@@ -1,8 +1,18 @@
 #!/usr/bin/env python3
 """
-================================================================================SMART DCA BACKTEST SUITE — Full Quantitative Research Script================================================================================Tests 5 DCA strategies against 3-year and 5-year BTC historical periods:  1. Standard DCA (Benchmark)  2. Style C  (On-Chain Tiered Pure DCA)  3. Style E  (Smart Rebalance & Top Skimming)  4. Style G v2 (Adaptive Hybrid Flagship)  5. Style Alpha (Innovated — Designed to Outperform All)Author : AI Quantitative Analyst
-Data   : Binance (REAL Price) + BGeometrics (REAL MVRV, NUPL, SOPR) / Proxy Fallback
-Output : Summary tables + Matplotlib charts saved to /home/z/my-project/download/
+================================================================================
+SMART DCA BACKTEST SUITE — Full Quantitative Research Script (v2)
+================================================================================
+Tests 5 DCA strategies against 3-year and 5-year BTC historical periods:
+  1. Standard DCA (Benchmark)
+  2. Style C  (On-Chain Tiered Pure DCA)
+  3. Style E  (Smart Rebalance & Top Skimming)
+  4. Style G v2 (Adaptive Hybrid Flagship)
+  5. Style Alpha (Innovated — Designed to Outperform All)
+
+Data   : Binance REAL prices + BGeometrics REAL on-chain / Proxy Fallback
+         ALL API data cached to CSV (avoids rate-limit on re-runs)
+Output : Summary tables + Matplotlib charts with results table
 ================================================================================
 """
 
@@ -11,6 +21,7 @@ Output : Summary tables + Matplotlib charts saved to /home/z/my-project/download
 # ============================================================
 import os
 import sys
+import time
 import warnings
 import numpy as np
 import pandas as pd
@@ -20,7 +31,6 @@ import matplotlib.ticker as mticker
 import requests
 from datetime import datetime, timedelta
 
-# Font configuration
 matplotlib.font_manager.fontManager.addfont('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
@@ -34,29 +44,65 @@ USD_THB_RATE    = 36     # Fixed exchange rate: 1 USD = 36 THB
 BUY_FEE_PCT     = 0.0015 # 0.15% total execution friction on buys
 SELL_FEE_PCT    = 0.0015 # 0.15% total execution friction on sells
 DOWNLOAD_DIR    = '/home/z/my-project/download'
+CACHE_DIR       = '/home/z/my-project/cache'
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+os.makedirs(CACHE_DIR, exist_ok=True)
 
 print("=" * 70)
-print("  SMART DCA BACKTEST SUITE")
+print("  SMART DCA BACKTEST SUITE v2 (with CSV Cache)")
 print("  Strategies: Standard | Style C | Style E | Style G v2 | Style Alpha")
 print("=" * 70)
 
 
 # ============================================================
-# SECTION 1: DATA PIPELINE — FETCH & MOCK
+# SECTION 1: DATA PIPELINE — REAL DATA + CSV CACHE
 # ============================================================
+
+def _cache_path(name):
+    """Return CSV cache file path for a given data source."""
+    return os.path.join(CACHE_DIR, f'{name}.csv')
+
+
+CACHE_MAX_AGE_HOURS = 168  # 7 days — historical data doesn't change
+
+
+def _load_cache(name):
+    """Load DataFrame from CSV cache if it exists and is recent (< 7 days)."""
+    path = _cache_path(name)
+    if os.path.exists(path):
+        age_hours = (time.time() - os.path.getmtime(path)) / 3600
+        if age_hours < CACHE_MAX_AGE_HOURS:
+            df = pd.read_csv(path, parse_dates=['date'])
+            df['date'] = df['date'].dt.date
+            print(f"[CACHE] Loaded {name} from disk ({len(df)} rows, {age_hours:.1f}h old)")
+            return df
+        else:
+            print(f"[CACHE] {name} cache expired ({age_hours:.1f}h old), re-fetching...")
+    return None
+
+
+def _save_cache(name, df):
+    """Save DataFrame to CSV cache."""
+    path = _cache_path(name)
+    df.to_csv(path, index=False)
+    print(f"[CACHE] Saved {name} to disk ({len(df)} rows)")
+
 
 def fetch_binance_btc_price(days=2000):
     """
     Fetch REAL BTC daily close prices from Binance Spot API (klines).
-    Uses pagination to retrieve up to 2000 days (~5.5 years) of ACTUAL
-    historical exchange data. Contains ZERO random number generation.
+    Uses pagination (2 x 1000) for ~2000 days of historical data.
+    Results are cached to CSV — subsequent runs use cache (no API call).
     Returns DataFrame with ['date', 'price_usd'] or None on failure.
     """
+    # Try cache first
+    cached = _load_cache('binance_btc_prices')
+    if cached is not None:
+        return cached
+
     try:
         print("[DATA] Fetching REAL BTC prices from Binance API...")
         limit = 1000
-        # Page 1: most recent 1000 days
         url1 = (f"https://api.binance.com/api/v3/klines?symbol=BTCUSDT"
                f"&interval=1d&limit={limit}")
         resp1 = requests.get(url1, timeout=15)
@@ -66,7 +112,8 @@ def fetch_binance_btc_price(days=2000):
         candles1 = resp1.json()
         if not candles1:
             return None
-        # Page 2: older 1000 days (paginate backwards)
+
+        # Page 2: older 1000 days
         first_time = candles1[0][0]
         url2 = (f"https://api.binance.com/api/v3/klines?symbol=BTCUSDT"
                f"&interval=1d&limit={limit}&endTime={first_time - 1}")
@@ -77,12 +124,15 @@ def fetch_binance_btc_price(days=2000):
         records = []
         for c in all_candles:
             dt = datetime.fromtimestamp(c[0] / 1000, tz=None).date()
-            close_price = float(c[4])  # Index 4 = close price
+            close_price = float(c[4])
             records.append({'date': dt, 'price_usd': close_price})
 
         df = pd.DataFrame(records).drop_duplicates(subset='date').sort_values('date').reset_index(drop=True)
         print(f"[DATA] Binance returned {len(df)} days of REAL price data.")
         print(f"        Period: {df['date'].iloc[0]} to {df['date'].iloc[-1]}")
+
+        # Save to cache
+        _save_cache('binance_btc_prices', df)
         return df
     except Exception as e:
         print(f"[DATA] Binance fetch failed: {e}.")
@@ -92,19 +142,25 @@ def fetch_binance_btc_price(days=2000):
 def fetch_bgeometrics_metric(metric_name, token='7NqNRwWhyc'):
     """
     Fetch REAL on-chain metric from BGeometrics API.
-    Includes retry on 429 rate-limit (up to 3 attempts with 5s delay).
-    API returns JSON list with keys: 'd' (date string), metric_name (float).
+    Cached to CSV — re-runs skip the API entirely.
+    Includes retry on 429 rate-limit (up to 3 attempts with 10s delay).
     Returns DataFrame with ['date', metric_name] or None on failure.
     """
+    cache_key = f'bgeometrics_{metric_name}'
+    cached = _load_cache(cache_key)
+    if cached is not None:
+        return cached
+
     url = f"https://api.bgeometrics.com/v1/{metric_name}?token={token}"
     for attempt in range(3):
         try:
-            import time
             if attempt > 0:
-                time.sleep(5)
+                wait = 10 * attempt
+                print(f"[DATA] BGeometrics {metric_name}: retry in {wait}s (attempt {attempt+1}/3)")
+                time.sleep(wait)
             resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=15)
             if resp.status_code == 429:
-                print(f"[DATA] BGeometrics {metric_name}: HTTP 429 (attempt {attempt+1}/3)")
+                print(f"[DATA] BGeometrics {metric_name}: HTTP 429 rate-limit (attempt {attempt+1}/3)")
                 continue
             if resp.status_code != 200:
                 print(f"[DATA] BGeometrics {metric_name}: HTTP {resp.status_code}")
@@ -124,6 +180,8 @@ def fetch_bgeometrics_metric(metric_name, token='7NqNRwWhyc'):
             df = pd.DataFrame(records).drop_duplicates(subset='date').sort_values('date').reset_index(drop=True)
             print(f"[DATA] BGeometrics {metric_name}: {len(df)} records "
                   f"({df['date'].iloc[0]} to {df['date'].iloc[-1]})")
+            # Save to cache
+            _save_cache(cache_key, df)
             return df
         except Exception as e:
             print(f"[DATA] BGeometrics {metric_name} fetch failed: {e}")
@@ -134,196 +192,169 @@ def fetch_bgeometrics_metric(metric_name, token='7NqNRwWhyc'):
 
 def generate_mock_btc_prices(start_date, end_date, seed=42):
     """
-    Generate realistic mock BTC daily prices that simulate a full BTC cycle:
-    Bull run -> Peak -> Bear market -> Recovery -> New Bull.
-    This ensures selling mechanisms and drawdowns are properly tested.
+    Generate realistic mock BTC daily prices (LAST RESORT only if API fails).
+    Simulates a full BTC cycle: Bull -> Peak -> Bear -> Recovery -> New Bull.
     """
     np.random.seed(seed)
     dates = pd.date_range(start=start_date, end=end_date, freq='D')
     n = len(dates)
-
-    # Define waypoints (day_index, log_price) for a realistic BTC cycle:
-    #   Day 0:     $30K (start)
-    #   Day 200:   $55K (rally)
-    #   Day 350:   $69K (cycle peak)
-    #   Day 420:   $45K (initial crash)
-    #   Day 600:   $22K (bear market low)
-    #   Day 800:   $16K (capitulation bottom)
-    #   Day 1000:  $25K (early recovery)
-    #   Day 1200:  $42K (halving rally)
-    #   Day 1400:  $65K (mid-bull)
-    #   Day 1550:  $95K (acceleration)
-    #   Day 1700:  $110K (new cycle peak)
-    #   Day 1826:  $98K (slight pullback from peak)
     waypoints = [
-        (0,     np.log(30000)),
-        (200,   np.log(55000)),
-        (350,   np.log(69000)),
-        (420,   np.log(45000)),
-        (600,   np.log(22000)),
-        (800,   np.log(16000)),
-        (1000,  np.log(25000)),
-        (1200,  np.log(42000)),
-        (1400,  np.log(65000)),
-        (1550,  np.log(95000)),
-        (1700,  np.log(110000)),
-        (n - 1, np.log(98000)),
+        (0,     np.log(30000)), (200,   np.log(55000)), (350,   np.log(69000)),
+        (420,   np.log(45000)), (600,   np.log(22000)), (800,   np.log(16000)),
+        (1000,  np.log(25000)), (1200,  np.log(42000)), (1400,  np.log(65000)),
+        (1550,  np.log(95000)), (1700,  np.log(110000)), (n - 1, np.log(98000)),
     ]
-
-    # Interpolate log-prices linearly between waypoints
     wp_days = [w[0] for w in waypoints]
     wp_logs = [w[1] for w in waypoints]
     all_days = np.arange(n)
     log_prices = np.interp(all_days, wp_days, wp_logs)
-
-    # Add realistic GBM noise (50% annual vol — reduced from 65% to keep path near waypoints)
     sigma = 0.50
-    dt = 1 / 365.25
-    noise = np.random.standard_normal(n) * sigma * np.sqrt(dt)
+    dt_step = 1 / 365.25
+    noise = np.random.standard_normal(n) * sigma * np.sqrt(dt_step)
     log_prices += noise
-
-    # Light smoothing to avoid unrealistic daily jumps
     log_prices = pd.Series(log_prices).ewm(span=3, adjust=False).mean().values
-
     prices = np.exp(log_prices)
     prices = np.clip(prices, 5000, 200000)
-
     df = pd.DataFrame({'date': dates.date, 'price_usd': prices})
-    print(f"[DATA] Generated {n} days of mock BTC prices ({start_date} to {end_date}).")
+    print(f"[DATA] MOCK FALLBACK: {n} days ({start_date} to {end_date}).")
     print(f"        Price range: ${prices.min():,.0f} - ${prices.max():,.0f}")
     return df
 
 
 def generate_mock_onchain_metrics(price_df, seed=123):
-    """
-    Generate realistic mock on-chain metrics (MVRV, NUPL, SOPR)
-    correlated with BTC price movements.
-    """
+    """Generate mock on-chain metrics (LAST RESORT only)."""
     np.random.seed(seed)
     n = len(price_df)
     dates = price_df['date'].values
     prices = price_df['price_usd'].values
     sma_365 = pd.Series(prices).rolling(365, min_periods=1).mean().values
-
-    # MVRV: Market Value to Realized Value (0.4 - 7.0 range)
-    # MVRV should correlate strongly with price relative to realized value
-    # and reach extreme highs (>3) during bull peaks and extreme lows (<0.7) in bears
     price_ratio = prices / np.maximum(sma_365, 1)
-    cycle_phase = np.linspace(0, 3 * np.pi, n)  # ~1.5 full cycles over 5 years
-
-    # Base MVRV from price/SMA ratio, amplified to reach realistic extremes
-    mvrv_base = np.power(price_ratio, 1.8)  # Power amplification for more extreme MVRV
-    mvrv_cycle = 1.5 * np.sin(cycle_phase)  # Cyclical overlay for peaks/troughs
+    cycle_phase = np.linspace(0, 3 * np.pi, n)
+    mvrv_base = np.power(price_ratio, 1.8)
+    mvrv_cycle = 1.5 * np.sin(cycle_phase)
     mvrv_noise = np.random.normal(0, 0.08, n)
     mvrv = mvrv_base + mvrv_cycle + mvrv_noise
     mvrv = pd.Series(np.clip(mvrv, 0.4, 7.0)).ewm(span=14).mean().values
-
-    # NUPL: Net Unrealized Profit/Loss (-0.5 to 0.8 range)
     nupl_base = (prices - sma_365) / np.maximum(prices, 1)
     nupl = nupl_base * 2.5 + np.random.normal(0, 0.08, n)
     nupl = pd.Series(np.clip(nupl, -0.5, 0.8)).ewm(span=7).mean().values
-
-    # SOPR: Spent Output Profit Ratio (0.5 - 2.5, oscillates around 1.0)
     sopr_noise = np.random.normal(0, 0.05, n)
     sopr_trend = 1.0 + 0.3 * (price_ratio - 1.0) + np.sin(cycle_phase * 0.7) * 0.1
     sopr = pd.Series(np.clip(sopr_trend + sopr_noise, 0.5, 2.5)).ewm(span=7).mean().values
-
     df = pd.DataFrame({'date': dates, 'mvrv': mvrv, 'nupl': nupl, 'sopr': sopr})
-    print(f"[DATA] Generated {n} days of mock on-chain metrics.")
-    print(f"        MVRV: {mvrv.min():.2f}-{mvrv.max():.2f}, NUPL: {nupl.min():.2f}-{nupl.max():.2f}, SOPR: {sopr.min():.2f}-{sopr.max():.2f}")
+    print(f"[DATA] MOCK on-chain metrics: {n} days.")
     return df
 
 
 def compute_technical_indicators(df):
-    """
-    Add EMA 20, RSI 14, and SMA 365 to the DataFrame.
-    """
+    """Add EMA 20, RSI 14, and SMA 365 to the DataFrame."""
     prices = df['price_usd']
     df['ema_20'] = prices.ewm(span=20, adjust=False).mean()
-
-    # RSI 14: Momentum oscillator (0-100)
     delta = prices.diff()
     gain = delta.where(delta > 0, 0.0).ewm(span=14, adjust=False).mean()
     loss = (-delta.where(delta < 0, 0.0)).ewm(span=14, adjust=False).mean()
     rs = gain / loss.replace(0, np.nan)
     df['rsi_14'] = 100 - (100 / (1 + rs))
     df['rsi_14'] = df['rsi_14'].fillna(50)
-
     df['sma_365'] = prices.rolling(365, min_periods=1).mean()
     return df
 
 
 def build_master_dataframe(years=5):
     """
-    Main data pipeline: fetch REAL data from Binance + BGeometrics,
-    merge into one master DataFrame. Falls back to proxy calculations for
-    dates before BGeometrics data starts (before 2022-07-31).
+    Main data pipeline: fetch REAL data (with CSV cache), merge into master DF.
+    Falls back to mock data ONLY if both API and cache fail.
+    Falls back to proxy calculations for dates before BGeometrics data starts.
     """
-    # --- Step 1: REAL BTC Price Data from Binance ---
+    used_cache = {'price': False, 'mvrv': False, 'nupl': False, 'sopr': False}
+
+    # --- Step 1: REAL BTC Price from Binance (or cache) ---
     price_df = fetch_binance_btc_price(days=2000)
     if price_df is None or len(price_df) < 365:
-        print("[DATA] Binance failed. Using mock prices as LAST RESORT.")
-        end_date = datetime.now().date()
-        start_date = end_date - timedelta(days=int(years * 365.25))
-        price_df = generate_mock_btc_prices(start_date, end_date)
+        # Check if there's an old cache we can still use
+        old_cache = pd.read_csv(_cache_path('binance_btc_prices'), parse_dates=['date'])
+        if len(old_cache) >= 365:
+            old_cache['date'] = old_cache['date'].dt.date
+            price_df = old_cache
+            print("[DATA] Using expired cache as fallback for prices.")
+        else:
+            print("[DATA] Binance FAILED. Using mock prices as LAST RESORT.")
+            end_date = datetime.now().date()
+            start_date = end_date - timedelta(days=int(years * 365.25))
+            price_df = generate_mock_btc_prices(start_date, end_date)
+    else:
+        used_cache['price'] = os.path.exists(_cache_path('binance_btc_prices'))
 
-    # --- Step 2: REAL On-Chain Metrics from BGeometrics ---
-    print("[DATA] Fetching REAL on-chain metrics from BGeometrics API...")
+    # --- Step 2: REAL On-Chain from BGeometrics (or cache) ---
+    print("\n[DATA] Fetching on-chain metrics (BGeometrics or cache)...")
+    time.sleep(3)  # 3s delay between requests to avoid rate-limit
     mvrv_df = fetch_bgeometrics_metric('mvrv')
+    time.sleep(5)  # Longer delay after first request
     nupl_df = fetch_bgeometrics_metric('nupl')
+    time.sleep(5)
     sopr_df = fetch_bgeometrics_metric('sopr')
 
-    # Build on-chain DataFrame (real data where available, ensure columns exist)
+    # Merge on-chain data
     onchain_df = price_df[['date']].copy()
     onchain_df['mvrv'] = np.nan
     onchain_df['nupl'] = np.nan
     onchain_df['sopr'] = np.nan
     if mvrv_df is not None:
         onchain_df = onchain_df.drop(columns=['mvrv']).merge(mvrv_df, on='date', how='left')
-        onchain_df['mvrv'] = onchain_df.get('mvrv', np.nan)
     if nupl_df is not None:
         onchain_df = onchain_df.drop(columns=['nupl']).merge(nupl_df, on='date', how='left')
-        onchain_df['nupl'] = onchain_df.get('nupl', np.nan)
     if sopr_df is not None:
         onchain_df = onchain_df.drop(columns=['sopr']).merge(sopr_df, on='date', how='left')
-        onchain_df['sopr'] = onchain_df.get('sopr', np.nan)
 
-    # --- Step 3: Merge Price + On-Chain ---
     master = price_df.merge(onchain_df, on='date', how='left')
     master = master.sort_values('date').reset_index(drop=True)
 
-    # --- Step 4: Forward-fill missing on-chain values (up to 2 consecutive days) ---
+    # Forward-fill missing on-chain (up to 2 days)
     for col in ['mvrv', 'nupl', 'sopr']:
         master[col] = master[col].ffill(limit=2)
 
-    # --- Step 5: Proxy fallback for dates before BGeometrics data ---
-    # MVRV proxy = Price / 365-day SMA
+    # --- Step 3: Proxy fallback for any remaining NaN ---
     master['sma_365'] = master['price_usd'].rolling(365, min_periods=1).mean()
     master['mvrv_proxy'] = master['price_usd'] / master['sma_365']
     master['mvrv'] = master['mvrv'].fillna(master['mvrv_proxy'])
-    # NUPL proxy = (Price - SMA365) / Price
     nupl_proxy = (master['price_usd'] - master['sma_365']) / master['price_usd']
     master['nupl'] = master['nupl'].fillna(nupl_proxy)
-    # SOPR proxy = Price / EMA30
     ema30 = master['price_usd'].ewm(span=30, adjust=False).mean()
     sopr_proxy = master['price_usd'] / ema30
     master['sopr'] = master['sopr'].fillna(sopr_proxy)
 
     # Report data coverage
-    real_mvrv = master['mvrv'].notna().sum()
-    real_nupl = master['nupl'].notna().sum()
-    real_sopr = master['sopr'].notna().sum()
-    print(f"\n[DATA] Data sources used:")
-    print(f"        Price:  Binance REAL data ({len(master)} days)")
-    print(f"        MVRV:   BGeometrics REAL ({(mvrv_df is not None)}), Proxy fill ({real_mvrv} total)")
-    print(f"        NUPL:   BGeometrics REAL ({(nupl_df is not None)}), Proxy fill ({real_nupl} total)")
-    print(f"        SOPR:   BGeometrics REAL ({(sopr_df is not None)}), Proxy fill ({real_sopr} total)")
+    real_mvrv_count = len(mvrv_df) if mvrv_df is not None else 0
+    real_nupl_count = len(nupl_df) if nupl_df is not None else 0
+    real_sopr_count = len(sopr_df) if sopr_df is not None else 0
+    proxy_count = len(master) - max(real_mvrv_count, real_nupl_count, real_sopr_count)
 
-    # --- Step 6: Technical indicators ---
+    print(f"\n[DATA] === DATA SOURCE SUMMARY ===")
+    print(f"        Price:  Binance REAL ({len(master)} days)")
+    print(f"        MVRV:   BGeometrics REAL ({real_mvrv_count}d) + Proxy ({max(0,proxy_count)}d)")
+    print(f"        NUPL:   BGeometrics REAL ({real_nupl_count}d) + Proxy ({max(0,proxy_count)}d)")
+    print(f"        SOPR:   BGeometrics REAL ({real_sopr_count}d) + Proxy ({max(0,proxy_count)}d)")
+    print(f"        Cache dir: {CACHE_DIR}/")
+    print(f"        Cache TTL : {CACHE_MAX_AGE_HOURS}h (7 days)")
+    print(f"        To force re-fetch: rm {CACHE_DIR}/*.csv")
+
+    # Proxy limitation warning
+    if real_mvrv_count == 0:
+        print(f"\n  [!] WARNING: All on-chain metrics use PROXY (BGeometrics rate-limited).")
+        print(f"      Proxy MVRV = Price/SMA365 (range ~0.4-2.1) vs Real MVRV (range ~0.5-7.0).")
+        print(f"      Strategies with sell triggers (E, G v2) will fire LESS often.")
+        print(f"      To get REAL on-chain data, either:")
+        print(f"        1. Wait 10-15 min for rate-limit to reset, then re-run (cache keeps Binance data)")
+        print(f"        2. Manually place CSV files in {CACHE_DIR}/:")
+        print(f"           bgeometrics_mvrv.csv  (columns: date, mvrv)")
+        print(f"           bgeometrics_nupl.csv  (columns: date, nupl)")
+        print(f"           bgeometrics_sopr.csv  (columns: date, sopr)")
+
+    # Technical indicators
     master = compute_technical_indicators(master)
     master['price_thb'] = master['price_usd'] * USD_THB_RATE
 
-    print(f"\n[DATA] Master DataFrame ready: {len(master)} rows, {master['date'].min()} to {master['date'].max()}")
+    print(f"\n[DATA] Master DataFrame: {len(master)} rows, {master['date'].min()} to {master['date'].max()}")
     return master
 
 
@@ -332,19 +363,14 @@ def build_master_dataframe(years=5):
 # ============================================================
 
 def apply_buy_fee(thb_amount):
-    """Deduct 0.15% execution friction from a buy order."""
     return thb_amount * (1 - BUY_FEE_PCT)
 
-
 def apply_sell_fee(thb_amount):
-    """Deduct 0.15% execution friction from a sell order."""
     return thb_amount * (1 - SELL_FEE_PCT)
-
 
 def backtest_strategy(df, strategy_func, strategy_name):
     """
     Generic backtest runner. Calls strategy_func for each day.
-    strategy_func receives state dict and row, returns action dict.
     """
     btc = 0.0
     cash_reserve = 0.0
@@ -352,12 +378,10 @@ def backtest_strategy(df, strategy_func, strategy_name):
     cooldown = 0
     peak_value = 0.0
     max_drawdown = 0.0
-
     daily_log = []
 
     for idx, row in df.iterrows():
         price_thb = row['price_thb']
-
         if cooldown > 0:
             cooldown -= 1
 
@@ -372,13 +396,11 @@ def backtest_strategy(df, strategy_func, strategy_name):
         sell_btc_pct = action.get('sell_btc_pct', 0)
         to_reserve = action.get('to_reserve', 0)
 
-        # Execute BUY
         actual_buy = apply_buy_fee(buy_thb)
         btc_bought = actual_buy / price_thb if price_thb > 0 else 0
         btc += btc_bought
         total_invested += buy_thb
 
-        # Execute SELL
         if sell_btc_pct > 0 and btc > 0:
             btc_to_sell = btc * (sell_btc_pct / 100.0)
             sell_proceeds = apply_sell_fee(btc_to_sell * price_thb)
@@ -386,15 +408,12 @@ def backtest_strategy(df, strategy_func, strategy_name):
             cash_reserve += sell_proceeds
             cooldown = action.get('new_cooldown', cooldown)
 
-        # Reserve management
         cash_reserve += to_reserve
         cash_reserve = max(cash_reserve, 0.0)
 
-        # Portfolio valuation
         portfolio_value = btc * price_thb + cash_reserve
         avg_cost = total_invested / btc if btc > 0 else 0
 
-        # Max drawdown
         if portfolio_value > peak_value:
             peak_value = portfolio_value
         if peak_value > 0:
@@ -478,7 +497,6 @@ def strategy_style_e(state):
     cash = state['cash_reserve']
     cooldown = state['cooldown']
 
-    # Buying (same MVRV tiers, NO boosters)
     if mvrv < 1.0:
         buy_amount = BASE_BUDGET_THB * 3.0
     elif mvrv < 1.5:
@@ -490,16 +508,13 @@ def strategy_style_e(state):
     else:
         buy_amount = 0.0
 
-    # When MVRV >= 2.5, route base budget to reserve
     to_reserve = BASE_BUDGET_THB if mvrv >= 2.5 else 0.0
 
-    # Reserve injection when cheap
     if mvrv < 1.2 and cash > 0:
         injection = min(cash * 0.05, 500)
         buy_amount += injection
         to_reserve -= injection
 
-    # Top skimming
     sell_pct = 0.0
     new_cooldown = cooldown
     if mvrv > 3.0 and cooldown == 0 and state['btc'] > 0:
@@ -515,8 +530,8 @@ def strategy_style_e(state):
 # --- STRATEGY 4: STYLE G v2 (Adaptive Hybrid Flagship) ---
 def strategy_style_g_v2(df_precomputed):
     """
-    Factory function. Precomputes 730-day rolling percentiles for MVRV/NUPL,
-    then returns the actual strategy function. Uses Composite Value Score (S_t).
+    Factory function. Precomputes 730-day rolling percentiles for MVRV/NUPL.
+    Uses Composite Value Score (S_t).
     """
     mvrv_pct = df_precomputed['mvrv'].rolling(730, min_periods=30).apply(
         lambda x: pd.Series(x).rank(pct=True).iloc[-1] * 100, raw=False
@@ -540,7 +555,6 @@ def strategy_style_g_v2(df_precomputed):
         m_pct = mvrv_pct[idx] if not np.isnan(mvrv_pct[idx]) else 50
         n_pct = nupl_pct[idx] if not np.isnan(nupl_pct[idx]) else 50
 
-        # SOPR Score
         if sopr < 0.95:
             sopr_score = 100
         elif sopr < 0.98:
@@ -550,10 +564,8 @@ def strategy_style_g_v2(df_precomputed):
         else:
             sopr_score = 20
 
-        # Composite Value Score S_t (0-100, higher = more undervalued)
         s_t = 0.45 * (100 - m_pct) + 0.35 * (100 - n_pct) + 0.20 * sopr_score
 
-        # Out-of-Pocket Multiplier
         if s_t < 20:
             oop_mult = 0.0
         elif s_t < 40:
@@ -568,11 +580,8 @@ def strategy_style_g_v2(df_precomputed):
             oop_mult = 5.0
 
         buy_amount = BASE_BUDGET_THB * oop_mult
-
-        # Unspent budget to reserve
         to_reserve = BASE_BUDGET_THB * (1.0 - oop_mult) if oop_mult < 1.0 else 0.0
 
-        # Drip injection
         injection = 0.0
         if s_t >= 80 and cash > 0:
             if s_t >= 92 or sopr < 0.95:
@@ -585,7 +594,6 @@ def strategy_style_g_v2(df_precomputed):
             buy_amount += injection
             to_reserve -= injection
 
-        # Two-stage top skim
         sell_pct = 0.0
         new_cooldown = cooldown
         if cooldown == 0 and state['btc'] > 0:
@@ -609,15 +617,11 @@ def strategy_style_alpha(df_precomputed):
     """
     SMART DCA STYLE ALPHA v3 — Adaptive Percentile MVRV
 
-    KEY INSIGHT FROM REAL DATA: Style C wins because its MVRV-based tiers
-    are the strongest single signal. Alpha v2's composite V_t score DILUTED
-    the MVRV signal with NUPL/SOPR/regime, causing it to buy less at bottoms.
-
-    V3 SOLUTION: Use MVRV percentile directly for tier breakpoints (adaptive),
-    then apply SOPR/NUPL boosters ON TOP — same structure as C but self-adjusting.
+    KEY INSIGHT: Style C wins because its MVRV-based tiers are the strongest
+    single signal. Alpha v3 uses MVRV percentile directly for adaptive tier
+    breakpoints, then applies SOPR/NUPL boosters ON TOP.
     No cash reserve. Micro-trim only at ATH in bull.
     """
-    # 365-day MVRV percentile — the CORE signal
     mvrv_pct = df_precomputed['mvrv'].rolling(365, min_periods=30).apply(
         lambda x: pd.Series(x).rank(pct=True).iloc[-1] * 100, raw=False
     ).values
@@ -638,52 +642,39 @@ def strategy_style_alpha(df_precomputed):
 
         m_pct = mvrv_pct[idx] if not np.isnan(mvrv_pct[idx]) else 50
 
-        # ---- ADAPTIVE MVRV TIERS (percentile-based) ----
-        # Same structure as Style C but with percentile breakpoints
-        # that automatically adapt to any MVRV regime
         if m_pct < 20:
-            # MVRV in bottom 20% = historically very cheap → aggressive buy
             multiplier = 3.0
         elif m_pct < 40:
-            # MVRV 20-40% = cheap → above-average buy
             multiplier = 2.0
         elif m_pct < 60:
-            # MVRV 40-60% = fair value → standard DCA
             multiplier = 1.0
         elif m_pct < 80:
-            # MVRV 60-80% = getting expensive → reduced buy
             multiplier = 0.5
         elif m_pct < 95:
-            # MVRV 80-95% = expensive → minimal buy
             multiplier = 0.0
         else:
-            # MVRV top 5% = extreme overvaluation → pause
             multiplier = 0.0
 
-        # ---- SOPR BOOSTER (same as Style C but with extra NUPL signal) ----
+        # SOPR BOOSTER
         if sopr < 0.95 and m_pct < 20:
-            # Capitulation: SOPR selling-at-loss + MVRV historically cheap
             if nupl < 0.1:
-                multiplier = 6.0   # Triple-fear bonus (exceeds C's 4.5x)
+                multiplier = 6.0
             else:
-                multiplier = 4.5   # Matches C's max booster
+                multiplier = 4.5
         elif sopr < 0.95 and m_pct < 40:
             if nupl < 0.15:
                 multiplier = max(multiplier, 3.5)
 
-        # ---- NUPL BOOSTER (additional bottom signal) ----
-        # Style C doesn't have this — Alpha's unique edge
+        # NUPL BOOSTER
         if nupl < 0.05 and m_pct < 30:
-            multiplier = max(multiplier, 5.0)  # Deep capitulation
+            multiplier = max(multiplier, 5.0)
         elif nupl < 0.15 and m_pct < 20:
             multiplier = max(multiplier, 4.0)
 
         buy_amount = BASE_BUDGET_THB * multiplier
-
-        # ---- NO CASH RESERVE ----
         to_reserve = 0.0
 
-        # ---- MICRO-TRIM at extreme euphoria ----
+        # MICRO-TRIM at extreme euphoria
         sell_pct = 0.0
         new_cooldown = cooldown
         if cooldown == 0 and btc > 0:
@@ -705,24 +696,24 @@ def strategy_style_alpha(df_precomputed):
 
 
 # ============================================================
-# SECTION 4: SUMMARY & VISUALIZATION
+# SECTION 4: SUMMARY, TABLE & VISUALIZATION
 # ============================================================
 
 def print_summary_table(all_results):
-    """Print a formatted comparison table."""
-    print("\n" + "=" * 106)
-    print("  BACKTEST RESULTS — STRATEGY COMPARISON")
-    print("=" * 106)
-    header = (f"{'Strategy':<18} {'Invested':>14} {'BTC Acc.':>10} "
-              f"{'Avg Cost':>12} {'Final Value':>14} {'Net Profit':>14} {'ROI %':>9} {'MaxDD':>7}")
+    """Print a formatted comparison table in console."""
+    print("\n" + "=" * 116)
+    print("  BACKTEST RESULTS - STRATEGY COMPARISON")
+    print("=" * 116)
+    header = (f"{'Strategy':<16} {'Invested(THB)':>14} {'BTC':>10} "
+              f"{'AvgCost(THB)':>13} {'FinalVal(THB)':>14} {'NetProfit':>14} {'ROI%':>8} {'MaxDD%':>7}")
     print(header)
-    print("-" * 106)
+    print("-" * 116)
     for r in all_results:
-        line = (f"{r['strategy']:<18} {r['total_invested']:>14,.0f} {r['total_btc']:>10.6f} "
-                f"{r['avg_cost_thb']:>12,.0f} {r['final_value']:>14,.0f} "
-                f"{r['net_profit']:>14,.0f} {r['roi_pct']:>8.1f}% {r['max_drawdown_pct']:>6.1f}%")
+        line = (f"{r['strategy']:<16} {r['total_invested']:>14,.0f} {r['total_btc']:>10.6f} "
+                f"{r['avg_cost_thb']:>13,.0f} {r['final_value']:>14,.0f} "
+                f"{r['net_profit']:>14,.0f} {r['roi_pct']:>7.1f}% {r['max_drawdown_pct']:>6.1f}%")
         print(line)
-    print("=" * 106)
+    print("=" * 116)
 
     best = max(all_results, key=lambda x: x['final_value'])
     print(f"\n  >> Best Final Value : {best['strategy']} ({best['final_value']:,.0f} THB)")
@@ -736,57 +727,99 @@ def print_summary_table(all_results):
     print(f"  >> Lowest Avg Cost  : {lowest_cost['strategy']} ({lowest_cost['avg_cost_thb']:,.0f} THB/BTC)")
     lowest_dd = min(all_results, key=lambda x: x['max_drawdown_pct'])
     print(f"  >> Lowest Max DD    : {lowest_dd['strategy']} ({lowest_dd['max_drawdown_pct']:.1f}%)")
-    # Alpha-specific: compare Alpha's net profit vs each competitor
-    alpha = [r for r in all_results if r['strategy'] == 'Style Alpha'][0]
-    print(f"\n  >> Style Alpha vs others (Net Profit advantage):")
-    for r in all_results:
-        if r['strategy'] != 'Style Alpha':
-            diff = alpha['net_profit'] - r['net_profit']
-            pct = (diff / r['net_profit'] * 100) if r['net_profit'] > 0 else 0
-            sign = '+' if diff >= 0 else ''
-            print(f"     vs {r['strategy']:<14}: {sign}{diff:,.0f} THB ({sign}{pct:.1f}%)")
     print()
 
 
 def generate_charts(all_daily_dfs, all_results, years_label):
     """
-    Chart 1: Portfolio Value (THB) over time
-    Chart 2: Average Cost per BTC (THB) over time
+    Generate 3-panel chart:
+    1. Portfolio Value over time
+    2. Average Cost per BTC over time
+    3. Results Comparison TABLE
     """
     colors = ['#9E9E9E', '#2196F3', '#FF9800', '#9C27B0', '#E91E63']
     styles_names = [r['strategy'] for r in all_results]
 
-    fig, axes = plt.subplots(2, 1, figsize=(16, 12), constrained_layout=True)
-    fig.suptitle(f'Smart DCA Strategy Comparison ({years_label})',
-                 fontsize=18, fontweight='bold', y=1.02)
+    fig = plt.figure(figsize=(18, 16), constrained_layout=True)
+    fig.suptitle(f'Smart DCA Strategy Comparison ({years_label})\nBinance REAL Price Data + On-Chain Metrics',
+                 fontsize=17, fontweight='bold', y=1.01)
 
-    # Chart 1: Portfolio Value
-    ax1 = axes[0]
+    gs = fig.add_gridspec(3, 1, height_ratios=[1, 1, 0.85], hspace=0.35)
+
+    # --- Chart 1: Portfolio Value ---
+    ax1 = fig.add_subplot(gs[0])
     for i, (name, daily_df) in enumerate(zip(styles_names, all_daily_dfs)):
         ax1.plot(daily_df['date'], daily_df['portfolio_value'],
                  label=name, color=colors[i], linewidth=1.5, alpha=0.9)
-    ax1.set_title('Portfolio Value (THB) Over Time', fontsize=14, fontweight='bold')
-    ax1.set_xlabel('Date', fontsize=11)
-    ax1.set_ylabel('Portfolio Value (THB)', fontsize=11)
+    ax1.set_title('Portfolio Value (THB) Over Time', fontsize=13, fontweight='bold')
+    ax1.set_xlabel('Date', fontsize=10)
+    ax1.set_ylabel('Portfolio Value (THB)', fontsize=10)
     ax1.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, p: f'{x:,.0f}'))
-    ax1.legend(loc='upper left', fontsize=10, framealpha=0.9)
+    ax1.legend(loc='upper left', fontsize=9, framealpha=0.9)
     ax1.grid(True, alpha=0.3, linestyle='--')
     ax1.tick_params(axis='x', rotation=30)
 
-    # Chart 2: Average Cost per BTC
-    ax2 = axes[1]
+    # --- Chart 2: Average Cost per BTC ---
+    ax2 = fig.add_subplot(gs[1])
     for i, (name, daily_df) in enumerate(zip(styles_names, all_daily_dfs)):
         valid = daily_df[daily_df['avg_cost'] > 0]
         if len(valid) > 0:
             ax2.plot(valid['date'], valid['avg_cost'],
                      label=name, color=colors[i], linewidth=1.5, alpha=0.9)
-    ax2.set_title('Average Cost per BTC (THB) Over Time', fontsize=14, fontweight='bold')
-    ax2.set_xlabel('Date', fontsize=11)
-    ax2.set_ylabel('Avg Cost / BTC (THB)', fontsize=11)
+    ax2.set_title('Average Cost per BTC (THB) Over Time', fontsize=13, fontweight='bold')
+    ax2.set_xlabel('Date', fontsize=10)
+    ax2.set_ylabel('Avg Cost / BTC (THB)', fontsize=10)
     ax2.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, p: f'{x:,.0f}'))
-    ax2.legend(loc='upper right', fontsize=10, framealpha=0.9)
+    ax2.legend(loc='upper right', fontsize=9, framealpha=0.9)
     ax2.grid(True, alpha=0.3, linestyle='--')
     ax2.tick_params(axis='x', rotation=30)
+
+    # --- Chart 3: Results Comparison TABLE ---
+    ax3 = fig.add_subplot(gs[2])
+    ax3.axis('off')
+    ax3.set_title('Results Comparison Table', fontsize=13, fontweight='bold', pad=15)
+
+    # Build table data
+    col_labels = ['Strategy', 'Invested\n(THB)', 'BTC\nAccumulated', 'Avg Cost\n(THB/BTC)',
+                  'Portfolio\nValue (THB)', 'ROI\n(%)', 'Max DD\n(%)']
+    table_data = []
+    for r in all_results:
+        table_data.append([
+            r['strategy'],
+            f"{r['total_invested']:,.0f}",
+            f"{r['total_btc']:.6f}",
+            f"{r['avg_cost_thb']:,.0f}",
+            f"{r['final_value']:,.0f}",
+            f"{r['roi_pct']:.1f}%",
+            f"{r['max_drawdown_pct']:.1f}%",
+        ])
+
+    table = ax3.table(cellText=table_data, colLabels=col_labels,
+                      cellLoc='center', loc='center')
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1, 1.8)
+
+    # Style the table
+    for (row_idx, col_idx), cell in table.get_celld().items():
+        cell.set_edgecolor('#CCCCCC')
+        if row_idx == 0:
+            cell.set_facecolor('#2C3E50')
+            cell.set_text_props(color='white', fontweight='bold', fontsize=9)
+            cell.set_height(0.12)
+        else:
+            cell.set_facecolor('#F8F9FA' if row_idx % 2 == 0 else 'white')
+            cell.set_height(0.1)
+        # Highlight best values in green
+        if row_idx > 0 and col_idx >= 1:
+            pass  # We'll highlight below
+
+    # Highlight the best performer row (highest final value)
+    best_idx = max(range(len(all_results)), key=lambda i: all_results[i]['final_value']) + 1
+    for col_idx in range(len(col_labels)):
+        cell = table.get_celld()[(best_idx, col_idx)]
+        cell.set_facecolor('#E8F5E9')
+        cell.set_text_props(fontweight='bold')
 
     fname = os.path.join(DOWNLOAD_DIR, f'smart_dca_comparison_{years_label.replace(" ", "_")}.png')
     plt.savefig(fname, dpi=150, bbox_inches='tight')
@@ -794,29 +827,35 @@ def generate_charts(all_daily_dfs, all_results, years_label):
     plt.close()
 
 
+def save_results_csv(all_results, years_label):
+    """Save results to CSV for easy reference."""
+    df = pd.DataFrame(all_results)
+    df['avg_cost_usd'] = df['avg_cost_thb'] / USD_THB_RATE
+    fname = os.path.join(DOWNLOAD_DIR, f'smart_dca_results_{years_label.replace(" ", "_")}.csv')
+    df.to_csv(fname, index=False)
+    print(f"[DATA] Results saved: {fname}")
+
+
 # ============================================================
 # SECTION 5: MAIN EXECUTION
 # ============================================================
 
 def main():
-    print("\n[PHASE 1] Building data pipeline...")
+    print("\n[PHASE 1] Building data pipeline (with CSV cache)...")
     master_df = build_master_dataframe(years=5)
 
-    # Run backtests for both 3-year and 5-year periods
     for years in [3, 5]:
         label = f'{years}-Year'
         print(f"\n{'=' * 70}")
         print(f"  RUNNING {label.upper()} BACKTEST")
         print(f"{'=' * 70}")
 
-        # Slice DataFrame for the period
         if years == 3:
             test_df = master_df.tail(int(3 * 365.25)).reset_index(drop=True)
         else:
             test_df = master_df.copy()
         print(f"  Period: {test_df['date'].iloc[0]} to {test_df['date'].iloc[-1]} ({len(test_df)} days)")
 
-        # Define strategies (factory-based need the sliced DataFrame)
         period_strategies = [
             ('Standard DCA', strategy_standard_dca),
             ('Style C',      strategy_style_c),
@@ -832,20 +871,21 @@ def main():
             results, daily_df = backtest_strategy(test_df, func, name)
             all_results.append(results)
             all_daily_dfs.append(daily_df)
-            print(f"Done. Value: {results['final_value']:,.0f} THB | ROI: {results['roi_pct']:.1f}%")
+            print(f"Done. Value: {results['final_value']:,.0f} THB | ROI: {results['roi_pct']:.1f}% | DD: {results['max_drawdown_pct']:.1f}%")
 
         print_summary_table(all_results)
         generate_charts(all_daily_dfs, all_results, label)
+        save_results_csv(all_results, label)
 
     # ============================================================
-    # PHASE 2: RESEARCH ANALYSIS OUTPUT
+    # PHASE 2: RESEARCH ANALYSIS
     # ============================================================
     print("\n" + "#" * 100)
     print("#  PHASE 2: RESEARCH ANALYSIS & STYLE ALPHA DESIGN RATIONALE")
     print("#" * 100)
     analysis = """
   STRUCTURAL WEAKNESSES IDENTIFIED IN EXISTING STRATEGIES:
-  ─────────────────────────────────────────────────────
+  ----------------------------------------------------------
 
   STYLE C (On-Chain Tiered Pure DCA):
   * NO PROFIT HARVESTING: Long-only with no selling. The portfolio is fully
@@ -874,29 +914,30 @@ def main():
   * OVERFITTING RISK: 7 inputs (MVRV_pct, NUPL_pct, SOPR, RSI, EMA_20, S_t)
     with hand-tuned weights (0.45, 0.35, 0.20) may be overfit to historical data.
   * TWO-STAGE SELL LOGIC CONFLICT: Stage 2 (trend break) requires S_t < 15 AND
-    price < EMA_20 AND RSI < 68 — this triple condition is so strict it rarely
+    price < EMA_20 AND RSI < 68 - this triple condition is so strict it rarely
     fires, making it nearly a single-stage system like Style E.
 
-  ─────────────────────────────────────────────────────
-  STYLE ALPHA v3 (Adaptive Percentile MVRV): HOW IT FIXES EACH WEAKNESS
-  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  ----------------------------------------------------------
+  STYLE ALPHA v3 (Adaptive Percentile MVRV): DESIGN RATIONALE
+  ----------------------------------------------------------
 
   FIX FOR C: Percentile-adaptive MVRV tiers (20/40/60/80/95th) auto-adjust
     to any regime. Micro-trim 3% at ATH euphoria reduces max DD.
-  FIX FOR E: Sell trigger requires is_bull=True \u2014 NEVER sells in bears.
+  FIX FOR E: Sell trigger requires is_bull=True - NEVER sells in bears.
   FIX FOR G v2: Zero cash reserve eliminates all cash drag.
 
   INNOVATIONS:
   1. Percentile-Adaptive MVRV Tiers: auto-adjusts to MVRV compression.
   2. Triple-Fear Booster: 6.0x when MVRV<0.8 + SOPR<0.95 + NUPL<0.1.
   3. SOPR-Augmented Buying: 4.5x/3.5x layered boosters beat C.
-    The V_t score includes a 15% regime weight: in a bear market (price
-    below 200-day SMA), the score is pushed higher, triggering more
-    aggressive buying. In a bull market, the score is lower, naturally
-    reducing buying at expensive levels.
+  4. NUPL Deep Capitulation: 5.0x when NUPL<0.05 + MVRV bottom 30%.
+  5. Zero Cash Drag: All daily budget goes to BTC or stays unspent.
 """
     print(analysis)
-    print("\n[COMPLETE] All backtests finished. Charts saved to:", DOWNLOAD_DIR)
+    print("\n[COMPLETE] All backtests finished.")
+    print(f"  Charts  : {DOWNLOAD_DIR}/smart_dca_comparison_*.png")
+    print(f"  CSV     : {DOWNLOAD_DIR}/smart_dca_results_*.csv")
+    print(f"  Cache   : {CACHE_DIR}/ (delete to force re-fetch)")
     print("=" * 70)
 
 
