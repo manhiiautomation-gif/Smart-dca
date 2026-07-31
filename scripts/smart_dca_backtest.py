@@ -477,6 +477,7 @@ def backtest_strategy(df, strategy_func, strategy_name):
     btc = 0.0
     cash_reserve = 0.0
     total_invested = 0.0
+    adjusted_invested = 0.0  # Reduces proportionally on sells (smooth avg cost)
     net_capital = 0.0       # Only new user capital (excludes reserve recycling)
     total_sell_proceeds = 0.0
     total_reserve_injected = 0.0
@@ -506,8 +507,10 @@ def backtest_strategy(df, strategy_func, strategy_name):
 
         actual_buy = apply_buy_fee(buy_thb)
         btc_bought = actual_buy / price_thb if price_thb > 0 else 0
+        btc_before_sell = btc + btc_bought  # BTC after buy, before sell
         btc += btc_bought
         total_invested += buy_thb
+        adjusted_invested += buy_thb
         # Net capital: total buy minus what came from reserve
         net_capital += buy_thb - reserve_injection
         total_reserve_injected += reserve_injection
@@ -518,6 +521,9 @@ def backtest_strategy(df, strategy_func, strategy_name):
             btc -= btc_to_sell
             cash_reserve += sell_proceeds
             cooldown = action.get('new_cooldown', cooldown)
+            # Adjust invested: remove proportional cost basis of sold BTC
+            sell_frac = btc_to_sell / btc_before_sell if btc_before_sell > 0 else 0
+            adjusted_invested *= (1.0 - sell_frac)
 
         # THB-based selling (Style Beta v3 / Omega)
         if sell_thb > 0 and btc > 0 and price_thb > 0:
@@ -529,12 +535,16 @@ def backtest_strategy(df, strategy_func, strategy_name):
             cash_reserve += sell_proceeds
             total_sell_proceeds += sell_proceeds
             cooldown = action.get('new_cooldown', cooldown)
+            # Adjust invested: remove proportional cost basis of sold BTC
+            sell_frac = btc_to_sell / btc_before_sell if btc_before_sell > 0 else 0
+            adjusted_invested *= (1.0 - sell_frac)
 
         cash_reserve += to_reserve
         cash_reserve = max(cash_reserve, 0.0)
 
         portfolio_value = btc * price_thb + cash_reserve
         avg_cost = total_invested / btc if btc > 0 else 0
+        adjusted_avg_cost = adjusted_invested / btc if btc > 0 else 0
 
         if portfolio_value > peak_value:
             peak_value = portfolio_value
@@ -548,13 +558,13 @@ def backtest_strategy(df, strategy_func, strategy_name):
             'btc': btc, 'cash_reserve': cash_reserve,
             'total_invested': total_invested,
             'portfolio_value': portfolio_value,
-            'avg_cost': avg_cost,
+            'avg_cost': adjusted_avg_cost,  # Use adjusted for chart (no sell spikes)
             'max_drawdown_so_far': max_drawdown,
         })
 
     final_price = df.iloc[-1]['price_thb']
     final_value = btc * final_price + cash_reserve
-    final_avg_cost = total_invested / btc if btc > 0 else 0
+    final_avg_cost = adjusted_invested / btc if btc > 0 else 0
     # ROI based on total invested (all THB through buy side)
     roi_pct = ((final_value - total_invested) / total_invested * 100) if total_invested > 0 else 0
     net_profit = final_value - total_invested
