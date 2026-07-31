@@ -16,6 +16,7 @@ from .style_omega import strategy_style_omega
 from .style_phoenix import strategy_style_phoenix
 from .style_phoenix_v2 import strategy_style_phoenix_v2
 from .style_phoenix_v3 import strategy_style_phoenix_v3
+from .style_phoenix_v4 import strategy_style_phoenix_v4
 
 # ============================================================
 # STRATEGY REGISTRY
@@ -35,4 +36,5 @@ STRATEGY_REGISTRY = [
     ('Style Phoenix',     strategy_style_phoenix,     True),
     ('Phoenix v2',        strategy_style_phoenix_v2,  True),
     ('Phoenix v3',        strategy_style_phoenix_v3,  True),
+    ('Phoenix v4',        strategy_style_phoenix_v4,  True),
 ]

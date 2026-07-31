@@ -54,6 +54,23 @@ def precompute_rsi_divergence(df, lookback=40):
     return rsi_divergence
 
 
+def precompute_mvrv_percentile(df, window=365):
+    """Rolling percentile rank of MVRV over window days.
+
+    Returns array where 0.0 = lowest MVRV in window, 1.0 = highest.
+    This adapts to diminishing MVRV peaks across cycles.
+    """
+    mvrv = df['mvrv'].values
+    n = len(mvrv)
+    pct = np.zeros(n)
+    for i in range(window, n):
+        w = mvrv[i - window:i]
+        valid = w[~np.isnan(w)]
+        if len(valid) > 10:
+            pct[i] = np.searchsorted(np.sort(valid), mvrv[i]) / len(valid)
+    return pct
+
+
 def precompute_short_trend_sell(df, sma_200, lookback_60=60):
     """Short-term downtrend: price dropped >15% from 60d high, still above SMA200."""
     price_arr = df['price_usd'].values
