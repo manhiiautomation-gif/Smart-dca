@@ -1,4 +1,4 @@
-"""Backtest Engine — Generic strategy runner with fee logic and state tracking.
+"""Backtest Engine - Generic strategy runner with fee logic and state tracking.
 
 Every strategy receives a `state` dict and returns an `action` dict.
 The engine handles: buy execution, sell execution (BTC% and THB-based),
@@ -36,15 +36,24 @@ def backtest_strategy(df, strategy_func, strategy_name):
     btc = 0.0
     cash_reserve = 0.0
     total_invested = 0.0
-    adjusted_invested = 0.0  # Reduces proportionally on sells (smooth avg cost)
-    net_capital = 0.0       # Only new user capital (excludes reserve recycling)
+    adjusted_invested = 0.0
+    net_capital = 0.0
     total_sell_proceeds = 0.0
     total_reserve_injected = 0.0
     cooldown = 0
     short_cooldown = 0
     peak_value = 0.0
     max_drawdown = 0.0
+
+    # Enhanced tracking
+    sell_count = 0
+    buy_days = 0
+    reserve_buy_days = 0
+    total_fees_paid = 0.0
+    btc_sold_total = 0.0
     daily_log = []
+
+    total_days = len(df)
 
     for idx, row in df.iterrows():
         price_thb = row['price_thb']
@@ -69,6 +78,8 @@ def backtest_strategy(df, strategy_func, strategy_name):
         sell_score = action.get('sell_score', 0)
         reserve_injection = action.get('reserve_injection', 0)
 
+        # === BUY EXECUTION ===
+        buy_fee = buy_thb * BUY_FEE_PCT
         actual_buy = apply_buy_fee(buy_thb)
         btc_bought = actual_buy / price_thb if price_thb > 0 else 0
         btc_before_sell = btc + btc_bought
@@ -77,25 +88,43 @@ def backtest_strategy(df, strategy_func, strategy_name):
         adjusted_invested += buy_thb
         net_capital += buy_thb - reserve_injection
         total_reserve_injected += reserve_injection
+        total_fees_paid += buy_fee
 
+        if buy_thb > 0:
+            buy_days += 1
+        if reserve_injection > 0:
+            reserve_buy_days += 1
+
+        # === SELL EXECUTION (BTC% based) ===
         if sell_btc_pct > 0 and btc > 0:
             btc_to_sell = btc * (sell_btc_pct / 100.0)
-            sell_proceeds = apply_sell_fee(btc_to_sell * price_thb)
+            sell_gross = btc_to_sell * price_thb
+            sell_fee = sell_gross * SELL_FEE_PCT
+            sell_proceeds = apply_sell_fee(sell_gross)
             btc -= btc_to_sell
+            btc_sold_total += btc_to_sell
             cash_reserve += sell_proceeds
+            total_sell_proceeds += sell_proceeds
+            total_fees_paid += sell_fee
+            sell_count += 1
             cooldown = action.get('new_cooldown', cooldown)
             sell_frac = btc_to_sell / btc_before_sell if btc_before_sell > 0 else 0
             adjusted_invested *= (1.0 - sell_frac)
 
-        # THB-based selling
+        # === SELL EXECUTION (THB-based) ===
         if sell_thb > 0 and btc > 0 and price_thb > 0:
             btc_to_sell = sell_thb / price_thb
             if btc_to_sell > btc:
                 btc_to_sell = btc
-            sell_proceeds = apply_sell_fee(btc_to_sell * price_thb)
+            sell_gross = btc_to_sell * price_thb
+            sell_fee = sell_gross * SELL_FEE_PCT
+            sell_proceeds = apply_sell_fee(sell_gross)
             btc -= btc_to_sell
+            btc_sold_total += btc_to_sell
             cash_reserve += sell_proceeds
             total_sell_proceeds += sell_proceeds
+            total_fees_paid += sell_fee
+            sell_count += 1
             cooldown = action.get('new_cooldown', cooldown)
             sell_frac = btc_to_sell / btc_before_sell if btc_before_sell > 0 else 0
             adjusted_invested *= (1.0 - sell_frac)
@@ -131,21 +160,39 @@ def backtest_strategy(df, strategy_func, strategy_name):
     true_roi_pct = ((final_value - net_capital) / net_capital * 100) if net_capital > 0 else 0
     true_net_profit = final_value - net_capital
 
+    # Derived metrics
+    reserve_utilization_pct = (total_reserve_injected / total_sell_proceeds * 100) if total_sell_proceeds > 0 else 0
+    avg_daily_dca = net_capital / total_days if total_days > 0 else 0
+    btc_sell_pct = (btc_sold_total / (btc + btc_sold_total) * 100) if (btc + btc_sold_total) > 0 else 0
+
     results = {
         'strategy': strategy_name,
-        'total_invested': total_invested,
+        # Capital flow
         'net_capital': net_capital,
+        'total_invested': total_invested,
+        'total_sell_proceeds': total_sell_proceeds,
+        'total_reserve_injected': total_reserve_injected,
+        'reserve_utilization_pct': reserve_utilization_pct,
+        'cash_reserve': cash_reserve,
+        'total_fees_paid': total_fees_paid,
+        # BTC
         'total_btc': btc,
+        'btc_sold_total': btc_sold_total,
+        'btc_sell_pct': btc_sell_pct,
         'avg_cost_thb': final_avg_cost,
         'avg_cost_usd': final_avg_cost / USD_THB_RATE,
+        # Performance
         'final_value': final_value,
-        'cash_reserve': cash_reserve,
         'roi_pct': roi_pct,
         'true_roi_pct': true_roi_pct,
         'net_profit': net_profit,
         'true_net_profit': true_net_profit,
-        'total_sell_proceeds': total_sell_proceeds,
-        'total_reserve_injected': total_reserve_injected,
         'max_drawdown_pct': max_drawdown * 100,
+        # Activity
+        'sell_count': sell_count,
+        'buy_days': buy_days,
+        'reserve_buy_days': reserve_buy_days,
+        'avg_daily_dca': avg_daily_dca,
+        'total_days': total_days,
     }
     return results, pd.DataFrame(daily_log)
