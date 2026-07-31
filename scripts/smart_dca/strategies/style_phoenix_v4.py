@@ -94,8 +94,8 @@ def strategy_style_phoenix_v4(df_precomputed):
         # 3. SELL SCORING — same multi-confirm as v3
         sell_score = 0
 
-        # MVRV absolute scoring
-        if mvrv > 2.5: sell_score += 15
+        # MVRV absolute scoring — boosted 2.5 tier
+        if mvrv > 2.5: sell_score += 20
         if mvrv > 3.0: sell_score += 15
         if mvrv > 3.5: sell_score += 10
         if mvrv > 4.0: sell_score += 10
@@ -152,16 +152,16 @@ def strategy_style_phoenix_v4(df_precomputed):
         sell_thb = 0.0
         new_cooldown = cooldown
 
-        if sell_score >= 45 and cooldown == 0 and btc > 0:
-            if sell_score >= 80:
+        if sell_score >= 40 and cooldown == 0 and btc > 0:
+            if sell_score >= 75:
                 sell_thb = portfolio_val * 0.50
-                new_cooldown = 60
-            elif sell_score >= 60:
+                new_cooldown = 50
+            elif sell_score >= 55:
                 sell_thb = portfolio_val * 0.15
-                new_cooldown = 45
+                new_cooldown = 35
             else:
                 sell_thb = portfolio_val * 0.04
-                new_cooldown = 30
+                new_cooldown = 20
 
         # NO short-trend sell
 
