@@ -3,14 +3,12 @@
 ================================================================================
 SMART DCA BACKTEST SUITE — Full Quantitative Research Script (v2)
 ================================================================================
-Tests 7 DCA strategies against 3-year and 5-year BTC historical periods:
+Tests 5 DCA strategies against 3-year and 5-year BTC historical periods:
   1. Standard DCA (Benchmark)
   2. Style C  (On-Chain Tiered Pure DCA)
-  3. Style E  (Smart Rebalance & Top Skimming)
-  4. Style G v2 (Adaptive Hybrid Flagship)
-  5. Style Alpha (Innovated — Designed to Outperform All)
-  6. Style Beta v3 (Multi-Confirm Sell DCA)
-  7. Style Omega (Capital Cyclone — LTH-Aware Reserve Recycler)
+  3. Style Beta v3 (Multi-Confirm Sell DCA)
+  4. Style Omega (Capital Cyclone — LTH-Aware Reserve Recycler)
+  5. Style Phoenix (Dynamic Sell + RSI Divergence + Short-Trend Profit Lock)
 
 Data   : Binance REAL prices + CoinMetrics REAL MVRV + Derived NUPL / Proxy SOPR
          ALL API data cached to CSV 7 days (re-runs = instant, no API calls)
@@ -482,6 +480,7 @@ def backtest_strategy(df, strategy_func, strategy_name):
     total_sell_proceeds = 0.0
     total_reserve_injected = 0.0
     cooldown = 0
+    short_cooldown = 0
     peak_value = 0.0
     max_drawdown = 0.0
     daily_log = []
@@ -490,10 +489,13 @@ def backtest_strategy(df, strategy_func, strategy_name):
         price_thb = row['price_thb']
         if cooldown > 0:
             cooldown -= 1
+        if short_cooldown > 0:
+            short_cooldown -= 1
 
         state = {
             'btc': btc, 'cash_reserve': cash_reserve,
             'total_invested': total_invested, 'cooldown': cooldown,
+            'short_cooldown': short_cooldown,
             'row': row, 'idx': idx
         }
         action = strategy_func(state)
@@ -1163,9 +1165,224 @@ def strategy_style_omega(df_precomputed):
     return strategy_func
 
 
+# --- STRATEGY 5: STYLE PHOENIX (Dynamic Sell + RSI Divergence + Short-Trend Profit Lock) ---
+def strategy_style_phoenix(df_precomputed):
+    """
+    SMART DCA STYLE PHOENIX — Adaptive Sell Architecture
+
+    BUILD ON: Style Omega's proven buy + reserve drain system
+    NEW SELL FEATURES:
+    1. Dynamic Sell Sizing: sell % of portfolio (not fixed THB)
+       -> Scales naturally: bigger portfolio = bigger sells
+    2. RSI Divergence Detection: price higher-high + RSI lower-high = bearish
+       -> Captures momentum exhaustion before MVRV confirms
+    3. Short-Term Downtrend Sell: price -15% from 60d high while still above SMA200
+       -> Locks profit during intra-cycle corrections (shorter than 4yr cycle)
+       -> Builds extra cash reserve for re-accumulation
+    """
+    # Precompute all signals
+    macd_line = df_precomputed['macd_line'].values
+    macd_signal = df_precomputed['macd_signal'].values
+    macd_hist = df_precomputed['macd_hist'].values
+    cummax_price = pd.Series(df_precomputed['price_usd']).cummax().values
+    sma_200 = df_precomputed['sma_200'].values
+    realized_price = df_precomputed['realized_price'].values
+    lth_rp = df_precomputed['lth_realized_price'].values
+    price_arr = df_precomputed['price_usd'].values
+    rsi_arr = df_precomputed['rsi_14'].values
+    n = len(df_precomputed)
+
+    # MACD bearish crossover
+    macd_cross_bear = np.zeros(n, dtype=bool)
+    for i in range(1, n):
+        if (not np.isnan(macd_line[i-1]) and not np.isnan(macd_signal[i-1])
+                and not np.isnan(macd_line[i]) and not np.isnan(macd_signal[i])):
+            if macd_line[i-1] >= macd_signal[i-1] and macd_line[i] < macd_signal[i]:
+                macd_cross_bear[i] = True
+
+    # MACD histogram declining 5+ days
+    hist_declining_5 = np.zeros(n, dtype=bool)
+    for i in range(5, n):
+        if all(not np.isnan(macd_hist[i-j]) for j in range(5)):
+            if all(macd_hist[i-j] < macd_hist[i-j-1] for j in range(4)):
+                hist_declining_5[i] = True
+
+    # RSI BEARISH DIVERGENCE (precompute 40-day lookback)
+    # Condition: price is near 40d high (within 3%) but RSI is >8 points below 40d RSI high
+    rsi_divergence = np.zeros(n, dtype=bool)
+    lookback = 40
+    for i in range(lookback, n):
+        window_price = price_arr[i-lookback:i]
+        window_rsi = rsi_arr[i-lookback:i]
+        if np.isnan(window_price).any() or np.isnan(window_rsi).any():
+            continue
+        price_max = np.nanmax(window_price)
+        rsi_max = np.nanmax(window_rsi)
+        # Price near or above 40d high, but RSI significantly below its 40d high
+        if price_max > 0 and rsi_max > 0:
+            price_near_high = price_arr[i] >= price_max * 0.97
+            rsi_below_high = rsi_arr[i] <= rsi_max - 8.0
+            # Extra: RSI should still be somewhat elevated (>60) to confirm it's a divergence, not just low RSI
+            rsi_still_elevated = rsi_arr[i] >= 58
+            if price_near_high and rsi_below_high and rsi_still_elevated:
+                rsi_divergence[i] = True
+
+    # SHORT-TERM DOWNTREND: price dropped >15% from 60-day high, still above SMA200
+    short_trend_sell = np.zeros(n, dtype=bool)
+    drop_60d_pct = np.zeros(n)  # How far price dropped from 60d high
+    lookback_60 = 60
+    for i in range(lookback_60, n):
+        window = price_arr[i-lookback_60:i]
+        if np.isnan(window).any():
+            continue
+        high_60d = np.nanmax(window)
+        if high_60d > 0:
+            drop_pct = (high_60d - price_arr[i]) / high_60d
+            drop_60d_pct[i] = drop_pct
+            s200 = sma_200[i]
+            if not np.isnan(s200) and drop_pct >= 0.15 and price_arr[i] > s200:
+                # Confirmed: significant drop but still in structural bull
+                short_trend_sell[i] = True
+
+    def strategy_func(state):
+        row = state['row']
+        idx = state['idx']
+        mvrv = row['mvrv']
+        sopr = row['sopr']
+        nupl = row['nupl']
+        rsi = row['rsi_14']
+        price_usd = row['price_usd']
+        price_thb = row['price_thb']
+        cash = state['cash_reserve']
+        cooldown = state['cooldown']
+        btc = state['btc']
+
+        # =============================================
+        # 1. BUY SIDE: Same as Omega (C's proven tiers)
+        # =============================================
+        if mvrv < 1.0:
+            multiplier = 4.5 if sopr < 0.95 else 3.0
+        elif mvrv < 1.5:
+            multiplier = 3.0 if nupl < 0.25 else 2.0
+        elif mvrv < 2.0:
+            multiplier = 1.0
+        elif mvrv < 2.5:
+            multiplier = 0.3
+        else:
+            multiplier = 0.0
+
+        buy_amount = min(BASE_BUDGET_THB * multiplier, 300.0)
+        to_reserve = 0.0
+
+        # =============================================
+        # 2. RESERVE DEPLOYMENT (same as Omega: % based)
+        # =============================================
+        reserve_inj = 0.0
+        usable_cash = max(cash - 300.0, 0.0)
+        if usable_cash > 0 and mvrv < 1.3:
+            s200 = sma_200[idx] if idx < len(sma_200) else price_usd
+            in_bear = not np.isnan(s200) and price_usd < s200
+
+            if mvrv < 0.9 and in_bear:
+                deploy_rate = 0.20
+            elif mvrv < 1.0:
+                deploy_rate = 0.12
+            elif mvrv < 1.1:
+                deploy_rate = 0.08
+            else:
+                deploy_rate = 0.05
+
+            injection = min(usable_cash * deploy_rate, 600.0)
+            rp = realized_price[idx] if idx < len(realized_price) else np.nan
+            if not np.isnan(rp) and price_usd < rp * 1.05:
+                injection = min(injection * 1.5, 800.0)
+            buy_amount += injection
+            reserve_inj = injection
+
+        # =============================================
+        # 3. PRIMARY SELL: MVRV Multi-Confirm (same as Omega)
+        #    BUT with dynamic sizing (% of portfolio)
+        # =============================================
+        sell_score = 0
+
+        if mvrv > 2.5: sell_score += 20
+        if mvrv > 3.0: sell_score += 15
+        if mvrv > 3.5: sell_score += 5
+        if rsi > 70:    sell_score += 10
+        if rsi > 80:    sell_score += 5
+        if macd_cross_bear[idx]: sell_score += 10
+        if hist_declining_5[idx]: sell_score += 5
+
+        # RSI DIVERGENCE: strong sell signal (+15)
+        if rsi_divergence[idx]:
+            sell_score += 15
+
+        lth_val = lth_rp[idx] if idx < len(lth_rp) else np.nan
+        if not np.isnan(lth_val) and lth_val > 0:
+            p_to_lth = price_usd / lth_val
+            if p_to_lth > 3.0: sell_score += 10
+            if p_to_lth > 3.5: sell_score += 5
+
+        ath = cummax_price[idx] if idx < len(cummax_price) else price_usd
+        if ath > 0 and price_usd > 0.97 * ath:
+            sell_score += 5
+
+        # Bear block
+        s200 = sma_200[idx] if idx < len(sma_200) else price_usd
+        if not np.isnan(s200) and price_usd < s200:
+            sell_score -= 200
+        if mvrv <= 2.5:
+            sell_score = 0
+
+        # DYNAMIC SELL SIZING: % of portfolio instead of fixed THB
+        portfolio_val = btc * price_thb + cash
+        sell_thb = 0.0
+        new_cooldown = cooldown
+
+        if sell_score >= 40 and cooldown == 0 and btc > 0:
+            if sell_score >= 75:
+                sell_thb = portfolio_val * 0.08   # 8% of portfolio
+                new_cooldown = 45
+            elif sell_score >= 60:
+                sell_thb = portfolio_val * 0.06   # 6% of portfolio
+                new_cooldown = 35
+            else:
+                sell_thb = portfolio_val * 0.04   # 4% of portfolio
+                new_cooldown = 20
+
+        # =============================================
+        # 4. SECONDARY SELL: Short-Term Downtrend Profit Lock
+        #    Separate cooldown, smaller size, builds extra reserve
+        #    Triggers when price drops >15% from 60d high but still above SMA200
+        #    (intra-cycle correction, not structural bear)
+        # =============================================
+        # Use sell_thb_secondary to avoid conflict with primary sell
+        sell_thb_secondary = 0.0
+        short_cd = state.get('short_cooldown', 0)
+        new_short_cd = max(short_cd - 1, 0) if short_cd > 0 else 0
+
+        if (short_trend_sell[idx] and new_short_cd == 0 and btc > 0
+                and sell_thb == 0):  # Don't trigger same day as primary sell
+            # Sell 2% of portfolio, but cap at 10,000 THB per event
+            sell_thb_secondary = min(portfolio_val * 0.02, 10000.0)
+            new_short_cd = 20  # 20-day cooldown for secondary sells
+
+        total_sell = sell_thb + sell_thb_secondary
+
+        return {
+            'buy_thb': buy_amount, 'sell_btc_pct': 0,
+            'sell_thb': total_sell, 'to_reserve': to_reserve,
+            'new_cooldown': new_cooldown, 'sell_score': sell_score,
+            'reserve_injection': reserve_inj,
+            'new_short_cooldown': new_short_cd,
+        }
+
+    return strategy_func
+
+
 # ============================================================
 # SECTION 4: SUMMARY, TABLE & VISUALIZATION
-# ============================================================
+# =============================================================
 
 def print_summary_table(all_results):
     """Print a formatted comparison table in console."""
@@ -1207,7 +1424,7 @@ def generate_charts(all_daily_dfs, all_results, years_label):
     2. Average Cost per BTC over time
     3. Results Comparison TABLE
     """
-    colors = ['#9E9E9E', '#2196F3', '#FF9800', '#9C27B0', '#E91E63', '#00BCD4', '#FF5722']
+    colors = ['#9E9E9E', '#2196F3', '#00BCD4', '#FF5722', '#4CAF50']
     styles_names = [r['strategy'] for r in all_results]
 
     fig = plt.figure(figsize=(18, 16), constrained_layout=True)
@@ -1327,11 +1544,9 @@ def main():
         period_strategies = [
             ('Standard DCA', strategy_standard_dca),
             ('Style C',      strategy_style_c),
-            ('Style E',      strategy_style_e),
-            ('Style G v2',   strategy_style_g_v2(test_df)),
-            ('Style Alpha',  strategy_style_alpha(test_df)),
             ('Style Beta',   strategy_style_beta(test_df)),
             ('Style Omega',  strategy_style_omega(test_df)),
+            ('Style Phoenix', strategy_style_phoenix(test_df)),
         ]
 
         all_results = []
@@ -1355,51 +1570,42 @@ def main():
     print("#" * 100)
     analysis = """
   ==================================================================
-  STRATEGY DESIGN RATIONALE (7 Strategies)
+  STRATEGY DESIGN RATIONALE (5 Strategies — Trimmed + Phoenix)
   ==================================================================
 
-  STYLE BETA v3 — MULTI-CONFIRM SELL DCA (Score: 9.0/10)
+  REMOVED: Style E, Style G v2, Style Alpha (underperforming True ROI)
+
+  STYLE OMEGA — CAPITAL CYCLONE (Baseline for comparison)
   ----------------------------------------------------------
-  * Style C's buying + Multi-Confirm selling (MVRV+RSI+MACD+ATH)
-  * Self-funding reserve from sell proceeds only
-  * Weakness: Fixed 100 THB/day deploy leaves 20-30K THB unused
+  * C's buy tiers + % based reserve drain + Multi-Confirm sell (fixed THB)
+  * True ROI: 81.4% (3yr) / 410.7% (5yr)
 
-  STYLE OMEGA — CAPITAL CYCLONE (Score: 9.5/10, LATEST)
+  STYLE PHOENIX — ADAPTIVE SELL ARCHITECTURE (NEW)
   ----------------------------------------------------------
-  3-ROUND DESIGN PROCESS:
-  Round 1: Tested LTH RP proxies (k=0.65, SMA180, EMA90 of Realized Price)
-           → ALL 99%+ correlated with MVRV (zero marginal signal as primary)
-           → DECISION: Use LTH RP as CONFIRMATION only, pivot to reserve optimization
-  Round 2: Root cause analysis — Beta's fixed 100 THB/day deploy = 200-300 days
-           to drain reserve. 20-30K THB sits idle at end of backtest.
-           Fix: % based reserve drain (5-20%/day of remaining cash)
-  Round 3: Safety guards added — SMA200 bear confirmation for aggressive rate,
-           reserve floor 300 THB, realized price floor boost for deployment,
-           cooldown tuned 15-45d (vs Beta's 30-60d) for more sell windows.
+  Builds on Omega's proven buy + reserve system. Three sell-side innovations:
 
-  KEY INNOVATIONS OVER BETA v3:
-  1. % based reserve drain: deploys 5-20% of cash/day (vs 100 THB fixed)
-     → 30K THB reserve drains in ~30-50 days instead of 300 days
-  2. Escalating deploy rate: MVRV<0.9+bear = 20%/day, <1.0 = 12%, <1.1 = 8%
-  3. Realized Price floor boost: 1.5x injection if price < 1.05x realized price
-  4. LTH RP (SMA180 Realized Price): confirmation on sell score (+10/+5)
-  5. Shorter cooldowns: 15-45d vs 30-60d (more sell windows in sustained bull)
-  6. Reserve floor: 300 THB minimum buffer always kept
+  1. DYNAMIC SELL SIZING (% of portfolio, not fixed THB)
+     * Score 40-54: sell 4% of portfolio (cd 20d)
+     * Score 55-69: sell 6% of portfolio (cd 35d)
+     * Score 70+:    sell 8% of portfolio (cd 45d)
+     * Scales naturally — bigger portfolio = proportionally bigger sells
 
-  BUY SIDE: Identical to C (MVRV tiers + SOPR/NUPL boosters), cap 300 THB/day
-  SELL SIDE: Multi-Confirm (MVRV+RSI+MACD+LTH_RP+ATH), SMA200 bear block
-  RESERVE:  Self-funding, % based drain with MVRV-escalated rates
+  2. RSI DIVERGENCE DETECTION (+15 to sell score)
+     * 40-day lookback: price near 40d high (within 3%)
+       BUT RSI >8 points below its 40d high AND RSI still >58
+     * Classic bearish divergence = momentum exhaustion
+     * Can trigger sells BEFORE MVRV confirms overvaluation
 
-  INDICATORS USED:
-  * MVRV (CoinMetrics real) — primary cycle position signal
-  * NUPL (derived: 1 - 1/MVRV) — unrealized profit/loss gauge
-  * SOPR (Proxy: Price/EMA30) — spending behavior signal
-  * RSI(14) — momentum overbought/oversold
-  * MACD(12,26,9) — trend reversal detection
-  * SMA200 — bear/bull regime filter
-  * Realized Price (Price/MVRV) — dynamic support level
-  * LTH Realized Price (SMA180 of RP) — LTH cost basis approximation
-  * ATH tracking — cumulative maximum price
+  3. SHORT-TERM DOWNTREND PROFIT LOCK (separate sell mechanism)
+     * Price dropped >15% from 60-day high, but STILL above SMA200
+     * Sells 2% of portfolio (cap 10,000 THB), 20-day cooldown
+     * Separate from primary sell (different cooldown)
+     * Catches intra-cycle corrections (weeks-months, not 4yr cycle)
+     * Builds extra cash reserve for re-accumulation at lower prices
+
+  BUY SIDE: Identical to Omega (C's tiers + % reserve drain)
+  SELL SIDE: Dynamic sizing + RSI divergence + short-trend profit lock
+  RESERVE:  Same as Omega (self-funding, % based, 300 THB floor)
 """
     print(analysis)
     print("\n[COMPLETE] All backtests finished.")
