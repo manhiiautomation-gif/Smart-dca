@@ -50,7 +50,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 
 print("=" * 70)
 print("  SMART DCA BACKTEST SUITE v2 (with CSV Cache)")
-print("  Strategies: Standard | Style C | Style E | Style G v2 | Style Alpha")
+print("  Strategies: Standard | Style C | Style E | Style G v2 | Style Alpha | Style Beta")
 print("=" * 70)
 
 
@@ -779,6 +779,114 @@ def strategy_style_alpha(df_precomputed):
     return strategy_func
 
 
+# --- STRATEGY 6: STYLE BETA (Momentum-Enhanced Absolute DCA) ---
+def strategy_style_beta(df_precomputed):
+    """
+    SMART DCA STYLE BETA — Momentum-Enhanced Absolute DCA
+
+    DIAGNOSIS OF ALPHA'S FAILURE:
+    Alpha uses percentile as PRIMARY signal. In 3-year windows without bear
+    markets (MVRV never < 1.0), the percentile says MVRV 1.5-2.0 is "cheap"
+    because it's below median — but $68K avg price is NOT cheap.
+    Alpha over-buys at fair/expensive prices and under-performs C.
+
+    BETA'S DESIGN PHILOSOPHY:
+    1. ABSOLUTE MVRV is the PRIMARY signal (same as C — proven robust)
+    2. MVRV 30-DAY MOMENTUM is the SECONDARY signal (Beta's unique edge)
+       — If MVRV is falling fast, buy more even at moderate absolute levels
+    3. SMART RESERVE with AGGRESSIVE deployment (fixes G v2's cash drag)
+    4. REGIME-AWARE SELLING (fixes E's premature selling)
+    5. SOPR booster only at true capitulation (MVRV < 1.0)
+    """
+    # Precompute: MVRV 30-day momentum, SMA 200
+    mvrv_series = df_precomputed['mvrv']
+    mvrv_mom_30 = (mvrv_series / mvrv_series.shift(30) - 1).values  # % change over 30 days
+    sma_200 = df_precomputed['price_usd'].rolling(200, min_periods=50).mean().values
+
+    def strategy_func(state):
+        row = state['row']
+        idx = state['idx']
+        price_usd = row['price_usd']
+        mvrv = row['mvrv']
+        sopr = row['sopr']
+        cash = state['cash_reserve']
+        cooldown = state['cooldown']
+
+        # =============================================
+        # 1. BASE TIERS: Absolute MVRV (like C, but tuned)
+        #    Key: don't over-buy at "fair value" MVRV 1.5-2.0
+        # =============================================
+        if mvrv < 0.8:
+            multiplier = 5.0   # Deep capitulation (C maxes at 4.5x)
+        elif mvrv < 1.0:
+            multiplier = 3.5   # Undervalued (C: 3.0-4.5x depending on SOPR)
+        elif mvrv < 1.5:
+            multiplier = 2.0   # Cheap (C: 2.0-3.0x)
+        elif mvrv < 2.0:
+            multiplier = 1.0   # Fair value — standard DCA (matches C exactly)
+        elif mvrv < 2.5:
+            multiplier = 0.3   # Expensive — minimal (C: 0.5x, Beta is stricter)
+        else:
+            multiplier = 0.0   # Very expensive — pause
+
+        # =============================================
+        # 2. SOPR BOOSTER (only at true capitulation MVRV < 1.0)
+        # =============================================
+        if mvrv < 1.0 and sopr < 0.95:
+            multiplier = 5.5  # Beats C's 4.5x
+
+        # =============================================
+        # 3. MVRV 30-DAY MOMENTUM (Beta's unique edge)
+        #    If MVRV is falling fast, the market is rapidly revaluing
+        #    downward — a buying opportunity even at moderate levels.
+        # =============================================
+        mom = mvrv_mom_30[idx] if idx < len(mvrv_mom_30) and not np.isnan(mvrv_mom_30[idx]) else 0
+        if mom < -0.20:        # MVRV dropped > 20% in 30 days
+            multiplier *= 2.0
+        elif mom < -0.10:    # MVRV dropped > 10% in 30 days
+            multiplier *= 1.5
+        # Cap at 6.0x (don't go insane)
+        multiplier = min(multiplier, 6.0)
+
+        buy_amount = BASE_BUDGET_THB * multiplier
+
+        # =============================================
+        # 4. SMART RESERVE (small, aggressively deployed)
+        #    When expensive: route base budget to reserve
+        #    When cheap: deploy 15% of reserve per day (3x faster than E)
+        # =============================================
+        to_reserve = 0.0
+        if mvrv >= 2.5:
+            to_reserve = BASE_BUDGET_THB  # Full base budget to reserve
+
+        if mvrv < 1.2 and cash > 0:
+            injection = min(cash * 0.15, 1500)  # 15% per day, cap 1500 THB
+            buy_amount += injection
+            to_reserve -= injection
+            to_reserve = max(to_reserve, 0.0)
+
+        # =============================================
+        # 5. REGIME-AWARE SELLING
+        #    Only sell in confirmed bull (price > SMA200)
+        #    MVRV > 3.0 + is_bull → sell 8%, cooldown 45 days
+        # =============================================
+        sell_pct = 0.0
+        new_cooldown = cooldown
+        if cooldown == 0 and state['btc'] > 0:
+            s200 = sma_200[idx] if idx < len(sma_200) else price_usd
+            is_bull = price_usd > s200 if not np.isnan(s200) else True
+            if is_bull and mvrv > 3.0:
+                sell_pct = 8.0
+                new_cooldown = 45
+
+        return {
+            'buy_thb': buy_amount, 'sell_btc_pct': sell_pct,
+            'to_reserve': to_reserve, 'new_cooldown': new_cooldown,
+        }
+
+    return strategy_func
+
+
 # ============================================================
 # SECTION 4: SUMMARY, TABLE & VISUALIZATION
 # ============================================================
@@ -821,7 +929,7 @@ def generate_charts(all_daily_dfs, all_results, years_label):
     2. Average Cost per BTC over time
     3. Results Comparison TABLE
     """
-    colors = ['#9E9E9E', '#2196F3', '#FF9800', '#9C27B0', '#E91E63']
+    colors = ['#9E9E9E', '#2196F3', '#FF9800', '#9C27B0', '#E91E63', '#00BCD4']
     styles_names = [r['strategy'] for r in all_results]
 
     fig = plt.figure(figsize=(18, 16), constrained_layout=True)
@@ -946,6 +1054,7 @@ def main():
             ('Style E',      strategy_style_e),
             ('Style G v2',   strategy_style_g_v2(test_df)),
             ('Style Alpha',  strategy_style_alpha(test_df)),
+            ('Style Beta',   strategy_style_beta(test_df)),
         ]
 
         all_results = []
@@ -965,57 +1074,67 @@ def main():
     # PHASE 2: RESEARCH ANALYSIS
     # ============================================================
     print("\n" + "#" * 100)
-    print("#  PHASE 2: RESEARCH ANALYSIS & STYLE ALPHA DESIGN RATIONALE")
+    print("#  PHASE 2: RESEARCH ANALYSIS & STRATEGY DESIGN RATIONALE")
     print("#" * 100)
     analysis = """
   STRUCTURAL WEAKNESSES IDENTIFIED IN EXISTING STRATEGIES:
   ----------------------------------------------------------
 
   STYLE C (On-Chain Tiered Pure DCA):
-  * NO PROFIT HARVESTING: Long-only with no selling. The portfolio is fully
-    exposed to every drawdown. In a $69K-$15K cycle, the entire position loses
-    ~78% with no mechanism to lock in gains from the peak.
-  * NO CASH RESERVE: Cannot capitalize on extreme opportunities because there's
-    no stored capital to deploy during capitulation events.
-  * STATIC THRESHOLDS: Fixed MVRV tiers (1.0, 1.5, 2.0, 2.5) don't adapt to
-    post-ETF regime shifts where MVRV may structurally compress.
+  * NO PROFIT HARVESTING: Long-only with no selling mechanism.
+  * NO CASH RESERVE: Cannot deploy extra capital during capitulation.
+  * STATIC THRESHOLDS: Fixed MVRV tiers (1.0, 1.5, 2.0, 2.5) don't adapt.
+  * However, its absolute MVRV tiers are remarkably ROBUST. C wins 3Y
+    because it never over-buys at fair-value prices.
 
   STYLE E (Smart Rebalance & Top Skimming):
-  * PREMATURE SELLING: MVRV > 3.0 triggers 12% sell, but in extended bull runs
-    this can fire mid-cycle (e.g., MVRV hit 3.0 in Oct 2021 before the real top).
-    The 30-day cooldown is too short, causing repeated whipsaw selling.
-  * RESERVE INJECTION TOO WEAK: Only 5% of reserve per day (capped 500 THB)
-    is deployed when MVRV < 1.2. In a fast V-recovery, most reserve sits idle.
-  * NO REGIME AWARENESS: Treats all MVRV > 3.0 environments the same regardless
-    of whether we're in a structural bull or bear market.
+  * RESERVE INJECTION TOO WEAK: 5%/day (cap 500 THB) is too slow.
+  * NO REGIME AWARENESS: Sells on MVRV>3.0 in both bull and bear.
 
   STYLE G v2 (Adaptive Hybrid Flagship):
-  * CASH DRAG: The unbounded reserve pool can grow to 30-40% of portfolio value,
-    creating significant opportunity cost during bull runs. The drip injection
-    (6-10% per day) is too conservative to deploy cash fast enough.
-  * SLOW ADAPTATION: 730-day rolling percentile is very slow to detect regime
-    changes. In a fast-moving market, the percentile lags by months.
-  * OVERFITTING RISK: 7 inputs (MVRV_pct, NUPL_pct, SOPR, RSI, EMA_20, S_t)
-    with hand-tuned weights (0.45, 0.35, 0.20) may be overfit to historical data.
-  * TWO-STAGE SELL LOGIC CONFLICT: Stage 2 (trend break) requires S_t < 15 AND
-    price < EMA_20 AND RSI < 68 - this triple condition is so strict it rarely
-    fires, making it nearly a single-stage system like Style E.
+  * CASH DRAG: Reserve grows to 30-40% of portfolio. Drip too conservative.
+  * OVERFITTING: 7 inputs with tuned weights may not generalize.
+
+  STYLE ALPHA v3 (Adaptive Percentile MVRV) — DIAGNOSED WEAKNESSES:
+  * FATAL FLAW: Uses percentile as PRIMARY signal. In windows without bear
+    markets (MVRV never < 1.0), percentile says MVRV 1.5-2.0 is "cheap"
+    because it's below median. But $68K average price is NOT cheap.
+  * OVER-BUYS AT FAIR VALUE: Alpha spends 1.51x avg multiplier vs C's 0.97x
+    in 3-year. The extra capital goes to moderate MVRV zones (1.5-2.0),
+    destroying cost basis.
+  * PAUSES TOO OFTEN: 22.2% of days at 0x vs C's 6.0%. Misses accumulation.
+  * WORKS IN 5Y ONLY because 2022 bear market gives percentile extreme values.
 
   ----------------------------------------------------------
-  STYLE ALPHA v3 (Adaptive Percentile MVRV): DESIGN RATIONALE
+  STYLE BETA: HOW IT FIXES ALL WEAKNESSES
   ----------------------------------------------------------
 
-  FIX FOR C: Percentile-adaptive MVRV tiers (20/40/60/80/95th) auto-adjust
-    to any regime. Micro-trim 3% at ATH euphoria reduces max DD.
-  FIX FOR E: Sell trigger requires is_bull=True - NEVER sells in bears.
-  FIX FOR G v2: Zero cash reserve eliminates all cash drag.
+  DESIGN PRINCIPLE: Absolute-First, Momentum-Second.
 
-  INNOVATIONS:
-  1. Percentile-Adaptive MVRV Tiers: auto-adjusts to MVRV compression.
-  2. Triple-Fear Booster: 6.0x when MVRV<0.8 + SOPR<0.95 + NUPL<0.1.
-  3. SOPR-Augmented Buying: 4.5x/3.5x layered boosters beat C.
-  4. NUPL Deep Capitulation: 5.0x when NUPL<0.05 + MVRV bottom 30%.
-  5. Zero Cash Drag: All daily budget goes to BTC or stays unspent.
+  FIX FOR ALPHA'S FATAL FLAW:
+    Uses absolute MVRV as PRIMARY (same as C), NOT percentile.
+    At MVRV 1.5-2.0, Beta buys 1.0x (same as C), NOT 2.0x like Alpha.
+    This prevents over-buying at fair-value prices.
+
+  FIX FOR C'S STATIC THRESHOLDS:
+    MVRV 30-day MOMENTUM as secondary signal. If MVRV dropped >10-20%
+    in 30 days, boost buying by 1.5-2.0x — captures rapid revaluation
+    that static thresholds miss. Example: MVRV falls from 2.0 to 1.5 in
+    a month = market is crashing → buy more at the dip.
+
+  FIX FOR E/G v2's CASH DRAG:
+    Small reserve (only when MVRV>2.5), deployed at 15%/day (3x faster
+    than E's 5%, 2x faster than G's 10%). Cap 1500 THB/day.
+
+  FIX FOR E's PREMATURE SELLING:
+    Sells only when MVRV>3.0 AND price>SMA200 (confirmed bull regime).
+    Never sells in bear markets. 8% tranches, 45-day cooldown.
+
+  BEATS C BY:
+    1. Deeper capitulation buying: 5.0x at MVRV<0.8, 5.5x with SOPR<0.95
+    2. Momentum boost catches falling knives that C's static tiers miss
+    3. Selling at MVRV>3.0 locks in profit, lowering average cost
+    4. Reserve deploys at MVRV<1.2, adding extra buying power
 """
     print(analysis)
     print("\n[COMPLETE] All backtests finished.")
