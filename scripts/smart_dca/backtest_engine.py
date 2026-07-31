@@ -53,6 +53,14 @@ def backtest_strategy(df, strategy_func, strategy_name):
     btc_sold_total = 0.0
     daily_log = []
 
+    # New metrics tracking
+    days_in_drawdown = 0
+    worst_recovery_start = None
+    worst_recovery_days = 0
+    current_dd_start = None
+    total_sell_value_thb = 0.0  # gross THB from sells (before fees)
+    in_drawdown = False
+
     total_days = len(df)
 
     for idx, row in df.iterrows():
@@ -62,11 +70,14 @@ def backtest_strategy(df, strategy_func, strategy_name):
         if short_cooldown > 0:
             short_cooldown -= 1
 
+        # Pass adjusted_avg_cost to strategies that need profit gate
+        adj_avg = adjusted_invested / btc if btc > 0 else 0
         state = {
             'btc': btc, 'cash_reserve': cash_reserve,
             'total_invested': total_invested, 'cooldown': cooldown,
             'short_cooldown': short_cooldown,
-            'row': row, 'idx': idx
+            'row': row, 'idx': idx,
+            'adjusted_avg_cost': adj_avg,
         }
 
         action = strategy_func(state)
@@ -105,6 +116,7 @@ def backtest_strategy(df, strategy_func, strategy_name):
             btc_sold_total += btc_to_sell
             cash_reserve += sell_proceeds
             total_sell_proceeds += sell_proceeds
+            total_sell_value_thb += sell_gross
             total_fees_paid += sell_fee
             sell_count += 1
             cooldown = action.get('new_cooldown', cooldown)
@@ -123,6 +135,7 @@ def backtest_strategy(df, strategy_func, strategy_name):
             btc_sold_total += btc_to_sell
             cash_reserve += sell_proceeds
             total_sell_proceeds += sell_proceeds
+            total_sell_value_thb += sell_gross
             total_fees_paid += sell_fee
             sell_count += 1
             cooldown = action.get('new_cooldown', cooldown)
@@ -138,8 +151,20 @@ def backtest_strategy(df, strategy_func, strategy_name):
 
         if portfolio_value > peak_value:
             peak_value = portfolio_value
+            # Recovered from drawdown
+            if in_drawdown and current_dd_start is not None:
+                recovery_days = idx - current_dd_start
+                if recovery_days > worst_recovery_days:
+                    worst_recovery_days = recovery_days
+                in_drawdown = False
+                current_dd_start = None
         if peak_value > 0:
             drawdown = (peak_value - portfolio_value) / peak_value
+            if drawdown > 0.001:  # > 0.1% counts as drawdown
+                days_in_drawdown += 1
+                if not in_drawdown:
+                    in_drawdown = True
+                    current_dd_start = idx
             if drawdown > max_drawdown:
                 max_drawdown = drawdown
 
@@ -164,6 +189,10 @@ def backtest_strategy(df, strategy_func, strategy_name):
     reserve_utilization_pct = (total_reserve_injected / total_sell_proceeds * 100) if total_sell_proceeds > 0 else 0
     avg_daily_dca = net_capital / total_days if total_days > 0 else 0
     btc_sell_pct = (btc_sold_total / (btc + btc_sold_total) * 100) if (btc + btc_sold_total) > 0 else 0
+    days_in_drawdown_pct = (days_in_drawdown / total_days * 100) if total_days > 0 else 0
+    avg_sell_price_thb = (total_sell_value_thb / btc_sold_total) if btc_sold_total > 0 else 0
+    sell_profit_ratio = (avg_sell_price_thb / final_avg_cost) if (btc_sold_total > 0 and final_avg_cost > 0) else 0
+    calmar_ratio = (true_roi_pct / (max_drawdown * 100)) if max_drawdown > 0 else 0
 
     results = {
         'strategy': strategy_name,
@@ -194,5 +223,11 @@ def backtest_strategy(df, strategy_func, strategy_name):
         'reserve_buy_days': reserve_buy_days,
         'avg_daily_dca': avg_daily_dca,
         'total_days': total_days,
+        # New metrics
+        'days_in_drawdown_pct': days_in_drawdown_pct,
+        'worst_recovery_days': worst_recovery_days,
+        'avg_sell_price_thb': avg_sell_price_thb,
+        'sell_profit_ratio': sell_profit_ratio,
+        'calmar_ratio': calmar_ratio,
     }
     return results, pd.DataFrame(daily_log)

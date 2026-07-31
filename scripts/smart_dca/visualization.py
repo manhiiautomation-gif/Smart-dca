@@ -13,34 +13,50 @@ from .config import DOWNLOAD_DIR, USD_THB_RATE
 def print_summary_table(all_results):
     n = len(all_results)
     print()
-    print("=" * 150)
+    print("=" * 160)
     print("  PERFORMANCE OVERVIEW")
-    print("=" * 150)
+    print("=" * 160)
     h1 = (f'{"Strategy":<16} {"Portfolio":>12} {"True ROI":>9} {"ROI%":>8} {"Max DD":>7} '
-          f'{"BTC Held":>10} {"Avg Cost":>10} {"BTC Sold":>8}')
+          f'{"Calmar":>7} {"BTC Held":>10} {"Avg Cost":>10} {"BTC Sold":>8}')
     print(h1)
-    print("-" * 150)
+    print("-" * 160)
     for r in all_results:
         ac = f'{r["avg_cost_thb"]:,.0f}' if r['avg_cost_thb'] > 0 else '-'
+        cal = f'{r["calmar_ratio"]:.2f}' if r['calmar_ratio'] > 0 else '-'
         line = (f'{r["strategy"]:<16} {r["final_value"]:>12,.0f} {r["true_roi_pct"]:>8.1f}% {r["roi_pct"]:>7.1f}% {r["max_drawdown_pct"]:>6.1f}% '
-                f'{r["total_btc"]:>10.6f} {ac:>10} {r["btc_sell_pct"]:>7.1f}%')
+                f'{cal:>7} {r["total_btc"]:>10.6f} {ac:>10} {r["btc_sell_pct"]:>7.1f}%')
         print(line)
 
     print()
-    print("=" * 150)
+    print("=" * 160)
     print("  CAPITAL FLOW ANALYSIS")
-    print("=" * 150)
+    print("=" * 160)
     h2 = (f'{"Strategy":<16} {"DCA Money":>12} {"Sell Profit":>12} {"Reserve Used":>13} {"Reserve Left":>13} '
           f'{"Reserve Use%":>12} {"Fees Paid":>11} {"Sells":>6} {"Reserve Days":>12}')
     print(h2)
-    print("-" * 150)
+    print("-" * 160)
     for r in all_results:
         line = (f'{r["strategy"]:<16} {r["net_capital"]:>12,.0f} {r["total_sell_proceeds"]:>12,.0f} '
                 f'{r["total_reserve_injected"]:>13,.0f} {r["cash_reserve"]:>13,.0f} '
                 f'{r["reserve_utilization_pct"]:>11.1f}% {r["total_fees_paid"]:>11,.0f} '
                 f'{r["sell_count"]:>6} {r["reserve_buy_days"]:>12}')
         print(line)
-    print("=" * 150)
+
+    print()
+    print("=" * 160)
+    print("  RISK & EFFICIENCY METRICS")
+    print("=" * 160)
+    h3 = (f'{"Strategy":<16} {"DD Days%":>9} {"Worst Recov":>12} {"Avg Sell Price":>14} {"Sell P/L Ratio":>14} {"Calmar":>7} {"Sell Count":>11}')
+    print(h3)
+    print("-" * 160)
+    for r in all_results:
+        asp = f'{r["avg_sell_price_thb"]:,.0f}' if r['avg_sell_price_thb'] > 0 else '-'
+        spr = f'{r["sell_profit_ratio"]:.2f}x' if r['sell_profit_ratio'] > 0 else '-'
+        cal = f'{r["calmar_ratio"]:.2f}' if r['calmar_ratio'] > 0 else '-'
+        line = (f'{r["strategy"]:<16} {r["days_in_drawdown_pct"]:>8.1f}% {r["worst_recovery_days"]:>12} '
+                f'{asp:>14} {spr:>14} {cal:>7} {r["sell_count"]:>11}')
+        print(line)
+    print("=" * 160)
 
     best_val = max(all_results, key=lambda x: x["final_value"])
     best_roi = max(all_results, key=lambda x: x["true_roi_pct"])
@@ -48,6 +64,8 @@ def print_summary_table(all_results):
     lowest_dd = min(all_results, key=lambda x: x["max_drawdown_pct"])
     lowest_cost = min(all_results, key=lambda x: x["avg_cost_thb"] if x["avg_cost_thb"] > 0 else float('inf'))
     lowest_fee = min(all_results, key=lambda x: x["total_fees_paid"])
+    best_calmar = max(all_results, key=lambda x: x["calmar_ratio"])
+    least_dd_days = min(all_results, key=lambda x: x["days_in_drawdown_pct"])
 
     print(f"  >> Best Portfolio   : {best_val['strategy']} ({best_val['final_value']:,.0f} THB)")
     print(f"  >> Best True ROI    : {best_roi['strategy']} ({best_roi['true_roi_pct']:.1f}%)")
@@ -55,27 +73,29 @@ def print_summary_table(all_results):
     print(f"  >> Lowest Drawdown  : {lowest_dd['strategy']} ({lowest_dd['max_drawdown_pct']:.1f}%)")
     print(f"  >> Lowest Avg Cost  : {lowest_cost['strategy']} ({lowest_cost['avg_cost_thb']:,.0f} THB/BTC)")
     print(f"  >> Lowest Fees      : {lowest_fee['strategy']} ({lowest_fee['total_fees_paid']:,.0f} THB)")
+    print(f"  >> Best Calmar      : {best_calmar['strategy']} ({best_calmar['calmar_ratio']:.2f})")
+    print(f"  >> Least DD Days    : {least_dd_days['strategy']} ({least_dd_days['days_in_drawdown_pct']:.1f}%)")
     print()
     print("  Metrics Key:")
-    print("    DCA Money     = money from your pocket (excl. reserve recycling)")
-    print("    Sell Profit   = cash from BTC sells (goes into reserve)")
-    print("    Reserve Used  = reserve cash used to buy BTC at lower prices")
-    print("    Reserve Left  = remaining reserve cash (not yet deployed)")
-    print("    Reserve Use%  = % of sell proceeds recycled back into buys")
-    print("    Fees Paid     = total fees across all trades (buy + sell)")
-    print("    Reserve Days  = days where reserve was used for buying")
+    print("    Calmar Ratio   = True ROI / Max DD (higher = better risk-adjusted return)")
+    print("    DD Days%       = % of total days spent in drawdown state")
+    print("    Worst Recovery = longest streak (days) to recover from a drawdown")
+    print("    Avg Sell Price = average THB/BTC when selling")
+    print("    Sell P/L Ratio = avg sell price / avg buy price (>1 = sold at profit)")
+    print("    DCA Money      = money from your pocket (excl. reserve recycling)")
+    print("    Reserve Use%   = % of sell proceeds recycled back into buys")
     print()
 
 
 def generate_charts(all_daily_dfs, all_results, years_label):
-    colors = ['#9E9E9E', '#2196F3', '#FF9800', '#4CAF50', '#E91E63', '#9C27B0']
+    colors = ['#9E9E9E', '#2196F3', '#FF9800', '#4CAF50', '#E91E63', '#9C27B0', '#00BCD4']
     styles_names = [r['strategy'] for r in all_results]
 
-    fig = plt.figure(figsize=(20, 22), constrained_layout=True)
+    fig = plt.figure(figsize=(20, 28), constrained_layout=True)
     fig.suptitle(f'Smart DCA Strategy Comparison ({years_label})\nBinance REAL Price Data + On-Chain Metrics',
                  fontsize=17, fontweight='bold', y=1.01)
 
-    gs = fig.add_gridspec(4, 1, height_ratios=[1, 0.9, 0.7, 0.7], hspace=0.32)
+    gs = fig.add_gridspec(5, 1, height_ratios=[1, 0.9, 0.7, 0.7, 0.7], hspace=0.35)
 
     ax1 = fig.add_subplot(gs[0])
     for i, (name, daily_df) in enumerate(zip(styles_names, all_daily_dfs)):
@@ -108,15 +128,17 @@ def generate_charts(all_daily_dfs, all_results, years_label):
     ax3.axis('off')
     ax3.set_title('Performance Comparison', fontsize=13, fontweight='bold', pad=15)
 
-    perf_cols = ['Strategy', 'Portfolio\nValue (THB)', 'True ROI\n(%)', 'Max DD\n(%)', 'BTC\nHeld', 'BTC\nSold (%)', 'Avg Cost\n(THB/BTC)', 'Fees\n(THB)']
+    perf_cols = ['Strategy', 'Portfolio\nValue (THB)', 'True ROI\n(%)', 'Max DD\n(%)', 'Calmar', 'BTC\nHeld', 'BTC\nSold (%)', 'Avg Cost\n(THB/BTC)', 'Fees\n(THB)']
     perf_data = []
     for r in all_results:
         ac = f"{r['avg_cost_thb']:,.0f}" if r['avg_cost_thb'] > 0 else "-"
+        cal = f"{r['calmar_ratio']:.2f}" if r['calmar_ratio'] > 0 else "-"
         perf_data.append([
             r['strategy'],
             f"{r['final_value']:,.0f}",
             f"{r['true_roi_pct']:.1f}%",
             f"{r['max_drawdown_pct']:.1f}%",
+            cal,
             f"{r['total_btc']:.6f}",
             f"{r['btc_sell_pct']:.1f}%",
             ac,
@@ -154,6 +176,33 @@ def generate_charts(all_daily_dfs, all_results, years_label):
     t4.scale(1, 1.9)
     _style_table(t4, cap_cols, all_results, key_col='final_value')
 
+    # Table 5: Risk & Efficiency
+    ax5 = fig.add_subplot(gs[4])
+    ax5.axis('off')
+    ax5.set_title('Risk & Efficiency Metrics', fontsize=13, fontweight='bold', pad=15)
+
+    risk_cols = ['Strategy', 'DD Days\n(%)', 'Worst Recovery\n(days)', 'Avg Sell Price\n(THB/BTC)', 'Sell P/L\nRatio', 'Calmar\nRatio', 'Sell\nCount']
+    risk_data = []
+    for r in all_results:
+        asp = f"{r['avg_sell_price_thb']:,.0f}" if r['avg_sell_price_thb'] > 0 else "-"
+        spr = f"{r['sell_profit_ratio']:.2f}x" if r['sell_profit_ratio'] > 0 else "-"
+        cal = f"{r['calmar_ratio']:.2f}" if r['calmar_ratio'] > 0 else "-"
+        risk_data.append([
+            r['strategy'],
+            f"{r['days_in_drawdown_pct']:.1f}%",
+            f"{r['worst_recovery_days']}",
+            asp,
+            spr,
+            cal,
+            f"{r['sell_count']}",
+        ])
+
+    t5 = ax5.table(cellText=risk_data, colLabels=risk_cols, cellLoc='center', loc='center')
+    t5.auto_set_font_size(False)
+    t5.set_fontsize(9)
+    t5.scale(1, 1.9)
+    _style_table(t5, risk_cols, all_results, key_col='calmar_ratio')
+
     fname = os.path.join(DOWNLOAD_DIR, f'smart_dca_comparison_{years_label.replace(" ", "_")}.png')
     plt.savefig(fname, dpi=150, bbox_inches='tight')
     print(f'[CHART] Saved: {fname}')
@@ -171,11 +220,14 @@ def _style_table(table, col_labels, all_results, key_col='final_value'):
             cell.set_facecolor('#F8F9FA' if row_idx % 2 == 0 else 'white')
             cell.set_height(0.1)
 
-    best_idx = max(range(len(all_results)), key=lambda i: all_results[i][key_col]) + 1
-    for col_idx in range(len(col_labels)):
-        cell = table.get_celld()[(best_idx, col_idx)]
-        cell.set_facecolor('#E8F5E9')
-        cell.set_text_props(fontweight='bold')
+    # Highlight best row (green for max metric)
+    valid_results = [r for r in all_results if r.get(key_col, 0) != 0 or key_col != 'calmar_ratio']
+    if valid_results:
+        best_idx = max(range(len(valid_results)), key=lambda i: valid_results[i].get(key_col, 0)) + 1
+        for col_idx in range(len(col_labels)):
+            cell = table.get_celld()[(best_idx, col_idx)]
+            cell.set_facecolor('#E8F5E9')
+            cell.set_text_props(fontweight='bold')
 
 
 def save_results_csv(all_results, years_label):

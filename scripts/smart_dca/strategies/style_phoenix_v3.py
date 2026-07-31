@@ -1,23 +1,21 @@
 """Phoenix v3 — Risk-Off Capital Protector.
 
-DESIGN PHILOSOPHY: "Sell ONLY at extreme cycle tops, accumulate BTC cheaper"
+DESIGN PHILOSOPHY: "Sell ONLY with strong confirmation, accumulate BTC cheaper"
 
-vs Phoenix v2 changes:
-1. Sell gate raised: MVRV > 3.0 (was 2.5) — avoids mid-cycle sells
-2. Score thresholds raised: 55/70/85 (was 40/60/75) — needs more confirmation
-3. Short-trend sell REMOVED entirely — was #1 drawdown contributor
-4. Profit certainty gate: price > 2x avg_cost before any sell allowed
-5. NUPL > 0.70 required — on-chain confirmation of euphoria zone
-6. Longer cooldowns: 30/45/60d (was 20/35/45) — let price run further
-7. Sell size: 4/6/8% (same as Phoenix v1, per user request)
-8. Reserve deploy boosted: higher rates + higher caps + lower floor
+vs Phoenix v1/v2 changes:
+1. No short-trend sell — #1 drawdown contributor removed
+2. Higher score thresholds: 45/60/80 (was 40/60/75) — needs more confirmation
+3. Longer cooldowns: 30/45/60d (was 20/35/45) — let price run
+4. Max 50% portfolio sell at extreme top (score >= 80)
+5. NUPL > 0.70 bonus — on-chain euphoria confirmation
+6. Reserve deploy boosted: wider MVRV window, higher rates, lower floor
 
-RESULT: Fewer sells, higher conviction, more BTC accumulation from reserve.
+MVRV GATE: 2.5 (same as Omega) — but scoring heavily weights 3.0+ zone
 """
 
 import numpy as np
 
-from ..config import BASE_BUDGET_THB, USD_THB_RATE
+from ..config import BASE_BUDGET_THB
 from ._shared import (
     precompute_macd_signals,
     precompute_rsi_divergence,
@@ -69,34 +67,37 @@ def strategy_style_phoenix_v3(df_precomputed):
             in_bear = not np.isnan(s200) and price_usd < s200
 
             if mvrv < 0.8 and in_bear:
-                deploy_rate = 0.25   # was 0.20
+                deploy_rate = 0.25
             elif mvrv < 0.9 and in_bear:
                 deploy_rate = 0.20
             elif mvrv < 1.0:
-                deploy_rate = 0.15   # was 0.12
+                deploy_rate = 0.15
             elif mvrv < 1.1:
-                deploy_rate = 0.10   # was 0.08
+                deploy_rate = 0.10
             elif mvrv < 1.3:
                 deploy_rate = 0.06
             else:
                 deploy_rate = 0.03
 
-            injection = min(usable_cash * deploy_rate, 900.0)  # Higher cap: 900 (was 600)
+            injection = min(usable_cash * deploy_rate, 900.0)
             rp = realized_price[idx] if idx < len(realized_price) else np.nan
             if not np.isnan(rp) and price_usd < rp * 1.05:
-                injection = min(injection * 1.8, 1200.0)  # Higher boost: 1.8x (was 1.5x), cap 1200
+                injection = min(injection * 1.8, 1200.0)
             buy_amount += injection
             reserve_inj = injection
 
-        # 3. PRIMARY SELL — STRICT EXTREME-TOP ONLY
+        # 3. PRIMARY SELL — CONFIRMATION-HEAVY, NO SHORT-TREND
         sell_score = 0
 
-        # MVRV scoring — only starts at 3.0 (was 2.5)
-        if mvrv > 3.0: sell_score += 20
-        if mvrv > 3.5: sell_score += 15
-        if mvrv > 4.0: sell_score += 10
-        if rsi > 72:    sell_score += 8
-        if rsi > 82:    sell_score += 7
+        # MVRV scoring — base points start at 2.5, heavy bonus 3.0+
+        if mvrv > 2.5: sell_score += 15
+        if mvrv > 3.0: sell_score += 15   # cumulative 30 at 3.0
+        if mvrv > 3.5: sell_score += 10   # cumulative 40 at 3.5
+        if mvrv > 4.0: sell_score += 10   # cumulative 50 at 4.0
+
+        # Momentum
+        if rsi > 70:    sell_score += 10
+        if rsi > 80:    sell_score += 7
         if macd_cross_bear[idx]: sell_score += 10
         if hist_declining_5[idx]: sell_score += 5
         if rsi_divergence[idx]: sell_score += 15
@@ -114,43 +115,37 @@ def strategy_style_phoenix_v3(df_precomputed):
         if ath > 0 and price_usd > 0.97 * ath:
             sell_score += 7
 
-        # NUPL euphoria gate
+        # NUPL euphoria confirmation
         nupl_val = nupl_arr[idx] if idx < len(nupl_arr) else 0
         if nupl_val > 0.70:
             sell_score += 5
         if nupl_val > 0.80:
             sell_score += 5
 
-        # Bear block
+        # Bear block + MVRV gate
         s200 = sma_200[idx] if idx < len(sma_200) else price_usd
         if not np.isnan(s200) and price_usd < s200:
             sell_score -= 200
-
-        # STRICT GATE: MVRV > 3.0 minimum (was 2.5)
-        if mvrv <= 3.0:
+        if mvrv <= 2.5:
             sell_score = 0
 
-        # SELL EXECUTION — higher thresholds, v1 sizes, longer cooldowns
+        # SELL EXECUTION — 4/15/50% tiers, longer cooldowns
         portfolio_val = btc * price_thb + cash
         sell_thb = 0.0
         new_cooldown = cooldown
 
-        # Profit certainty gate: only sell if price > 2x our average cost
-        avg_cost = state.get('adjusted_avg_cost', float('inf'))
-        profit_certainty_ok = (price_usd * USD_THB_RATE) > (avg_cost * 2.0)
-
-        if sell_score >= 55 and cooldown == 0 and btc > 0 and profit_certainty_ok:
-            if sell_score >= 85:
-                sell_thb = portfolio_val * 0.08
+        if sell_score >= 45 and cooldown == 0 and btc > 0:
+            if sell_score >= 80:
+                sell_thb = portfolio_val * 0.50
                 new_cooldown = 60
-            elif sell_score >= 70:
-                sell_thb = portfolio_val * 0.06
+            elif sell_score >= 60:
+                sell_thb = portfolio_val * 0.15
                 new_cooldown = 45
             else:
                 sell_thb = portfolio_val * 0.04
                 new_cooldown = 30
 
-        # NO short-trend sell — removed entirely for risk-off
+        # NO short-trend sell — risk-off: don't sell during corrections
 
         return {
             'buy_thb': buy_amount, 'sell_btc_pct': 0,
