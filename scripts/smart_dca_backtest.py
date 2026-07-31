@@ -10,9 +10,9 @@ Tests 5 DCA strategies against 3-year and 5-year BTC historical periods:
   4. Style G v2 (Adaptive Hybrid Flagship)
   5. Style Alpha (Innovated — Designed to Outperform All)
 
-Data   : Binance REAL prices + BGeometrics REAL on-chain / Proxy Fallback
-         ALL API data cached to CSV (avoids rate-limit on re-runs)
-Output : Summary tables + Matplotlib charts with results table
+Data   : Binance REAL prices + CoinMetrics REAL MVRV + Derived NUPL / Proxy SOPR
+         ALL API data cached to CSV 7 days (re-runs = instant, no API calls)
+Output : Summary tables + Matplotlib charts with results comparison table
 ================================================================================
 """
 
@@ -139,12 +139,74 @@ def fetch_binance_btc_price(days=2000):
         return None
 
 
+def fetch_coinmetrics_mvrv(start_date, end_date):
+    """
+    Fetch REAL MVRV from CoinMetrics Community API (FREE, no API key needed).
+    Metric: CapMVRVCur (Market Value to Realized Value Ratio).
+    High rate limit — no issues in practice.
+    Cached to CSV — subsequent runs skip the API entirely.
+    Returns DataFrame with ['date', 'mvrv'] or None on failure.
+    """
+    cache_key = 'coinmetrics_mvrv'
+    cached = _load_cache(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        print(f"[DATA] Fetching REAL MVRV from CoinMetrics Community API...")
+        all_records = []
+        # CoinMetrics limits ~100 rows per request — use 90-day chunks
+        current_start = start_date.strftime('%Y-%m-%dT00:00:00Z')
+        end_str = end_date.strftime('%Y-%m-%dT23:59:59Z')
+        
+        while current_start < end_str:
+            chunk_end_dt = (pd.to_datetime(current_start) + timedelta(days=90)).strftime('%Y-%m-%dT00:00:00Z')
+            if chunk_end_dt > end_str:
+                chunk_end_dt = end_str
+            
+            url = "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics"
+            params = {
+                'assets': 'btc',
+                'metrics': 'CapMVRVCur',
+                'frequency': '1d',
+                'start_time': current_start,
+                'end_time': chunk_end_dt,
+            }
+            resp = requests.get(url, params=params, timeout=30)
+            if resp.status_code != 200:
+                print(f"[DATA] CoinMetrics HTTP {resp.status_code}: {resp.text[:200]}")
+                if not all_records:
+                    return None
+                break
+            
+            data = resp.json().get('data', [])
+            for item in data:
+                dt = pd.to_datetime(item['time']).date()
+                val = float(item['CapMVRVCur'])
+                if val > 0:  # skip invalid MVRV
+                    all_records.append({'date': dt, 'mvrv': val})
+            
+            print(f"[DATA]   {current_start[:10]} to {chunk_end_dt[:10]}: {len(data)} rows")
+            current_start = chunk_end_dt
+            time.sleep(0.2)  # CoinMetrics has high rate limits
+        
+        if not all_records:
+            return None
+        
+        df = pd.DataFrame(all_records).drop_duplicates(subset='date').sort_values('date').reset_index(drop=True)
+        print(f"[DATA] CoinMetrics MVRV: {len(df)} records ({df['date'].iloc[0]} to {df['date'].iloc[-1]})")
+        print(f"        MVRV range: {df['mvrv'].min():.3f} - {df['mvrv'].max():.3f}")
+        _save_cache(cache_key, df)
+        return df
+    except Exception as e:
+        print(f"[DATA] CoinMetrics MVRV fetch failed: {e}")
+        return None
+
+
 def fetch_bgeometrics_metric(metric_name, token='7NqNRwWhyc'):
     """
-    Fetch REAL on-chain metric from BGeometrics API.
-    Cached to CSV — re-runs skip the API entirely.
-    Includes retry on 429 rate-limit (up to 3 attempts with 10s delay).
-    Returns DataFrame with ['date', metric_name] or None on failure.
+    Fetch REAL on-chain metric from BGeometrics API (FALLBACK only).
+    Used for SOPR which CoinMetrics doesn't offer for free.
     """
     cache_key = f'bgeometrics_{metric_name}'
     cached = _load_cache(cache_key)
@@ -163,7 +225,6 @@ def fetch_bgeometrics_metric(metric_name, token='7NqNRwWhyc'):
                 print(f"[DATA] BGeometrics {metric_name}: HTTP 429 rate-limit (attempt {attempt+1}/3)")
                 continue
             if resp.status_code != 200:
-                print(f"[DATA] BGeometrics {metric_name}: HTTP {resp.status_code}")
                 return None
             data = resp.json()
             if not isinstance(data, list) or len(data) == 0:
@@ -180,11 +241,9 @@ def fetch_bgeometrics_metric(metric_name, token='7NqNRwWhyc'):
             df = pd.DataFrame(records).drop_duplicates(subset='date').sort_values('date').reset_index(drop=True)
             print(f"[DATA] BGeometrics {metric_name}: {len(df)} records "
                   f"({df['date'].iloc[0]} to {df['date'].iloc[-1]})")
-            # Save to cache
             _save_cache(cache_key, df)
             return df
         except Exception as e:
-            print(f"[DATA] BGeometrics {metric_name} fetch failed: {e}")
             if attempt == 2:
                 return None
     return None
@@ -285,13 +344,24 @@ def build_master_dataframe(years=5):
     else:
         used_cache['price'] = os.path.exists(_cache_path('binance_btc_prices'))
 
-    # --- Step 2: REAL On-Chain from BGeometrics (or cache) ---
-    print("\n[DATA] Fetching on-chain metrics (BGeometrics or cache)...")
-    time.sleep(3)  # 3s delay between requests to avoid rate-limit
-    mvrv_df = fetch_bgeometrics_metric('mvrv')
-    time.sleep(5)  # Longer delay after first request
-    nupl_df = fetch_bgeometrics_metric('nupl')
-    time.sleep(5)
+    # --- Step 2: REAL On-Chain Metrics ---
+    # PRIMARY:   CoinMetrics Community API (CapMVRVCur) — FREE, high rate limit
+    # DERIVED:   NUPL = 1 - (1/MVRV) — mathematically identical to on-chain NUPL
+    # FALLBACK:  BGeometrics SOPR (rate-limited) → Proxy (Price/EMA30)
+    data_start = price_df['date'].iloc[0]
+    data_end = price_df['date'].iloc[-1]
+
+    print(f"\n[DATA] === ON-CHAIN DATA PIPELINE ===")
+    print(f"        Primary source: CoinMetrics Community API (CapMVRVCur)")
+    print(f"        NUPL: Derived from MVRV (NUPL = 1 - 1/MVRV)")
+    print(f"        SOPR: BGeometrics fallback -> Proxy (Price/EMA30)")
+
+    # Fetch REAL MVRV from CoinMetrics
+    mvrv_df = fetch_coinmetrics_mvrv(data_start, data_end)
+    nupl_df = None  # Will be derived from MVRV
+
+    # Try BGeometrics SOPR (non-critical, proxy is acceptable)
+    time.sleep(2)
     sopr_df = fetch_bgeometrics_metric('sopr')
 
     # Merge on-chain data
@@ -301,8 +371,6 @@ def build_master_dataframe(years=5):
     onchain_df['sopr'] = np.nan
     if mvrv_df is not None:
         onchain_df = onchain_df.drop(columns=['mvrv']).merge(mvrv_df, on='date', how='left')
-    if nupl_df is not None:
-        onchain_df = onchain_df.drop(columns=['nupl']).merge(nupl_df, on='date', how='left')
     if sopr_df is not None:
         onchain_df = onchain_df.drop(columns=['sopr']).merge(sopr_df, on='date', how='left')
 
@@ -313,42 +381,58 @@ def build_master_dataframe(years=5):
     for col in ['mvrv', 'nupl', 'sopr']:
         master[col] = master[col].ffill(limit=2)
 
-    # --- Step 3: Proxy fallback for any remaining NaN ---
+    # --- Step 3: Proxy fallback ---
     master['sma_365'] = master['price_usd'].rolling(365, min_periods=1).mean()
+    # MVRV proxy (only if CoinMetrics failed)
     master['mvrv_proxy'] = master['price_usd'] / master['sma_365']
     master['mvrv'] = master['mvrv'].fillna(master['mvrv_proxy'])
+
+    # NUPL: DERIVE from real MVRV where available, proxy otherwise
+    # Real: NUPL = 1 - (1/MVRV)   [on-chain identity]
+    # Proxy: NUPL = (Price - SMA365) / Price
+    master['nupl_real'] = 1.0 - (1.0 / master['mvrv'])
     nupl_proxy = (master['price_usd'] - master['sma_365']) / master['price_usd']
+    # Use derived NUPL where MVRV is real (not proxy), else proxy
+    master['nupl'] = master['nupl'].fillna(master['nupl_real'])
     master['nupl'] = master['nupl'].fillna(nupl_proxy)
+    master.drop(columns=['nupl_real'], inplace=True)
+
+    # SOPR proxy: Price/EMA30
     ema30 = master['price_usd'].ewm(span=30, adjust=False).mean()
     sopr_proxy = master['price_usd'] / ema30
     master['sopr'] = master['sopr'].fillna(sopr_proxy)
 
     # Report data coverage
     real_mvrv_count = len(mvrv_df) if mvrv_df is not None else 0
-    real_nupl_count = len(nupl_df) if nupl_df is not None else 0
     real_sopr_count = len(sopr_df) if sopr_df is not None else 0
-    proxy_count = len(master) - max(real_mvrv_count, real_nupl_count, real_sopr_count)
+    # NUPL is derived from MVRV, so same count
+    real_nupl_count = real_mvrv_count
 
     print(f"\n[DATA] === DATA SOURCE SUMMARY ===")
     print(f"        Price:  Binance REAL ({len(master)} days)")
-    print(f"        MVRV:   BGeometrics REAL ({real_mvrv_count}d) + Proxy ({max(0,proxy_count)}d)")
-    print(f"        NUPL:   BGeometrics REAL ({real_nupl_count}d) + Proxy ({max(0,proxy_count)}d)")
-    print(f"        SOPR:   BGeometrics REAL ({real_sopr_count}d) + Proxy ({max(0,proxy_count)}d)")
+    print(f"        MVRV:   CoinMetrics REAL ({real_mvrv_count}d) + Proxy ({max(0, len(master)-real_mvrv_count)}d)")
+    print(f"        NUPL:   Derived from MVRV ({real_nupl_count}d) + Proxy ({max(0, len(master)-real_nupl_count)}d)")
+    print(f"        SOPR:   BGeometrics REAL ({real_sopr_count}d) + Proxy ({max(0, len(master)-real_sopr_count)}d)")
     print(f"        Cache dir: {CACHE_DIR}/")
     print(f"        Cache TTL : {CACHE_MAX_AGE_HOURS}h (7 days)")
     print(f"        To force re-fetch: rm {CACHE_DIR}/*.csv")
 
-    # Proxy limitation warning
-    if real_mvrv_count == 0:
-        print(f"\n  [!] WARNING: All on-chain metrics use PROXY (BGeometrics rate-limited).")
+    if real_mvrv_count > 0:
+        real_mvrv_range = master[master['mvrv'].notna()]['mvrv']
+        # Get the real MVRV range (not proxy)
+        if mvrv_df is not None:
+            print(f"\n        [OK] REAL MVRV range: {mvrv_df['mvrv'].min():.3f} - {mvrv_df['mvrv'].max():.3f}")
+            print(f"             Days with MVRV > 2.5: {(mvrv_df['mvrv'] > 2.5).sum()}")
+            print(f"             Days with MVRV > 3.0: {(mvrv_df['mvrv'] > 3.0).sum()}")
+    else:
+        print(f"\n  [!] WARNING: MVRV uses PROXY (CoinMetrics failed).")
         print(f"      Proxy MVRV = Price/SMA365 (range ~0.4-2.1) vs Real MVRV (range ~0.5-7.0).")
-        print(f"      Strategies with sell triggers (E, G v2) will fire LESS often.")
-        print(f"      To get REAL on-chain data, either:")
-        print(f"        1. Wait 10-15 min for rate-limit to reset, then re-run (cache keeps Binance data)")
-        print(f"        2. Manually place CSV files in {CACHE_DIR}/:")
-        print(f"           bgeometrics_mvrv.csv  (columns: date, mvrv)")
-        print(f"           bgeometrics_nupl.csv  (columns: date, nupl)")
-        print(f"           bgeometrics_sopr.csv  (columns: date, sopr)")
+        print(f"      Delete {CACHE_DIR}/coinmetrics_mvrv.csv and re-run to retry.")
+
+    if real_sopr_count == 0:
+        print(f"        [i] SOPR uses Proxy (Price/EMA30) — BGeometrics rate-limited.")
+        print(f"            SOPR is a secondary booster signal, impact is limited.")
+        print(f"            To get real SOPR: export from Dune.com or Glassnode and place in {CACHE_DIR}/")
 
     # Technical indicators
     master = compute_technical_indicators(master)
