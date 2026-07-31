@@ -1,2 +1,44 @@
+# Skills (internal)
 skills/
-node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Data cache (fetched from APIs)
+cache/
+
+# Output deliverables
+download/
+
+# Environment / secrets
+.env
+
+# Tool intermediate files
+tool-results/
+search_*.json
+
+# Upload staging
+upload/
+
+# Debug / one-off scripts
+diagnose_*.py
+check_*.py
+dump_*.py
+test_*.py
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Work log (internal)
+worklog.md
