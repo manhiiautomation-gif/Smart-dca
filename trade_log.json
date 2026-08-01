@@ -1,0 +1,38 @@
+[
+  {
+    "date": "2026-07-28",
+    "type": "buy",
+    "amount": 100.0,
+    "btc": 0.00123,
+    "price": 81300.0,
+    "fee": 0.15,
+    "reserve": 0
+  },
+  {
+    "date": "2026-07-29",
+    "type": "buy",
+    "amount": 100.0,
+    "btc": 0.00119,
+    "price": 84000.0,
+    "fee": 0.15,
+    "reserve": 0
+  },
+  {
+    "date": "2026-07-30",
+    "type": "buy",
+    "amount": 200.0,
+    "btc": 0.00245,
+    "price": 81600.0,
+    "fee": 0.3,
+    "reserve": 100
+  },
+  {
+    "date": "2026-07-31",
+    "type": "buy",
+    "amount": 100.0,
+    "btc": 0.00122,
+    "price": 82000.0,
+    "fee": 0.15,
+    "reserve": 0
+  }
+]

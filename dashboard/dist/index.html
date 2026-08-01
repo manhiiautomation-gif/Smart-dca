@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="refresh" content="86400">  <!-- Auto refresh daily -->
+    <title>Phoenix v5.1 Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #0d1117;
+            --card: #161b22;
+            --border: #30363d;
+            --text: #e6edf3;
+            --text-dim: #8b949e;
+            --green: #3fb950;
+            --green-bg: rgba(63,185,80,0.1);
+            --red: #f85149;
+            --red-bg: rgba(248,81,73,0.1);
+            --blue: #58a6ff;
+            --blue-bg: rgba(88,166,255,0.1);
+            --yellow: #d29922;
+            --yellow-bg: rgba(210,153,34,0.1);
+            --purple: #bc8cff;
+            --purple-bg: rgba(188,140,255,0.1);
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            padding: 16px;
+            max-width: 960px;
+            margin: 0 auto;
+        }
+        h1 { font-size: 1.5rem; margin-bottom: 4px; }
+        h2 { font-size: 1.1rem; margin-bottom: 12px; color: var(--text-dim); }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 0;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 16px;
+        }
+        .header-left h1 { display: inline; }
+        .header-right { display: flex; align-items: center; gap: 8px; }
+        .status-badge {
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.85rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .status-badge.alive { background: var(--green-bg); color: var(--green); border: 1px solid var(--green); }
+        .status-badge.killed { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }
+        .pulse {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--green);
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        .tag {
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .tag.green { background: var(--green-bg); color: var(--green); }
+        .tag.red { background: var(--red-bg); color: var(--red); }
+        .tag.yellow { background: var(--yellow-bg); color: var(--yellow); }
+        .tag.blue { background: var(--blue-bg); color: var(--blue); }
+        .tag.neutral { background: rgba(139,148,158,0.1); color: var(--text-dim); }
+        .grid { display: grid; gap: 16px; margin-bottom: 16px; }
+        .grid-2 { grid-template-columns: 1fr 1fr; }
+        .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+        @media (max-width: 640px) {
+            .grid-2, .grid-3 { grid-template-columns: 1fr; }
+        }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px;
+        }
+        .card-title {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-dim);
+            margin-bottom: 12px;
+        }
+        .metric { margin-bottom: 10px; }
+        .metric-label { font-size: 0.8rem; color: var(--text-dim); }
+        .metric-value { font-size: 1.4rem; font-weight: 700; }
+        .metric-value.green { color: var(--green); }
+        .metric-value.red { color: var(--red); }
+        .metric-value.blue { color: var(--blue); }
+        .metric-value.yellow { color: var(--yellow); }
+        .metric-value.purple { color: var(--purple); }
+        .metric-value.dim { color: var(--text-dim); }
+        .metric-sub { font-size: 0.8rem; color: var(--text-dim); }
+        .ind-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .ind-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 10px;
+            border-radius: 6px;
+            background: rgba(255,255,255,0.02);
+        }
+        .ind-item .label { font-size: 0.8rem; color: var(--text-dim); }
+        .ind-item .val { font-weight: 600; font-size: 0.85rem; }
+        .ind-item .val.green { color: var(--green); }
+        .ind-item .val.red { color: var(--red); }
+        .ind-item .val.blue { color: var(--blue); }
+        .ind-item .val.yellow { color: var(--yellow); }
+        .score-bar {
+            height: 24px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            overflow: hidden;
+            position: relative;
+            margin-top: 8px;
+        }
+        .score-fill {
+            height: 100%;
+            border-radius: 12px;
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            padding-left: 10px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: white;
+        }
+        .score-fill.green { background: var(--green); }
+        .score-fill.yellow { background: var(--yellow); }
+        .score-fill.red { background: var(--red); }
+        table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        th { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text-dim); font-size: 0.75rem; text-transform: uppercase; }
+        td { padding: 6px 10px; border-bottom: 1px solid rgba(48,54,61,0.5); }
+        tr.buy td:nth-child(2) { color: var(--green); font-weight: 600; }
+        tr.sell td:nth-child(2) { color: var(--red); font-weight: 600; }
+        td.empty { text-align: center; color: var(--text-dim); padding: 20px; }
+        .chart-container { width: 100%; height: 280px; }
+        .kill-detail { font-size: 0.8rem; color: var(--text-dim); margin-top: 6px; }
+        .footer {
+            text-align: center;
+            color: var(--text-dim);
+            font-size: 0.75rem;
+            padding: 16px 0;
+            border-top: 1px solid var(--border);
+            margin-top: 16px;
+        }
+        .mvrv-zone {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .mvrv-zone.green { background: var(--green-bg); color: var(--green); }
+        .mvrv-zone.blue { background: var(--blue-bg); color: var(--blue); }
+        .mvrv-zone.yellow { background: var(--yellow-bg); color: var(--yellow); }
+        .mvrv-zone.red { background: var(--red-bg); color: var(--red); }
+        .mvrv-zone.neutral { background: rgba(139,148,158,0.1); color: var(--text-dim); }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="header-left">
+            <h1>Phoenix v5.1</h1>
+            <span class="tag yellow">DRY RUN</span>
+        </div>
+        <div class="header-right">
+            <div class="status-badge alive">
+            <span class="pulse"></span> BOT ACTIVE
+        </div>
+        </div>
+    </div>
+
+    <!-- Row 1: Portfolio + Kill Switch -->
+    <div class="grid grid-2">
+        <!-- Portfolio Summary -->
+        <div class="card">
+            <div class="card-title">Portfolio Summary</div>
+            <div class="metric">
+                <div class="metric-label">Portfolio Value</div>
+                <div class="metric-value green">629.40 USDT</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">BTC Holdings</div>
+                <div class="metric-value blue">0.00380000 BTC</div>
+                <div class="metric-sub">308.94 USDT</div>
+            </div>
+            <div class="metric">
+                <div class="metric-label">Cash Balance</div>
+                <div class="metric-value">320.00 USDT</div>
+            </div>
+            <div class="grid grid-2" style="margin-top:12px; gap:8px;">
+                <div class="metric">
+                    <div class="metric-label">ROI</div>
+                    <div class="metric-value green">+25.9%</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Total Invested</div>
+                    <div class="metric-value dim">500.00 USDT</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Peak Value</div>
+                    <div class="metric-value dim">680.00</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Max Drawdown</div>
+                    <div class="metric-value red">8.0%</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Status + Kill Switch -->
+        <div class="card">
+            <div class="card-title">System Status</div>
+            <div class="ind-grid">
+                <div class="ind-item">
+                    <span class="label">L1 Kill (env)</span>
+                    <span class="val"><span class="tag green">ON</span></span>
+                </div>
+                <div class="ind-item">
+                    <span class="label">L2 Kill (file)</span>
+                    <span class="val"><span class="tag green">ON</span></span>
+                </div>
+                <div class="ind-item">
+                    <span class="label">Exchange</span>
+                    <span class="val">USDT</span>
+                </div>
+                <div class="ind-item">
+                    <span class="label">Last Run</span>
+                    <span class="val">2026-08-01</span>
+                </div>
+                <div class="ind-item">
+                    <span class="label">Run Count</span>
+                    <span class="val">5</span>
+                </div>
+                <div class="ind-item">
+                    <span class="label">BTC Price</span>
+                    <span class="val">81,300.00 USDT</span>
+                </div>
+            </div>
+            
+        </div>
+    </div>
+
+    <!-- Row 2: Indicators -->
+    <div class="grid grid-2">
+        <div class="card">
+            <div class="card-title">Indicators</div>
+            
+            <div class="ind-grid" style="margin-top:8px;">
+                <div class="ind-item">
+                    <span class="label">MVRV</span>
+                    <span class="val yellow">2.150</span>
+                </div>
+                <div class="ind-item">
+                    <span class="label">MVRV Zone</span>
+                    <span class="mvrv-zone yellow">Euphoria</span>
+                </div>
+                <div class="ind-item">
+                    <span class="label">MVRV %ile</span>
+                    <span class="val">72.0%</span>
+                </div>
+                <div class="ind-item">
+                    <span class="label">MVRV Z</span>
+                    <span class="val">1.40</span>
+                </div>
+                <div class="ind-item">
+                    <span class="label">RSI (14)</span>
+                    <span class="val blue">58.3</span>
+                </div>
+                <div class="ind-item">
+                    <span class="label">MACD Hist</span>
+                    <span class="val">12.5000</span>
+                </div>
+                <div class="ind-item">
+                    <span class="label">NUPL</span>
+                    <span class="val">0.535</span>
+                </div>
+                <div class="ind-item">
+                    <span class="label">SOPR</span>
+                    <span class="val">1.020</span>
+                </div>
+                <div class="ind-item">
+                    <span class="label">SMA 200</span>
+                    <span class="val">79,500.00</span>
+                </div>
+                <div class="ind-item">
+                    <span class="label">SMA 365</span>
+                    <span class="val">65,000.00</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sell Logic -->
+        <div class="card">
+            <div class="card-title">Sell Logic</div>
+            <div class="metric">
+                <div class="metric-label">Sell Score <span class="tag blue">Path: none</span></div>
+                <div class="score-bar">
+                    <div class="score-fill green" style="width:25%">
+                        25 / 100
+                    </div>
+                </div>
+            </div>
+            <div class="ind-grid" style="margin-top:12px;">
+                <div class="ind-item">
+                    <span class="label">Cooldown</span>
+                    <span class="val">0 days</span>
+                </div>
+                <div class="ind-item">
+                    <span class="label">ATH</span>
+                    <span class="val">124,000.00</span>
+                </div>
+            </div>
+            <div style="margin-top:16px;">
+                <div class="card-title">Trade Statistics</div>
+                <div class="ind-grid">
+                    <div class="ind-item">
+                        <span class="label">Total Buys</span>
+                        <span class="val green">5</span>
+                    </div>
+                    <div class="ind-item">
+                        <span class="label">Total Sells</span>
+                        <span class="val red">1</span>
+                    </div>
+                    <div class="ind-item">
+                        <span class="label">BTC Bought</span>
+                        <span class="val">0.00580000</span>
+                    </div>
+                    <div class="ind-item">
+                        <span class="label">BTC Sold</span>
+                        <span class="val">0.00200000</span>
+                    </div>
+                    <div class="ind-item">
+                        <span class="label">Sell Proceeds</span>
+                        <span class="val">280.00</span>
+                    </div>
+                    <div class="ind-item">
+                        <span class="label">Reserve Used</span>
+                        <span class="val">0.00</span>
+                    </div>
+                    <div class="ind-item">
+                        <span class="label">Total Fees</span>
+                        <span class="val yellow">1.17</span>
+                    </div>
+                    <div class="ind-item">
+                        <span class="label">Last Trade</span>
+                        <span class="val"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Row 3: Portfolio Chart -->
+    <div class="card" style="margin-bottom:16px;">
+        <div class="card-title">Portfolio Value Over Time</div>
+        <div class="chart-container" id="chart"></div>
+    </div>
+
+    <!-- Row 4: Recent Trades -->
+    <div class="card">
+        <div class="card-title">Recent Trades (last 10)</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Amount (USDT)</th>
+                    <th>BTC</th>
+                    <th>Price</th>
+                    <th>Fee</th>
+                </tr>
+            </thead>
+            <tbody>
+                
+        <tr class="buy">
+            <td>2026-07-31</td>
+            <td class="buy">BUY</td>
+            <td>100.00 USDT</td>
+            <td>0.00122000</td>
+            <td>82,000.00</td>
+            <td>0.15</td>
+        </tr>
+        <tr class="buy">
+            <td>2026-07-30</td>
+            <td class="buy">BUY</td>
+            <td>200.00 USDT</td>
+            <td>0.00245000</td>
+            <td>81,600.00</td>
+            <td>0.30</td>
+        </tr>
+        <tr class="buy">
+            <td>2026-07-29</td>
+            <td class="buy">BUY</td>
+            <td>100.00 USDT</td>
+            <td>0.00119000</td>
+            <td>84,000.00</td>
+            <td>0.15</td>
+        </tr>
+        <tr class="buy">
+            <td>2026-07-28</td>
+            <td class="buy">BUY</td>
+            <td>100.00 USDT</td>
+            <td>0.00123000</td>
+            <td>81,300.00</td>
+            <td>0.15</td>
+        </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+        Phoenix v5.1 DCA Bot | Generated: 2026-08-01 08:47:19 | Updated daily
+    </div>
+
+    <!-- ECharts -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+    <script>
+        (function() {
+            var dates = ["2026-07-28", "2026-07-29", "2026-07-30", "2026-07-31", "2026-08-01"];
+            var values = [-500.15, -497.02, -503.21, -501.37, 629.4];
+            var types = ["buy", "buy", "buy", "buy", "current"];
+
+            if (dates.length === 0) {
+                document.getElementById('chart').innerHTML =
+                    '<div style="text-align:center;color:var(--text-dim);padding:40px;">ยังไม่มีข้อมูลเพียงพอสำหรับกราฟ</div>';
+                return;
+            }
+
+            var buyDates = [], sellDates = [];
+            var buyPoints = [], sellPoints = [];
+            for (var i = 0; i < types.length; i++) {
+                if (types[i] === 'buy') { buyDates.push(dates[i]); buyPoints.push(values[i]); }
+                if (types[i] === 'sell') { sellDates.push(dates[i]); sellPoints.push(values[i]); }
+            }
+
+            var option = {
+                backgroundColor: 'transparent',
+                tooltip: {
+                    trigger: 'axis',
+                    backgroundColor: '#1c2128',
+                    borderColor: '#30363d',
+                    textStyle: { color: '#e6edf3', fontSize: 12 }
+                },
+                grid: { left: 60, right: 20, top: 20, bottom: 40 },
+                xAxis: {
+                    type: 'category',
+                    data: dates,
+                    axisLabel: { color: '#8b949e', fontSize: 10, rotate: 30 },
+                    axisLine: { lineStyle: { color: '#30363d' } }
+                },
+                yAxis: {
+                    type: 'value',
+                    axisLabel: { color: '#8b949e', fontSize: 10, formatter: function(v) { return v.toLocaleString(); } },
+                    splitLine: { lineStyle: { color: '#21262d' } }
+                },
+                series: [
+                    {
+                        name: 'Portfolio',
+                        type: 'line',
+                        data: values,
+                        smooth: true,
+                        lineStyle: { color: '#58a6ff', width: 2 },
+                        areaStyle: {
+                            color: {
+                                type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                                colorStops: [
+                                    { offset: 0, color: 'rgba(88,166,255,0.2)' },
+                                    { offset: 1, color: 'rgba(88,166,255,0.01)' }
+                                ]
+                            }
+                        },
+                        itemStyle: { color: '#58a6ff' }
+                    },
+                    {
+                        name: 'Buy',
+                        type: 'scatter',
+                        data: buyPoints.length ? buyPoints.map(function(v, i) { return [buyDates[i], v]; }) : [],
+                        symbol: 'triangle',
+                        symbolSize: 12,
+                        itemStyle: { color: '#3fb950' },
+                        tooltip: { formatter: function(p) { return 'BUY<br>Value: ' + p.value[1].toLocaleString(); } }
+                    },
+                    {
+                        name: 'Sell',
+                        type: 'scatter',
+                        data: sellPoints.length ? sellPoints.map(function(v, i) { return [sellDates[i], v]; }) : [],
+                        symbol: 'triangle',
+                        symbolRotate: 180,
+                        symbolSize: 12,
+                        itemStyle: { color: '#f85149' },
+                        tooltip: { formatter: function(p) { return 'SELL<br>Value: ' + p.value[1].toLocaleString(); } }
+                    }
+                ]
+            };
+
+            var chart = echarts.init(document.getElementById('chart'));
+            chart.setOption(option);
+            window.addEventListener('resize', function() { chart.resize(); });
+        })();
+    </script>
+</body>
+</html>

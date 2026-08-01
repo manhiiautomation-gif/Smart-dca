@@ -1,7 +1,7 @@
 '''Phoenix v5.1 Bot Engine.
 
-Orchestrates: fetch data, compute indicators, run strategy,
-execute trades, update state, send notifications.
+Orchestrates: kill switch check, fetch data, compute indicators,
+run strategy, execute trades, update state, record trade log, send notifications.
 '''
 
 import math
@@ -13,6 +13,7 @@ from . import indicators as ind
 from . import strategy
 from . import state as state_mod
 from . import notifier
+from . import kill_switch as ks_mod
 
 
 def _fetch_price_history(exchange) -> list:
@@ -46,14 +47,51 @@ def _get_btc_balance(exchange) -> float:
     return 0.0
 
 
-def run_daily(exchange, bot_state: dict, dry_run: bool = False) -> dict:
-    '''Main daily run. Returns updated state.'''
+def run_daily(exchange, bot_state: dict, dry_run: bool = False,
+              trade_log_path: str = 'trade_log.json',
+              kill_switch_path: str = 'kill_switch.json') -> dict:
+    '''Main daily run. Returns updated state.
+
+    Steps:
+        0. Idempotency guard
+        -1. Kill switch check (L1 + L2)
+        1.  Fetch price & history
+        2.  Compute indicators
+        3.  Get MVRV
+        4.  Get balances
+        5.  Convert budget
+        6.  Decrement cooldown
+        7.  Run strategy
+        8.  Execute trades
+        9.  Update state + trade log
+        10. Snapshot indicators for dashboard
+        11. Send notification
+    '''
     currency = exchange.currency
     today = date.today()
 
     # ── 0. Idempotency guard: skip if already ran today ──
     if bot_state.get('last_run_date') == today.isoformat():
         print(f'[BOT] Already ran today ({today}). Skipping to prevent duplicate trades.')
+        return bot_state
+
+    # ── -1. Kill Switch Check ──
+    is_alive, kill_reason = ks_mod.check_kill_switch(kill_switch_path)
+    if not is_alive:
+        print(f'[BOT] KILLED: {kill_reason}')
+        # Still fetch indicators for dashboard, but skip all trading
+        try:
+            price = exchange.get_price()
+            _snapshot_indicators(bot_state, price, currency, dry_run,
+                                  exchange, killed=True, kill_reason=kill_reason)
+        except Exception as e:
+            print(f'[BOT] Could not fetch indicators for dashboard: {e}')
+        notifier.send_telegram(
+            f'Phoenix v5.1 KILLED: {kill_reason}\n'
+            f'No trades executed. Dashboard still updated.'
+        )
+        bot_state['last_run_date'] = today.isoformat()
+        bot_state['run_count'] += 1
         return bot_state
 
     # ── 1. Fetch current price ──
@@ -99,7 +137,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False) -> dict:
     if math.isnan(mvrv_val):
         print(f'[BOT] WARNING: No embedded MVRV for {today}. Skipping.')
         notifier.send_telegram(
-            f'Phoenix v5.1 WARNING: No MVRV data for {today}. '  
+            f'Phoenix v5.1 WARNING: No MVRV data for {today}. '
             'Embedded data may need updating. Skipping trade.'
         )
         return bot_state
@@ -150,13 +188,17 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False) -> dict:
         base_budget=base_budget, max_buy=max_buy,
     )
 
-    print(f'[BOT] Decision: buy={decision["buy_amount"]:.2f} '  
-          f'sell={decision["sell_amount"]:.2f} '  
+    print(f'[BOT] Decision: buy={decision["buy_amount"]:.2f} '
+          f'sell={decision["sell_amount"]:.2f} '
           f'score={decision["sell_score"]} path={decision["path_taken"]}')
 
     # ── 9. Execute trades ──
     buy_fee = 0.0
     sell_fee = 0.0
+    buy_btc_got = 0.0
+    sell_btc_sold = 0.0
+    buy_cost_actual = 0.0
+    sell_proceeds_actual = 0.0
 
     # BUY
     if decision['buy_amount'] > 0:
@@ -177,16 +219,18 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False) -> dict:
         print(f'[BOT] BUYING {decision["buy_amount"]:.2f} {currency} of BTC...')
         try:
             result = exchange.market_buy(decision['buy_amount'])
-            btc_got = result.get('executed_qty', result.get('amount', 0))
-            cost = result.get('cummulative_quote_qty', result.get('cost', decision['buy_amount']))
-            fee = result.get('fee', cost * config.BUY_FEE_PCT)
-            buy_fee = float(fee)
-            bot_state['total_btc_bought'] += float(btc_got)
-            print(f'[BOT] Bought {btc_got:.8f} BTC for {cost:.2f} {currency} (fee: {buy_fee:.2f})')
+            buy_btc_got = float(result.get('executed_qty', result.get('amount', 0)))
+            buy_cost_actual = float(result.get('cummulative_quote_qty', result.get('cost', decision['buy_amount'])))
+            buy_fee = float(result.get('fee', buy_cost_actual * config.BUY_FEE_PCT))
+            bot_state['total_btc_bought'] += buy_btc_got
+            print(f'[BOT] Bought {buy_btc_got:.8f} BTC for {buy_cost_actual:.2f} {currency} (fee: {buy_fee:.2f})')
         except Exception as e:
             print(f'[BOT] BUY ERROR: {e}')
             decision['buy_amount'] = 0
     elif decision['buy_amount'] > 0 and dry_run:
+        buy_btc_got = decision['buy_amount'] / price
+        buy_cost_actual = decision['buy_amount']
+        buy_fee = buy_cost_actual * config.BUY_FEE_PCT
         print(f'[BOT] [DRY RUN] Would buy {decision["buy_amount"]:.2f} {currency}')
 
     # SELL
@@ -202,18 +246,20 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False) -> dict:
             print(f'[BOT] SELLING {btc_to_sell:.8f} BTC (~{decision["sell_amount"]:.2f} {currency})...')
             try:
                 result = exchange.market_sell(btc_to_sell)
-                btc_sold = result.get('executed_qty', result.get('amount', 0))
-                proceeds = result.get('cummulative_quote_qty', result.get('cost', decision['sell_amount']))
-                fee = result.get('fee', proceeds * config.SELL_FEE_PCT)
-                sell_fee = float(fee)
-                bot_state['total_btc_sold'] += float(btc_sold)
+                sell_btc_sold = float(result.get('executed_qty', result.get('amount', 0)))
+                sell_proceeds_actual = float(result.get('cummulative_quote_qty', result.get('cost', decision['sell_amount'])))
+                sell_fee = float(result.get('fee', sell_proceeds_actual * config.SELL_FEE_PCT))
+                bot_state['total_btc_sold'] += sell_btc_sold
                 # Update cash reserve after sell
-                cash_balance += float(proceeds) - sell_fee
-                print(f'[BOT] Sold {btc_sold:.8f} BTC for {proceeds:.2f} {currency} (fee: {sell_fee:.2f})')
+                cash_balance += sell_proceeds_actual - sell_fee
+                print(f'[BOT] Sold {sell_btc_sold:.8f} BTC for {sell_proceeds_actual:.2f} {currency} (fee: {sell_fee:.2f})')
             except Exception as e:
                 print(f'[BOT] SELL ERROR: {e}')
                 decision['sell_amount'] = 0
     elif decision['sell_amount'] > 0 and dry_run:
+        sell_btc_sold = decision['sell_amount'] / price
+        sell_proceeds_actual = decision['sell_amount']
+        sell_fee = sell_proceeds_actual * config.SELL_FEE_PCT
         print(f'[BOT] [DRY RUN] Would sell {decision["sell_amount"]:.2f} {currency} of BTC')
 
     # ── 10. Update state ──
@@ -222,9 +268,25 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False) -> dict:
         buy_fee=buy_fee, sell_fee=sell_fee
     )
 
+    # Record trades in trade log
+    if decision['buy_amount'] > 0 and buy_btc_got > 0:
+        state_mod.append_trade_log(
+            trade_log_path, 'buy', buy_cost_actual, buy_btc_got,
+            price, buy_fee,
+            extra={'reserve': round(decision.get('reserve_injection', 0), 2)}
+        )
+
+    if decision['sell_amount'] > 0 and sell_btc_sold > 0:
+        state_mod.append_trade_log(
+            trade_log_path, 'sell', sell_proceeds_actual, sell_btc_sold,
+            price, sell_fee,
+            extra={'path': decision.get('path_taken', ''),
+                   'score': decision.get('sell_score', 0)}
+        )
+
     # Track portfolio value
-    current_btc = _get_btc_balance(exchange) if not dry_run else btc_balance
-    current_cash = _get_cash_balance(exchange) if not dry_run else cash_balance
+    current_btc = _get_btc_balance(exchange) if not dry_run else btc_balance + buy_btc_got - sell_btc_sold
+    current_cash = _get_cash_balance(exchange) if not dry_run else cash_balance - buy_cost_actual + sell_proceeds_actual - buy_fee - sell_fee
     portfolio = current_btc * price + current_cash
 
     if portfolio > bot_state['peak_value']:
@@ -234,7 +296,35 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False) -> dict:
         if dd > bot_state['max_drawdown']:
             bot_state['max_drawdown'] = dd
 
-    # ── 11. Send notification ──
+    # ── 11. Snapshot indicators for dashboard ──
+    bot_state['last_indicators'] = {
+        'price': round(price, 2),
+        'mvrv': round(mvrv_val, 3),
+        'mvrv_pct': round(mvrv_pct, 3),
+        'mvrv_z': round(mvrv_z, 2),
+        'rsi': round(rsi_val, 1),
+        'macd_h': round(macd_h, 4),
+        'nupl': round(nupl, 3),
+        'sopr': round(sopr, 3),
+        'sma_200': round(sma_200, 2) if not math.isnan(sma_200) else None,
+        'sma_365': round(sma_365, 2) if not math.isnan(sma_365) else None,
+        'macd_bear': macd_bear,
+        'macd_declining': macd_declining,
+        'rsi_divergence': rsi_div,
+        'ath': round(ath, 2),
+        'sell_score': decision.get('sell_score', 0),
+        'path_taken': decision.get('path_taken', 'none'),
+        'in_bear': decision.get('in_bear', False),
+        'cooldown': decision.get('new_cooldown', 0),
+    }
+    bot_state['last_btc_balance'] = round(current_btc, 8)
+    bot_state['last_cash_balance'] = round(current_cash, 2)
+    bot_state['last_portfolio_value'] = round(portfolio, 2)
+    bot_state['last_price'] = round(price, 2)
+    bot_state['last_exchange_currency'] = currency
+    bot_state['last_dry_run'] = dry_run
+
+    # ── 12. Send notification ──
     msg = notifier.format_report(
         decision, price, mvrv_val, current_btc, current_cash,
         currency, dry_run
@@ -246,3 +336,53 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False) -> dict:
 
     print(f'[BOT] Done. Portfolio: {portfolio:,.2f} {currency}')
     return bot_state
+
+
+def _snapshot_indicators(bot_state: dict, price: float, currency: str,
+                         dry_run: bool, exchange, killed: bool = False,
+                         kill_reason: str = ''):
+    '''Fetch and snapshot indicators when bot is killed (for dashboard).'''
+    try:
+        klines = _fetch_price_history_with_dates(exchange)
+        closes = [k['close'] for k in klines]
+        if len(closes) < 50:
+            return
+
+        sma_200 = ind.sma(closes, 200)
+        sma_365 = ind.sma(closes, 365)
+        rsi_val = ind.rsi(closes, 14)
+        _, _, macd_h = ind.macd(closes)
+        ath = max(closes) if closes else 0
+        ema30 = ind.ema(closes, 30)
+        sopr = price / ema30 if ema30 > 0 else 1.0
+
+        today = date.today()
+        mvrv_val = strategy.get_mvrv_for_date(today)
+        mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val) if not math.isnan(mvrv_val) else 0
+        mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val) if not math.isnan(mvrv_val) else 0
+        nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 and not math.isnan(mvrv_val) else 0
+
+        bot_state['last_indicators'] = {
+            'price': round(price, 2),
+            'mvrv': round(mvrv_val, 3) if not math.isnan(mvrv_val) else None,
+            'mvrv_pct': round(mvrv_pct, 3),
+            'mvrv_z': round(mvrv_z, 2),
+            'rsi': round(rsi_val, 1),
+            'macd_h': round(macd_h, 4),
+            'nupl': round(nupl, 3),
+            'sopr': round(sopr, 3),
+            'sma_200': round(sma_200, 2) if not math.isnan(sma_200) else None,
+            'sma_365': round(sma_365, 2) if not math.isnan(sma_365) else None,
+            'ath': round(ath, 2),
+            'sell_score': 0,
+            'path_taken': 'killed',
+            'in_bear': price < sma_200 if not math.isnan(sma_200) else False,
+            'cooldown': bot_state.get('cooldown', 0),
+            'killed': True,
+            'kill_reason': kill_reason,
+        }
+        bot_state['last_price'] = round(price, 2)
+        bot_state['last_exchange_currency'] = currency
+        bot_state['last_dry_run'] = dry_run
+    except Exception as e:
+        print(f'[BOT] Indicator snapshot failed: {e}')

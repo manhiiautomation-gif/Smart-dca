@@ -12,6 +12,7 @@ Environment variables (or GitHub Secrets):
     TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
     DAILY_BUDGET_THB, MAX_BUY_THB, USD_THB_RATE
     DRY_RUN=true
+    BOT_ENABLED=true   # Kill switch L1
 '''
 
 import argparse
@@ -55,6 +56,10 @@ def main():
         config.DAILY_BUDGET_THB = args.budget
     state_path = args.state_file or config.STATE_FILE
 
+    # Derive paths relative to project root
+    trade_log_path = os.path.join(PROJECT_ROOT, 'trade_log.json')
+    kill_switch_path = os.path.join(PROJECT_ROOT, 'kill_switch.json')
+
     print(f'========================================')
     print(f'  Phoenix v5.1 Live Bot')
     print(f'  Exchange: {exchange_name.upper()}')
@@ -91,16 +96,18 @@ def main():
     print(f'[BOT] State loaded: run #{bot_state["run_count"]} '
           f'cooldown={bot_state["cooldown"]} sells={bot_state["sell_count"]}')
 
-    # ── Run engine (or dry-run stub) ──
+    # ── Run engine ──
     if dry_run:
         print('[BOT] DRY RUN MODE — no real trades')
-        # For dry run without API keys, we need a minimal client
-        # Create a mock that can still fetch public data
         if exchange is None:
             exchange = cls('__dummy_key__', '__dummy_secret__')
 
     try:
-        bot_state = engine.run_daily(exchange, bot_state, dry_run=dry_run)
+        bot_state = engine.run_daily(
+            exchange, bot_state, dry_run=dry_run,
+            trade_log_path=trade_log_path,
+            kill_switch_path=kill_switch_path,
+        )
     except Exception as e:
         print(f'[BOT] FATAL ERROR: {e}')
         import traceback

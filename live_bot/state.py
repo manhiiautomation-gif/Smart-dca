@@ -26,6 +26,15 @@ DEFAULT_STATE = {
     'last_sell_date': '',
     'run_count': 0,
     'cumulative_fees': 0.0,
+    # Last known indicators (for dashboard when bot is killed)
+    'last_indicators': {},
+    # Last known balances
+    'last_btc_balance': 0.0,
+    'last_cash_balance': 0.0,
+    'last_portfolio_value': 0.0,
+    'last_price': 0.0,
+    'last_exchange_currency': 'USDT',
+    'last_dry_run': False,
     # Price cache for indicator calculation (list of [date_str, price])
     'price_history': [],
 }
@@ -82,3 +91,46 @@ def update_state_after_run(state: dict, decision: dict,
         state['last_sell_date'] = today
 
     return state
+
+
+def load_trade_log(path: str = 'trade_log.json') -> list:
+    """Load trade log from JSON file."""
+    if os.path.exists(path):
+        with open(path, 'r') as f:
+            return json.load(f)
+    return []
+
+
+def append_trade_log(log_path: str, trade_type: str, amount: float,
+                     btc_amount: float, price: float, fee: float = 0.0,
+                     extra: dict = None):
+    """Append a trade record to the trade log. Atomic write."""
+    log = load_trade_log(log_path)
+    record = {
+        'date': date.today().isoformat(),
+        'type': trade_type,  # 'buy' or 'sell'
+        'amount': round(amount, 2),
+        'btc': round(btc_amount, 8),
+        'price': round(price, 2),
+        'fee': round(fee, 2),
+    }
+    if extra:
+        record.update(extra)
+    log.append(record)
+    # Keep last 500 trades max to prevent file bloat
+    if len(log) > 500:
+        log = log[-500:]
+    # Atomic save
+    import tempfile
+    dir_name = os.path.dirname(log_path) or '.'
+    os.makedirs(dir_name, exist_ok=True)
+    try:
+        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
+        with os.fdopen(fd, 'w') as f:
+            json.dump(log, f, indent=2, default=str)
+        os.replace(tmp_path, log_path)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+    return record
