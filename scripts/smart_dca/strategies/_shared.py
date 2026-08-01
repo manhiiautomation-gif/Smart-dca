@@ -55,16 +55,22 @@ def precompute_rsi_divergence(df, lookback=40):
 
 
 def precompute_mvrv_percentile(df, window=365):
-    """Rolling percentile rank of MVRV over window days.
+    """Rolling percentile rank of MVRV over adaptive window days.
 
     Returns array where 0.0 = lowest MVRV in window, 1.0 = highest.
     This adapts to diminishing MVRV peaks across cycles.
+
+    FIX (v5): Uses min(window, current_index) so Path B is not blind
+    during the first 365 days. Starts producing valid percentiles
+    after only 30 days of data (minimum viable window).
     """
+    MIN_WINDOW = 30
     mvrv = df['mvrv'].values
     n = len(mvrv)
     pct = np.zeros(n)
-    for i in range(window, n):
-        w = mvrv[i - window:i]
+    for i in range(MIN_WINDOW, n):
+        w_size = min(window, i)
+        w = mvrv[i - w_size:i]
         valid = w[~np.isnan(w)]
         if len(valid) > 10:
             pct[i] = np.searchsorted(np.sort(valid), mvrv[i]) / len(valid)
