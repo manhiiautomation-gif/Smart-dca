@@ -54,7 +54,6 @@ from ..config import BASE_BUDGET_THB
 from ._shared import (
     precompute_macd_signals,
     precompute_rsi_divergence,
-    precompute_mvrv_percentile,
     precompute_short_trend_sell,
 )
 
@@ -62,7 +61,18 @@ from ._shared import (
 def strategy_style_phoenix_v5(df_precomputed):
     macd_cross_bear, hist_declining_5 = precompute_macd_signals(df_precomputed)
     rsi_divergence = precompute_rsi_divergence(df_precomputed, lookback=40)
-    mvrv_pct = precompute_mvrv_percentile(df_precomputed, window=365)
+
+    # FIX (Risk 1): Use PRE-WARMED percentile from data pipeline
+    # (computed on 2015+ MVRV data, not just backtest window)
+    if 'mvrv_pct' in df_precomputed.columns:
+        mvrv_pct = df_precomputed['mvrv_pct'].values
+    else:
+        # Fallback: compute locally (no warm-up, first 365d = 0)
+        from ._shared import precompute_mvrv_percentile
+        mvrv_pct = precompute_mvrv_percentile(df_precomputed, window=365)
+
+    # NEW: MVRV Z-Score (from data pipeline, pre-warmed)
+    mvrv_zscore = df_precomputed['mvrv_zscore'].values if 'mvrv_zscore' in df_precomputed.columns else np.zeros(len(df_precomputed))
     sma_200 = df_precomputed['sma_200'].values
     realized_price = df_precomputed['realized_price'].values
     lth_rp = df_precomputed['lth_realized_price'].values
@@ -157,6 +167,14 @@ def strategy_style_phoenix_v5(df_precomputed):
             sell_score += 12
         if pct_val >= 0.97:
             sell_score += 8
+
+        # NEW: MVRV Z-Score bonus (normalizes across cycles)
+        # Z > 3 = statistically extreme, Z > 4 = historically rare top zone
+        z_val = mvrv_zscore[idx] if idx < len(mvrv_zscore) else 0
+        if z_val > 3.0:
+            sell_score += 8
+        if z_val > 4.0:
+            sell_score += 7
 
         # Momentum
         if rsi > 70:    sell_score += 10
