@@ -2,50 +2,40 @@
 
 Addresses ALL 8 identified risks from v4 analysis:
 
-  RISK 1 (Cold-Start):    Uses adaptive percentile window in _shared.py
-                            Path B starts working after 30 days instead of 365.
+  RISK 1 (Cold-Start):    Solved in data_pipeline.py — pre-warmed MVRV
+                            percentile from 2015+ extended historical data.
 
-  RISK 2 (False Trigger):  Path B sells are CAPPED at 15% portfolio max.
-                            Even if Path B triggers during mid-cycle rallies,
-                            the damage is limited.
+  RISK 2 (False Trigger):  Path B sells CAPPED at 8% portfolio max.
+                            Conservative sizing prevents mid-cycle damage.
 
-  RISK 3 (50% Too Big):    Graduated 4-tier sells: 4/10/25/40% (was 4/15/50%)
-                            Plus 50% absolute cap remains for extreme scores.
+  RISK 3 (50% Too Big):    Graduated 4-tier sells: 4/8/18/40% (was 4/15/50%)
+                            Top tier reduced from 50% to 40%.
 
   RISK 4 (Path B Score):   SEPARATE score thresholds:
-                            Path A (MVRV > 2.5): score >= 40 (proven)
-                            Path B (adaptive):     score >= 28 (lower because less
-                            MVRV absolute scoring available at low MVRV)
+                            Path A (MVRV > 2.5): score >= 45 (proven)
+                            Path B (adaptive):     score >= 44 (high bar)
 
-  RISK 5 (No Short-Trend): Re-added short-trend sell with MVRV > 2.0 gate.
-                            Only activates when MVRV is elevated (> 2.0),
-                            preventing sells during deep bear (MVRV < 2.0).
-                            Size: 2% portfolio, cooldown 20d.
+  RISK 5 (Short-Trend):    REMOVED — caused loss-making sells at MVRV 2.0-2.5.
+                            v4 proved short-trend sell is net-negative.
 
-  RISK 6 (MVRV Proxy):    Strategy-level mitigation: if proxy is detected
-                            (price/sma_365 ~= mvrv), lower Path A threshold
-                            to 1.8 since proxy systematically underestimates.
+  RISK 6 (MVRV Proxy):    Proxy detection: if detected, lower Path A MVRV
+                            gate to 1.8 since proxy underestimates.
 
-  RISK 7 (Long Cooldown):  Reduced cooldowns: 15/25/35d (was 20/35/50d)
-                            Allows more sells during extended tops.
+  RISK 7 (Cooldown):       Moderate cooldowns: 18/22/28/35d
+                            Balance between capturing tops and over-trading.
 
-  RISK 8 (Low Vol):        Addressed by Risk 4 fix — Path B now works
-                            at low MVRV (1.8-2.5) with score >= 28.
+  RISK 8 (Low Vol):        Path B at score >= 44 with MVRV > 1.8 catches
+                            low-vol cycle peaks with strong multi-confirm.
 
-Sell Tiers (Path A):
-  score >= 80  -> Sell 40% portfolio, cooldown 35d
-  score >= 65  -> Sell 25% portfolio, cooldown 25d
-  score >= 50  -> Sell 10% portfolio, cooldown 20d
-  score >= 40  -> Sell  4% portfolio, cooldown 15d
+Sell Tiers (Path A — MVRV > 2.5 absolute):
+  score >= 75  -> Sell 40% portfolio, cooldown 35d
+  score >= 60  -> Sell 18% portfolio, cooldown 28d
+  score >= 50  -> Sell  8% portfolio, cooldown 22d
+  score >= 45  -> Sell  4% portfolio, cooldown 18d
 
-Sell Tiers (Path B — capped at 15% max):
-  score >= 45  -> Sell 15% portfolio, cooldown 25d
-  score >= 35  -> Sell  8% portfolio, cooldown 20d
-  score >= 28  -> Sell  4% portfolio, cooldown 15d
-
-Short-Trend Sell (secondary):
-  Price -15% from 60d high + above SMA200 + MVRV > 2.0
-  Size: 2% portfolio, cooldown 20d
+Sell Tiers (Path B — adaptive, capped at 8% max):
+  score >= 56  -> Sell  8% portfolio, cooldown 28d
+  score >= 44  -> Sell  4% portfolio, cooldown 22d
 """
 
 import numpy as np
@@ -54,7 +44,6 @@ from ..config import BASE_BUDGET_THB
 from ._shared import (
     precompute_macd_signals,
     precompute_rsi_divergence,
-    precompute_short_trend_sell,
 )
 
 
@@ -71,7 +60,7 @@ def strategy_style_phoenix_v5(df_precomputed):
         from ._shared import precompute_mvrv_percentile
         mvrv_pct = precompute_mvrv_percentile(df_precomputed, window=365)
 
-    # NEW: MVRV Z-Score (from data pipeline, pre-warmed)
+    # MVRV Z-Score (from data pipeline, pre-warmed)
     mvrv_zscore = df_precomputed['mvrv_zscore'].values if 'mvrv_zscore' in df_precomputed.columns else np.zeros(len(df_precomputed))
     sma_200 = df_precomputed['sma_200'].values
     realized_price = df_precomputed['realized_price'].values
@@ -82,9 +71,6 @@ def strategy_style_phoenix_v5(df_precomputed):
     # RISK 6: Proxy detection — compute proxy inline for comparison
     sma_365 = df_precomputed.get('sma_365', df_precomputed['price_usd'].rolling(365, min_periods=1).mean()).values
     price_arr = df_precomputed['price_usd'].values
-
-    # Precompute short-trend sell signal
-    short_trend_sell = precompute_short_trend_sell(df_precomputed, sma_200, lookback_60=60)
 
     def strategy_func(state):
         row = state['row']
@@ -222,55 +208,39 @@ def strategy_style_phoenix_v5(df_precomputed):
         sell_thb = 0.0
         new_cooldown = cooldown
 
-        if path_a and sell_score >= 40 and cooldown == 0 and btc > 0:
+        if path_a and sell_score >= 45 and cooldown == 0 and btc > 0:
             # Path A: Full sell tiers (proven absolute trigger)
-            if sell_score >= 80:
+            if sell_score >= 75:
                 sell_thb = portfolio_val * 0.40
                 new_cooldown = 35
-            elif sell_score >= 65:
-                sell_thb = portfolio_val * 0.25
-                new_cooldown = 25
+            elif sell_score >= 60:
+                sell_thb = portfolio_val * 0.18
+                new_cooldown = 28
             elif sell_score >= 50:
-                sell_thb = portfolio_val * 0.10
-                new_cooldown = 20
-            else:  # 40-49
-                sell_thb = portfolio_val * 0.04
-                new_cooldown = 15
-
-        elif path_b and not path_a and sell_score >= 28 and cooldown == 0 and btc > 0:
-            # Path B: Capped sell tiers (RISK 2 FIX: max 15%)
-            # Lower score threshold (28 vs 40) because less MVRV
-            # absolute scoring available at low MVRV.
-            # But cap at 15% since Path B is less certain.
-            if sell_score >= 45:
-                sell_thb = portfolio_val * 0.15
-                new_cooldown = 25
-            elif sell_score >= 35:
                 sell_thb = portfolio_val * 0.08
-                new_cooldown = 20
-            else:  # 28-34
+                new_cooldown = 22
+            else:  # 45-49
                 sell_thb = portfolio_val * 0.04
-                new_cooldown = 15
+                new_cooldown = 18
 
-        # ═══ SHORT-TREND SELL (RISK 5 FIX: re-added with MVRV > 2.0 gate) ═══
-        sell_thb_secondary = 0.0
-        short_cd = state.get('short_cooldown', 0)
-        new_short_cd = max(short_cd - 1, 0) if short_cd > 0 else 0
+        elif path_b and not path_a and sell_score >= 44 and cooldown == 0 and btc > 0:
+            # Path B: Conservative capped tiers (RISK 2 FIX: max 8%)
+            if sell_score >= 56:
+                sell_thb = portfolio_val * 0.08
+                new_cooldown = 28
+            else:  # 44-55
+                sell_thb = portfolio_val * 0.04
+                new_cooldown = 22
 
-        if (short_trend_sell[idx] and new_short_cd == 0 and btc > 0
-                and sell_thb == 0 and mvrv > 2.0):
-            # Only activates when MVRV > 2.0 (elevated, not deep bear)
-            sell_thb_secondary = min(portfolio_val * 0.02, 10000.0)
-            new_short_cd = 20
-
-        total_sell = sell_thb + sell_thb_secondary
+        # ═══ NO SHORT-TREND SELL (RISK 5: removed — caused loss-making sells) ═══
+        total_sell = sell_thb
 
         return {
             'buy_thb': buy_amount, 'sell_btc_pct': 0,
             'sell_thb': total_sell, 'to_reserve': to_reserve,
             'new_cooldown': new_cooldown, 'sell_score': sell_score,
             'reserve_injection': reserve_inj,
-            'new_short_cooldown': new_short_cd,
+            'new_short_cooldown': 0,
         }
 
     return strategy_func
