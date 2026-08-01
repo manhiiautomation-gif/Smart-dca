@@ -170,11 +170,16 @@ def backtest_strategy(df, strategy_func, strategy_name):
 
         daily_log.append({
             'date': row['date'], 'price_thb': price_thb,
+            'price_usd': row['price_usd'],
             'btc': btc, 'cash_reserve': cash_reserve,
             'total_invested': total_invested,
             'portfolio_value': portfolio_value,
             'avg_cost': adjusted_avg_cost,
             'max_drawdown_so_far': max_drawdown,
+            'sell_event_thb': total_sell_value_thb,
+            'buy_event_thb': buy_thb,
+            'reserve_event_thb': reserve_injection,
+            'mvrv': row['mvrv'],
         })
 
     final_price = df.iloc[-1]['price_thb']
