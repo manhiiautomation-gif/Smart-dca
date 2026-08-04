@@ -43,7 +43,12 @@ jobs:
           DAILY_BUDGET_THB: ${{ github.event.inputs.budget || '100' }}
           MAX_BUY_THB: ${{ secrets.MAX_BUY_THB || '1000' }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
-        run: python live_bot/main.py --exchange bitkub --state-file live_bot/state.json
+        run: |
+          FLAGS="--exchange bitkub --state-file live_bot/state.json"
+          if [ "${{ github.event.inputs.dry_run }}" != "false" ]; then
+            FLAGS="$FLAGS --dry-run"
+          fi
+          python live_bot/main.py $FLAGS
 
       - name: Generate dashboard
         run: python scripts/generate_dashboard.py

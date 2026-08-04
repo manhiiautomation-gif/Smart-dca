@@ -29,21 +29,38 @@ def _fetch_price_history_with_dates(exchange) -> list:
 
 def _get_cash_balance(exchange) -> float:
     '''Get available cash in exchange currency.'''
-    if hasattr(exchange, 'get_usdt_balance'):
-        return exchange.get_usdt_balance()
-    balances = exchange.get_balance()
-    if isinstance(balances, dict):
-        return balances.get(exchange.currency, 0.0)
+    try:
+        if hasattr(exchange, 'get_usdt_balance'):
+            return exchange.get_usdt_balance()
+        # Prefer robust get_balances() if available (Bitkub)
+        if hasattr(exchange, 'get_balances'):
+            balances = exchange.get_balances()
+        elif hasattr(exchange, 'get_balance'):
+            balances = exchange.get_balance()
+        else:
+            return 0.0
+        if isinstance(balances, dict):
+            return balances.get(exchange.currency, 0.0)
+    except Exception as e:
+        print(f'[BOT] WARNING: Could not fetch cash balance: {e}')
     return 0.0
 
 
 def _get_btc_balance(exchange) -> float:
     '''Get available BTC balance.'''
-    if hasattr(exchange, 'get_balance'):
-        bal = exchange.get_balance()
+    try:
+        # Prefer robust get_balances() if available (Bitkub)
+        if hasattr(exchange, 'get_balances'):
+            bal = exchange.get_balances()
+        elif hasattr(exchange, 'get_balance'):
+            bal = exchange.get_balance()
+        else:
+            return 0.0
         if isinstance(bal, dict):
             return bal.get('BTC', 0.0)
         return float(bal)
+    except Exception as e:
+        print(f'[BOT] WARNING: Could not fetch BTC balance: {e}')
     return 0.0
 
 

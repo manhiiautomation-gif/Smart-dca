@@ -69,9 +69,10 @@ class BitkubClient:
     def get_balance(self) -> dict:
         '''Get wallet balances. Returns {'BTC': float, 'THB': float}.'''
         path = '/api/v3/market/wallet'
-        headers = self._auth_headers(path)
+        body = '{}'
+        headers = self._auth_headers(path, body=body)
         resp = requests.post(
-            f'{self.BASE_URL}{path}', headers=headers, timeout=10
+            f'{self.BASE_URL}{path}', headers=headers, data=body, timeout=10
         )
         resp.raise_for_status()
         data = resp.json()['result']
@@ -127,6 +128,32 @@ class BitkubClient:
     def get_usdt_balance(self) -> float:
         '''Not applicable for Bitkub (THB only).'''
         return 0.0
+
+    def get_balances(self) -> dict:
+        '''Get wallet balances. Returns {'BTC': float, 'THB': float}.
+
+        Tries multiple endpoint variants for compatibility.
+        '''
+        # Variant 1: POST /api/v3/market/wallet with empty body
+        for path in ['/api/v3/market/wallet', '/api/v3/wallet']:
+            body = '{}'
+            headers = self._auth_headers(path, body=body)
+            try:
+                resp = requests.post(
+                    f'{self.BASE_URL}{path}', headers=headers, data=body, timeout=10
+                )
+                resp.raise_for_status()
+                data = resp.json().get('result', resp.json())
+                if isinstance(data, dict):
+                    return {
+                        'BTC': float(data.get('btc', {}).get('available', 0)),
+                        'THB': float(data.get('thb', {}).get('available', 0)),
+                    }
+            except Exception:
+                continue
+        # All variants failed — return zeros (bot will use 0 balance)
+        print('[BITKUB] WARNING: Could not fetch wallet balance. Using 0.')
+        return {'BTC': 0.0, 'THB': 0.0}
 
     @property
     def currency(self) -> str:
