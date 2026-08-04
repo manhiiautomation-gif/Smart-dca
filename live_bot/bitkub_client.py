@@ -47,15 +47,9 @@ class BitkubClient:
         )
         resp.raise_for_status()
         body = resp.json()
-        if isinstance(body, list):
-            for item in body:
-                if isinstance(item, dict) and self.SYMBOL in item:
-                    return float(item[self.SYMBOL]['last'])
-            raise RuntimeError(f"Symbol {self.SYMBOL} not found in ticker")
-        data = body.get('result', {})
-        if not data or self.SYMBOL not in data:
-            raise RuntimeError(f"Bitkub API error: {body}")
-        return float(data[self.SYMBOL]['last'])
+        if isinstance(body, list) and body:
+            return float(body[0]['last'])
+        raise RuntimeError(f"Bitkub API error: {body}")
 
     def get_ohlcv(self, days: int = 365) -> list:
         '''Get daily OHLCV. Returns list of {''date'': date, ''close'': float}.'''
