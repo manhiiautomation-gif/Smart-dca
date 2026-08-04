@@ -156,9 +156,14 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
 
     print(f'[BOT] MVRV={mvrv_val:.3f} Pct={mvrv_pct:.3f} Z={mvrv_z:.2f} NUPL={nupl:.3f}')
 
-    # ── 5. Get exchange balances ──
-    btc_balance = _get_btc_balance(exchange)
-    cash_balance = _get_cash_balance(exchange)
+    # ── 5. Get exchange balances (skip API call in dry run) ──
+    if dry_run:
+        btc_balance = 0.0
+        cash_balance = 0.0
+        print(f'[BOT] Balances: DRY RUN (skip API)')
+    else:
+        btc_balance = _get_btc_balance(exchange)
+        cash_balance = _get_cash_balance(exchange)
     print(f'[BOT] Balances: BTC={btc_balance:.8f} Cash={cash_balance:,.2f} {currency}')
 
     # ── 6. Convert budget to exchange currency ──

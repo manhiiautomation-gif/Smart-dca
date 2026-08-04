@@ -67,10 +67,10 @@ class BitkubClient:
         return result
 
     def get_balance(self) -> dict:
-        '''Get wallet balances. Returns {''BTC'': float, ''THB'': float}.'''
+        '''Get wallet balances. Returns {'BTC': float, 'THB': float}.'''
         path = '/api/v3/market/wallet'
         headers = self._auth_headers(path)
-        resp = requests.get(
+        resp = requests.post(
             f'{self.BASE_URL}{path}', headers=headers, timeout=10
         )
         resp.raise_for_status()
