@@ -571,11 +571,11 @@ def build_html(**kw) -> str:
                     <span class="val">{fmt_num(current_price)} {currency}</span>
                 </div>
             </div>
-            {f'''<div class="kill-detail" style="margin-top:12px; color:var(--red);">
-                Reason: {ks_reason}<br>
-                At: {ks_time}<br>
-                By: {ks_by}
-            </div>''' if not bot_alive else ''}
+            {('<div class="kill-detail" style="margin-top:12px; color:var(--red);">'
+              + f'Reason: {ks_reason}<br>'
+              + f'At: {ks_time}<br>'
+              + f'By: {ks_by}'
+              + '</div>') if not bot_alive else ''}
         </div>
     </div>
 
