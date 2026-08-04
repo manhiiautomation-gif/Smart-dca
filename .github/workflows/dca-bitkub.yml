@@ -2,14 +2,14 @@ name: Phoenix v5.1 DCA - Bitkub
 
 on:
   schedule:
-    # Every day at 01:00 Bangkok time (18:00 UTC previous day)
-    - cron: '0 18 * * *'
+    # Run daily at 08:00 Bangkok time (01:00 UTC)
+    - cron: '0 1 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
         description: 'Dry run (no real trades)'
         type: boolean
-        default: false
+        default: true
       budget:
         description: 'Daily budget in THB'
         type: number
@@ -19,16 +19,15 @@ jobs:
   dca:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # for committing state.json
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_PAT }}
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
       - name: Install dependencies
         run: pip install -r live_bot/requirements.txt
@@ -40,14 +39,23 @@ jobs:
           BITKUB_API_SECRET: ${{ secrets.BITKUB_API_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BOT_ENABLED: ${{ secrets.BOT_ENABLED || 'true' }}
           DAILY_BUDGET_THB: ${{ github.event.inputs.budget || '100' }}
-          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
-        run: python live_bot/main.py
+          MAX_BUY_THB: ${{ secrets.MAX_BUY_THB || '1000' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
+        run: python live_bot/main.py --exchange bitkub --state-file live_bot/state.json
 
-      - name: Commit state changes
+      - name: Generate dashboard
+        run: python scripts/generate_dashboard.py
+
+      - name: Commit updated files
         run: |
           git config user.name "Phoenix Bot"
-          git config user.email "bot@github.com"
-          git add live_bot/state.json 2>/dev/null || true
-          git diff --staged --quiet || git commit -m "bot: update state $(date -u +%Y-%m-%d)"
-          git push
+          git config user.email "phoenix-bot@users.noreply.github.com"
+          git add live_bot/state.json trade_log.json dashboard/dist/index.html
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "bot: bitkub update $(date +%Y-%m-%d)"
+            git push
+          fi
