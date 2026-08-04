@@ -52,13 +52,12 @@ class BitkubClient:
         raise RuntimeError(f"Bitkub API error: {body}")
 
     def get_ohlcv(self, days: int = 365) -> list:
-        """Get daily OHLCV using Binance public API for historical data.
+        """Get daily OHLCV using CoinGecko public API.
         Returns list of {'date': date, 'close': float}."""
         resp = requests.get(
-            'https://api.binance.com/api/v3/klines',
-            params={'symbol': 'BTCUSDT', 'interval': '1d',
-                    'limit': min(days, 1000)},
-            timeout=15
+            'https://api.coingecko.com/api/v3/coins/bitcoin/ohlc',
+            params={'vs_currency': 'thb', 'days': min(days, 365)},
+            timeout=30
         )
         resp.raise_for_status()
         result = []
