@@ -42,7 +42,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           DAILY_BUDGET_THB: ${{ github.event.inputs.budget || '100' }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
-          USD_THB_RATE: '36'
+          USD_THB_RATE: '33.426'
         run: python live_bot/main.py
 
       - name: Commit state changes

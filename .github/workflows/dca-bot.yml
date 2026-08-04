@@ -53,7 +53,7 @@ jobs:
           BOT_ENABLED: ${{ secrets.BOT_ENABLED || 'true' }}
           DAILY_BUDGET_THB: ${{ secrets.DAILY_BUDGET_THB || '100' }}
           MAX_BUY_THB: ${{ secrets.MAX_BUY_THB || '1000' }}
-          USD_THB_RATE: ${{ secrets.USD_THB_RATE || '36' }}
+          USD_THB_RATE: ${{ secrets.USD_THB_RATE || '33.426' }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
           EXCHANGE: binance
         run: |

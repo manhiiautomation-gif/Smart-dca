@@ -5,7 +5,7 @@ import os
 # ── Trading Parameters ──
 DAILY_BUDGET_THB = float(os.environ.get('DAILY_BUDGET_THB', '100'))
 MAX_BUY_THB = float(os.environ.get('MAX_BUY_THB', '1000'))
-USD_THB_RATE = float(os.environ.get('USD_THB_RATE', '36'))
+USD_THB_RATE = float(os.environ.get('USD_THB_RATE', '33.426'))
 
 # ── Exchange ──
 EXCHANGE = os.environ.get('EXCHANGE', 'binance').lower()  # 'binance' or 'bitkub'
