@@ -22,7 +22,8 @@ on:
 
 # Prevent concurrent runs
 concurrency:
-  bot: {}
+  group: bot
+  cancel-in-progress: true
 
 jobs:
   trade:
