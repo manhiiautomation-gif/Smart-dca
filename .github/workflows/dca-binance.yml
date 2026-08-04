@@ -1,0 +1,54 @@
+name: Phoenix v5.1 DCA - Binance
+
+on:
+  schedule:
+    # Every day at 01:00 Bangkok time (18:00 UTC previous day)
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (no real trades)'
+        type: boolean
+        default: false
+      budget:
+        description: 'Daily budget in THB'
+        type: number
+        default: 100
+
+jobs:
+  dca:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # for committing state.json
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r live_bot/requirements.txt
+
+      - name: Run Phoenix v5.1
+        env:
+          EXCHANGE: binance
+          BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
+          BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DAILY_BUDGET_THB: ${{ github.event.inputs.budget || '100' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          USD_THB_RATE: '36'
+        run: python live_bot/main.py
+
+      - name: Commit state changes
+        run: |
+          git config user.name "Phoenix Bot"
+          git config user.email "bot@github.com"
+          git add live_bot/state.json 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "bot: update state $(date -u +%Y-%m-%d)"
+          git push
