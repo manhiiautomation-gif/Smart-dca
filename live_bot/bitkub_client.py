@@ -15,7 +15,7 @@ from datetime import datetime
 
 class BitkubClient:
     BASE_URL = 'https://api.bitkub.com'
-        SYMBOL = 'BTC_THB'
+    SYMBOL = 'BTC_THB'
 
     def __init__(self, api_key: str, api_secret: str):
         self.api_key = api_key
