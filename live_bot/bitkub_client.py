@@ -39,8 +39,8 @@ class BitkubClient:
             'Content-Type': 'application/json',
         }
 
-        def get_price(self) -> float:
-        '''Current BTC price in THB.'''
+    def get_price(self) -> float:
+        """Current BTC price in THB."""
         resp = requests.get(
             f'{self.BASE_URL}/api/v3/market/ticker',
             params={'sym': self.SYMBOL}, timeout=10
