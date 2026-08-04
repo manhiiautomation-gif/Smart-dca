@@ -52,21 +52,19 @@ class BitkubClient:
         raise RuntimeError(f"Bitkub API error: {body}")
 
     def get_ohlcv(self, days: int = 365) -> list:
-        '''Get daily OHLCV. Returns list of {''date'': date, ''close'': float}.'''
-        from_ts = int((datetime.utcnow().timestamp() - days * 86400) * 1000)
+        """Get daily OHLCV using Binance public API for historical data.
+        Returns list of {'date': date, 'close': float}."""
         resp = requests.get(
-            f'{self.BASE_URL}/api/v3/market/tradingview',
-            params={'sym': self.SYMBOL, 'int': 'day', 'from': str(from_ts),
-                    'to': str(int(time.time() * 1000))},
+            'https://api.binance.com/api/v3/klines',
+            params={'symbol': 'BTCUSDT', 'interval': '1d',
+                    'limit': min(days, 1000)},
             timeout=15
         )
         resp.raise_for_status()
         result = []
-        for item in resp.json()['result']:
-            if not item:  # skip empty
-                continue
-            dt = datetime.fromtimestamp(item[0] / 1000).date()
-            result.append({'date': dt, 'close': float(item[4])})
+        for c in resp.json():
+            dt = datetime.fromtimestamp(c[0] / 1000).date()
+            result.append({'date': dt, 'close': float(c[4])})
         return result
 
     def get_balance(self) -> dict:
