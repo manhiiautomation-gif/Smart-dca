@@ -360,7 +360,7 @@
                     </div>
                     <div class="ind-item">
                         <span class="label">Last Trade</span>
-                        <span class="val"></span>
+                        <span class="val">—</span>
                     </div>
                 </div>
             </div>
@@ -388,55 +388,23 @@
                 </tr>
             </thead>
             <tbody>
-                
-        <tr class="buy">
-            <td>2026-07-31</td>
-            <td class="buy">BUY</td>
-            <td>100.00 THB</td>
-            <td>0.00122000</td>
-            <td>82,000.00</td>
-            <td>0.15</td>
-        </tr>
-        <tr class="buy">
-            <td>2026-07-30</td>
-            <td class="buy">BUY</td>
-            <td>200.00 THB</td>
-            <td>0.00245000</td>
-            <td>81,600.00</td>
-            <td>0.30</td>
-        </tr>
-        <tr class="buy">
-            <td>2026-07-29</td>
-            <td class="buy">BUY</td>
-            <td>100.00 THB</td>
-            <td>0.00119000</td>
-            <td>84,000.00</td>
-            <td>0.15</td>
-        </tr>
-        <tr class="buy">
-            <td>2026-07-28</td>
-            <td class="buy">BUY</td>
-            <td>100.00 THB</td>
-            <td>0.00123000</td>
-            <td>81,300.00</td>
-            <td>0.15</td>
-        </tr>
+                <tr><td colspan="6" class="empty">ยังไม่มี trades</td></tr>
             </tbody>
         </table>
     </div>
 
     <!-- Footer -->
     <div class="footer">
-        Phoenix v5.1 DCA Bot | Generated: 2026-08-04 12:42:21 | Updated daily
+        Phoenix v5.1 DCA Bot | Generated: 2026-08-04 14:11:22 | Updated daily
     </div>
 
     <!-- ECharts -->
     <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
     <script>
         (function() {
-            var dates = ["2026-07-28", "2026-07-29", "2026-07-30", "2026-07-31"];
-            var values = [-0.15, 2.98, -3.21, -1.37];
-            var types = ["buy", "buy", "buy", "buy"];
+            var dates = [];
+            var values = [];
+            var types = [];
 
             if (dates.length === 0) {
                 document.getElementById('chart').innerHTML =

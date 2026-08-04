@@ -82,44 +82,57 @@ def generate_dashboard(state_path='live_bot/state.json',
     indicators = state.get('last_indicators', {})
     currency = state.get('last_exchange_currency', 'USDT')
 
-    # Computed values
+    # Computed values from state (for portfolio snapshot)
     portfolio = state.get('last_portfolio_value', 0)
-    invested = state.get('total_invested', 0)
-    roi = ((portfolio - invested) / invested * 100) if invested > 0 else 0
-    peak = state.get('peak_value', 0)
-    max_dd = state.get('max_drawdown', 0)
     current_price = state.get('last_price', 0)
     btc_bal = state.get('last_btc_balance', 0)
     cash_bal = state.get('last_cash_balance', 0)
     last_run = state.get('last_run_date', '—')
     run_count = state.get('run_count', 0)
     dry_run = state.get('last_dry_run', False)
-    total_fees = state.get('cumulative_fees', 0)
+    peak = state.get('peak_value', 0)
+    max_dd = state.get('max_drawdown', 0)
 
-    # Time series for chart
+    # Trade statistics — computed from trade_log (source of truth)
+    tl_buys = [t for t in trade_log if t['type'] == 'buy']
+    tl_sells = [t for t in trade_log if t['type'] == 'sell']
+    buy_count = len(tl_buys)
+    sell_count = len(tl_sells)
+    total_btc_bought = sum(t['btc'] for t in tl_buys)
+    total_btc_sold = sum(t['btc'] for t in tl_sells)
+    invested = sum(t['amount'] for t in tl_buys)
+    total_sell_proceeds = sum(t['amount'] for t in tl_sells)
+    total_fees = sum(t.get('fee', 0) for t in trade_log)
+    total_reserve = sum(t.get('reserve', 0) for t in tl_buys)
+    last_trade_date = trade_log[-1]['date'] if trade_log else '—'
+    roi = ((portfolio - invested) / invested * 100) if invested > 0 else 0.0
+
+    # Time series for chart — value BTC at current price for accurate P&L
     portfolio_series = []
-    running_btc = 0.0
-    running_cash = invested * -1  # start with negative (invested)
-    for trade in trade_log:
-        if trade['type'] == 'buy':
-            running_btc += trade['btc']
-            running_cash -= trade['amount'] + trade.get('fee', 0)
-        else:
-            running_btc -= trade['btc']
-            running_cash += trade['amount'] - trade.get('fee', 0)
-        pv = running_btc * trade['price'] + running_cash
-        portfolio_series.append({
-            'date': trade['date'],
-            'value': round(pv, 2),
-            'type': trade['type']
-        })
-    # Add current point
-    if portfolio > 0 and (not portfolio_series or portfolio_series[-1]['date'] != last_run):
-        portfolio_series.append({
-            'date': last_run,
-            'value': round(portfolio, 2),
-            'type': 'current'
-        })
+    if trade_log and current_price > 0:
+        running_btc = 0.0
+        net_cash_out = 0.0
+        for trade in trade_log:
+            if trade['type'] == 'buy':
+                running_btc += trade['btc']
+                net_cash_out += trade['amount'] + trade.get('fee', 0)
+            else:
+                running_btc -= trade['btc']
+                net_cash_out -= trade['amount'] - trade.get('fee', 0)
+            # Value BTC at current price (realistic P&L)
+            pv = running_btc * current_price - net_cash_out
+            portfolio_series.append({
+                'date': trade['date'],
+                'value': round(pv, 2),
+                'type': trade['type']
+            })
+        # Add current snapshot point
+        if portfolio > 0 and (not portfolio_series or portfolio_series[-1]['date'] != last_run):
+            portfolio_series.append({
+                'date': last_run,
+                'value': round(portfolio, 2),
+                'type': 'current'
+            })
 
     # Recent trades (last 10)
     recent_trades = trade_log[-10:][::-1]  # newest first
@@ -157,12 +170,12 @@ def generate_dashboard(state_path='live_bot/state.json',
         btc_bal=btc_bal, cash_bal=cash_bal, currency=currency,
         last_run=last_run, run_count=run_count, dry_run=dry_run,
         total_fees=total_fees,
-        buy_count=state.get('buy_count', 0),
-        sell_count=state.get('sell_count', 0),
-        total_sell_proceeds=state.get('total_sell_proceeds', 0),
-        total_btc_bought=state.get('total_btc_bought', 0),
-        total_btc_sold=state.get('total_btc_sold', 0),
-        total_reserve=state.get('total_reserve_injected', 0),
+        buy_count=buy_count,
+        sell_count=sell_count,
+        total_sell_proceeds=total_sell_proceeds,
+        total_btc_bought=total_btc_bought,
+        total_btc_sold=total_btc_sold,
+        total_reserve=total_reserve,
         mvrv=mvrv, mvrv_pct=mvrv_pct, mvrv_z=mvrv_z,
         rsi_val=rsi_val, macd_h=macd_h, nupl=nupl, sopr=sopr,
         sma200=sma200, sma365=sma365, ath=ath,
@@ -170,7 +183,7 @@ def generate_dashboard(state_path='live_bot/state.json',
         in_bear=in_bear, cooldown=cooldown,
         portfolio_series=portfolio_series,
         recent_trades=recent_trades,
-        last_trade_date=state.get('last_trade_date', '—'),
+        last_trade_date=last_trade_date,
         now=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
     )
 
