@@ -9,8 +9,10 @@ Bitkub API v3 docs: https://github.com/bitkub/bitkub-official-api-docs
 import time
 import hmac
 import hashlib
+import io
+import zipfile
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta, date
 
 
 class BitkubClient:
@@ -52,8 +54,78 @@ class BitkubClient:
         raise RuntimeError(f"Bitkub API error: {body}")
 
     def get_ohlcv(self, days: int = 365) -> list:
-        """Get daily OHLCV using CoinGecko public API.
-        Returns list of {'date': date, 'close': float}."""
+        """Get daily OHLCV for indicators.
+
+        Priority:
+        1. Binance Vision (500+ days, public, no auth, no geo-block)
+        2. CoinGecko fallback (~90 days)
+        Returns list of {'date': date, 'close': float} in THB.
+        """
+        try:
+            result = self._ohlcv_binance_vision(days)
+            if len(result) >= 200:
+                print(f'[BITKUB] Got {len(result)} daily closes from Binance Vision')
+                return result
+            print(f'[BITKUB] Binance Vision returned only {len(result)} rows, trying CoinGecko...')
+        except Exception as e:
+            print(f'[BITKUB] Binance Vision failed: {e}. Falling back to CoinGecko...')
+        return self._ohlcv_coingecko(min(days, 365))
+
+    def _ohlcv_binance_vision(self, days: int) -> list:
+        """Download BTCUSDT daily klines from Binance Vision.
+
+        data.binance.vision serves static ZIP/CSV files — NOT geo-blocked
+        unlike api.binance.com.  Prices are converted USDT -> THB.
+        """
+        from live_bot import config
+
+        end = date.today()
+        start = end - timedelta(days=days + 60)
+
+        # Build YYYY-MM list
+        months = []
+        cur = start.replace(day=1)
+        while cur <= end:
+            months.append(cur.strftime('%Y-%m'))
+            if cur.month == 12:
+                cur = cur.replace(year=cur.year + 1, month=1)
+            else:
+                cur = cur.replace(month=cur.month + 1)
+
+        base_url = 'https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1d'
+        rate = config.USD_THB_RATE
+        seen = {}
+
+        for m in months:
+            url = f'{base_url}/BTCUSDT-1d-{m}.zip'
+            try:
+                resp = requests.get(url, timeout=30)
+                if resp.status_code == 404:
+                    continue  # current month may not exist yet
+                resp.raise_for_status()
+            except requests.HTTPError:
+                continue
+
+            # Unzip CSV in memory
+            zf = zipfile.ZipFile(io.BytesIO(resp.content))
+            csv_text = zf.read(zf.namelist()[0]).decode('utf-8')
+            for line in csv_text.strip().split('\n'):
+                parts = line.split(',')
+                if len(parts) < 5:
+                    continue
+                try:
+                    # Binance Vision uses microsecond timestamps (16 digits)
+                    dt = datetime.fromtimestamp(int(parts[0]) / 1_000_000).date()
+                    seen[dt] = float(parts[4]) * rate
+                except (ValueError, OSError):
+                    continue
+
+        # Sort, deduplicate, trim
+        result = [{'date': d, 'close': p} for d, p in sorted(seen.items())]
+        return result[-days:]
+
+    def _ohlcv_coingecko(self, days: int) -> list:
+        """Fallback: CoinGecko public API (~90 days max on free tier)."""
         resp = requests.get(
             'https://api.coingecko.com/api/v3/coins/bitcoin/ohlc',
             params={'vs_currency': 'thb', 'days': min(days, 365)},
