@@ -15,7 +15,7 @@ from datetime import datetime
 
 class BitkubClient:
     BASE_URL = 'https://api.bitkub.com'
-    SYMBOL = 'thb_btc'
+    SYMBOL = 'THB_BTC'
 
     def __init__(self, api_key: str, api_secret: str):
         self.api_key = api_key
@@ -39,14 +39,17 @@ class BitkubClient:
             'Content-Type': 'application/json',
         }
 
-    def get_price(self) -> float:
+        def get_price(self) -> float:
         '''Current BTC price in THB.'''
         resp = requests.get(
             f'{self.BASE_URL}/api/v3/market/ticker',
             params={'sym': self.SYMBOL}, timeout=10
         )
         resp.raise_for_status()
-        data = resp.json()['result'][self.SYMBOL]
+        body = resp.json()
+        if not body.get('result'):
+            raise RuntimeError(f"Bitkub API returned no result: {body}")
+        data = body['result'][self.SYMBOL]
         return float(data['last'])
 
     def get_ohlcv(self, days: int = 365) -> list:
