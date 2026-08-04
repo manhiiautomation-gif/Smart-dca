@@ -58,7 +58,7 @@ class BitkubClient:
 
         Priority:
         1. Binance Vision (500+ days, public, no auth, no geo-block)
-        2. CoinGecko fallback (~90 days)
+        2. CoinGecko fallback (~90 days daily, >90 days becomes weekly)
         Returns list of {'date': date, 'close': float} in THB.
         """
         try:
@@ -74,8 +74,12 @@ class BitkubClient:
     def _ohlcv_binance_vision(self, days: int) -> list:
         """Download BTCUSDT daily klines from Binance Vision.
 
-        data.binance.vision serves static ZIP/CSV files — NOT geo-blocked
+        data.binance.vision serves static ZIP/CSV files - NOT geo-blocked
         unlike api.binance.com.  Prices are converted USDT -> THB.
+        Binance Vision changed timestamp format in 2025:
+          - <=2024: 13-digit millisecond timestamps
+          - >=2025: 16-digit microsecond timestamps
+        Auto-detected by digit count.
         """
         from live_bot import config
 
@@ -114,8 +118,12 @@ class BitkubClient:
                 if len(parts) < 5:
                     continue
                 try:
-                    # Binance Vision uses microsecond timestamps (16 digits)
-                    dt = datetime.fromtimestamp(int(parts[0]) / 1_000_000).date()
+                    ts_raw = int(parts[0])
+                    # Auto-detect: >=16 digits = microseconds, else milliseconds
+                    if len(parts[0]) >= 16:
+                        dt = datetime.fromtimestamp(ts_raw / 1_000_000).date()
+                    else:
+                        dt = datetime.fromtimestamp(ts_raw / 1_000).date()
                     seen[dt] = float(parts[4]) * rate
                 except (ValueError, OSError):
                     continue
@@ -125,7 +133,7 @@ class BitkubClient:
         return result[-days:]
 
     def _ohlcv_coingecko(self, days: int) -> list:
-        """Fallback: CoinGecko public API (~90 days max on free tier)."""
+        """Fallback: CoinGecko public API (~90 days daily candles on free tier)."""
         resp = requests.get(
             'https://api.coingecko.com/api/v3/coins/bitcoin/ohlc',
             params={'vs_currency': 'thb', 'days': min(days, 365)},
@@ -153,10 +161,36 @@ class BitkubClient:
             'THB': float(data.get('thb', {}).get('available', 0)),
         }
 
+    def get_balances(self) -> dict:
+        '''Get wallet balances with multi-endpoint fallback.
+
+        Tries multiple endpoint variants for compatibility.
+        Returns {'BTC': float, 'THB': float}.
+        '''
+        for path in ['/api/v3/market/wallet', '/api/v3/wallet']:
+            body = '{}'
+            headers = self._auth_headers(path, body=body)
+            try:
+                resp = requests.post(
+                    f'{self.BASE_URL}{path}', headers=headers, data=body, timeout=10
+                )
+                resp.raise_for_status()
+                data = resp.json().get('result', resp.json())
+                if isinstance(data, dict):
+                    return {
+                        'BTC': float(data.get('btc', {}).get('available', 0)),
+                        'THB': float(data.get('thb', {}).get('available', 0)),
+                    }
+            except Exception:
+                continue
+        # All variants failed - return zeros (bot will use 0 balance)
+        print('[BITKUB] WARNING: Could not fetch wallet balance. Using 0.')
+        return {'BTC': 0.0, 'THB': 0.0}
+
     def market_buy(self, thb_amount: float) -> dict:
         '''Market buy BTC with THB.
 
-        Bitkub uses amount in THB for the ''amt'' field on bids.
+        Bitkub uses amount in THB for the 'amt' field on bids.
         '''
         path = '/api/v3/market/place-bid'
         body = f'{{"sym":"{self.SYMBOL}","amt":{thb_amount:.2f},"rat":0,"typ":"market"}}'
@@ -176,7 +210,7 @@ class BitkubClient:
     def market_sell(self, btc_amount: float) -> dict:
         '''Market sell BTC for THB.
 
-        Bitkub uses amount in BTC for the ''amt'' field on asks.
+        Bitkub uses amount in BTC for the 'amt' field on asks.
         '''
         path = '/api/v3/market/place-ask'
         body = f'{{"sym":"{self.SYMBOL}","amt":{btc_amount:.8f},"rat":0,"typ":"market"}}'
@@ -194,38 +228,12 @@ class BitkubClient:
         }
 
     def get_klines(self, days: int = 365) -> list:
-        '''Alias for get_ohlcv — compatible with engine.py interface.'''
+        '''Alias for get_ohlcv - compatible with engine.py interface.'''
         return self.get_ohlcv(days=days)
 
     def get_usdt_balance(self) -> float:
         '''Not applicable for Bitkub (THB only).'''
         return 0.0
-
-    def get_balances(self) -> dict:
-        '''Get wallet balances. Returns {'BTC': float, 'THB': float}.
-
-        Tries multiple endpoint variants for compatibility.
-        '''
-        # Variant 1: POST /api/v3/market/wallet with empty body
-        for path in ['/api/v3/market/wallet', '/api/v3/wallet']:
-            body = '{}'
-            headers = self._auth_headers(path, body=body)
-            try:
-                resp = requests.post(
-                    f'{self.BASE_URL}{path}', headers=headers, data=body, timeout=10
-                )
-                resp.raise_for_status()
-                data = resp.json().get('result', resp.json())
-                if isinstance(data, dict):
-                    return {
-                        'BTC': float(data.get('btc', {}).get('available', 0)),
-                        'THB': float(data.get('thb', {}).get('available', 0)),
-                    }
-            except Exception:
-                continue
-        # All variants failed — return zeros (bot will use 0 balance)
-        print('[BITKUB] WARNING: Could not fetch wallet balance. Using 0.')
-        return {'BTC': 0.0, 'THB': 0.0}
 
     @property
     def currency(self) -> str:
