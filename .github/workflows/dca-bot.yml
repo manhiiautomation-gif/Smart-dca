@@ -1,0 +1,90 @@
+name: Phoenix v5.1 DCA Bot
+
+on:
+  schedule:
+    # Run daily at 08:00 Bangkok time (01:00 UTC)
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+    inputs:
+      exchange:
+        description: 'Exchange'
+        required: true
+        default: 'binance'
+        type: choice
+        options:
+          - binance
+          - bitkub
+      dry_run:
+        description: 'Dry run (no real trades)'
+        required: false
+        default: true
+        type: boolean
+
+# Prevent concurrent runs
+concurrency:
+  bot: {}
+
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r live_bot/requirements.txt
+
+      - name: Run bot (Binance)
+        if: ${{ (github.event.inputs.exchange || 'binance') == 'binance' }}
+        env:
+          BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
+          BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BOT_ENABLED: ${{ secrets.BOT_ENABLED || 'true' }}
+          DAILY_BUDGET_THB: ${{ secrets.DAILY_BUDGET_THB || '100' }}
+          MAX_BUY_THB: ${{ secrets.MAX_BUY_THB || '1000' }}
+          USD_THB_RATE: ${{ secrets.USD_THB_RATE || '36' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
+          EXCHANGE: binance
+        run: |
+          python live_bot/main.py --exchange binance --state-file live_bot/state.json
+
+      - name: Run bot (Bitkub)
+        if: ${{ (github.event.inputs.exchange || 'binance') == 'bitkub' }}
+        env:
+          BITKUB_API_KEY: ${{ secrets.BITKUB_API_KEY }}
+          BITKUB_API_SECRET: ${{ secrets.BITKUB_API_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BOT_ENABLED: ${{ secrets.BOT_ENABLED || 'true' }}
+          DAILY_BUDGET_THB: ${{ secrets.DAILY_BUDGET_THB || '100' }}
+          MAX_BUY_THB: ${{ secrets.MAX_BUY_THB || '1000' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
+          EXCHANGE: bitkub
+        run: |
+          python live_bot/main.py --exchange bitkub --state-file live_bot/state.json
+
+      - name: Generate dashboard
+        run: |
+          python scripts/generate_dashboard.py
+
+      - name: Commit updated files
+        run: |
+          git config user.name "Phoenix Bot"
+          git config user.email "phoenix-bot@users.noreply.github.com"
+          git add live_bot/state.json trade_log.json dashboard/dist/index.html
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "bot: daily update $(date +%Y-%m-%d)"
+            git push
+          fi
