@@ -687,8 +687,8 @@ def build_html(**kw) -> str:
                     <span class="val">{fmt_num(nupl, 3)}</span>
                 </div>
                 <div class="ind-item">
-                    <span class="label">SOPR</span>
-                    <span class="val">{fmt_num(sopr, 3)}</span>
+                    <span class="label">STH-SOPR</span>
+                    <span class="val">{fmt_num(sopr, 3)} <small class="tag sopr-src">{sopr_source}</small></span>
                 </div>
                 <div class="ind-item">
                     <span class="label">SMA 200</span>
