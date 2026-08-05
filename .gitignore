@@ -43,3 +43,9 @@ Thumbs.db
 # Work log (internal)
 worklog.md
 Smart-dca/
+
+# Demo portfolio (committed by workflow, not locally)
+# Uncomment below if you want to ignore demo files locally:
+# demo_state*.json
+# demo_trades*.json
+# demo_report*.json

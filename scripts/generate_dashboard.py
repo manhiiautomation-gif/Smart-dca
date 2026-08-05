@@ -165,6 +165,107 @@ def generate_dashboard(state_path='live_bot/state.json',
     ath = indicators.get('ath', 0)
 
     # Build HTML
+    # Load demo portfolio data if exists
+    demo_html = ''
+    demo_state_path = os.path.join(PROJECT_ROOT, 'demo_state.json')
+    demo_report_path = os.path.join(PROJECT_ROOT, 'demo_report.json')
+    if os.path.exists(demo_state_path):
+        try:
+            with open(demo_state_path, 'r') as f:
+                ds = json.load(f)
+            ds_runs = ds.get('run_count', 0)
+            ds_btc = ds.get('btc', 0)
+            ds_cash = ds.get('cash', 0)
+            ds_price = ds.get('last_price', 0)
+            ds_portfolio = ds_btc * ds_price + ds_cash
+            ds_initial = ds.get('initial_cash', 10000)
+            ds_roi = ((ds_portfolio - ds_initial) / ds_initial * 100) if ds_initial > 0 else 0
+            ds_peak = ds.get('peak_value', 0)
+            ds_max_dd = ds.get('max_drawdown', 0)
+            ds_fees = ds.get('cumulative_fees', 0)
+            ds_slip = ds.get('cumulative_slippage', 0)
+            ds_buys = ds.get('buy_count', 0)
+            ds_sells = ds.get('sell_count', 0)
+            ds_val = ds.get('validation', {})
+            ds_created = ds.get('created_at', '')
+
+            # Load report if exists
+            ds_ready = False
+            ds_recommendation = ''
+            checklist_html = ''
+            if os.path.exists(demo_report_path):
+                try:
+                    with open(demo_report_path, 'r') as f:
+                        dr = json.load(f)
+                    ds_ready = dr.get('go_live_ready', False)
+                    ds_recommendation = dr.get('recommendation', '')
+                    checks = dr.get('go_live_checklist', [])
+                    for c in checks:
+                        icon = '<span style="color:var(--green)">&#10003;</span>' if c['passed'] else '<span style="color:var(--red)">&#10007;</span>'
+                        checklist_html += f'<div style="display:flex;gap:8px;align-items:center;margin:4px 0;font-size:12px;"><span>{icon}</span><span>{c["name"]}</span><span style="color:var(--text-dim)">{c["detail"]}</span></div>'
+                except Exception:
+                    pass
+
+            ready_class = 'green' if ds_ready else ('yellow' if ds_runs >= 7 else 'red')
+            ready_text = 'READY' if ds_ready else ('IN PROGRESS' if ds_runs >= 7 else 'TOO EARLY')
+            roi_class_d = 'green' if ds_roi > 0 else ('red' if ds_roi < 0 else 'neutral')
+
+            demo_html = f'''
+    <!-- Demo Portfolio -->
+    <div class="card" style="margin-bottom:16px;border-left:3px solid var(--blue);">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+            Demo Portfolio Simulation
+            <span class="tag {ready_class}">{ready_text}</span>
+        </div>
+        <div class="ind-grid">
+            <div class="ind-item">
+                <span class="label">Runs</span>
+                <span class="val">{ds_runs} / 14</span>
+            </div>
+            <div class="ind-item">
+                <span class="label">Portfolio</span>
+                <span class="val">{fmt_num(ds_portfolio)}</span>
+            </div>
+            <div class="ind-item">
+                <span class="label">ROI</span>
+                <span class="val {roi_class_d}">{ds_roi:+.2f}%</span>
+            </div>
+            <div class="ind-item">
+                <span class="label">BTC</span>
+                <span class="val">{ds_btc:.8f}</span>
+            </div>
+            <div class="ind-item">
+                <span class="label">Cash</span>
+                <span class="val">{fmt_num(ds_cash)}</span>
+            </div>
+            <div class="ind-item">
+                <span class="label">Buys / Sells</span>
+                <span class="val"><span class="green">{ds_buys}</span> / <span class="red">{ds_sells}</span></span>
+            </div>
+            <div class="ind-item">
+                <span class="label">Peak</span>
+                <span class="val">{fmt_num(ds_peak)}</span>
+            </div>
+            <div class="ind-item">
+                <span class="label">Max DD</span>
+                <span class="val">{ds_max_dd*100:.2f}%</span>
+            </div>
+            <div class="ind-item">
+                <span class="label">Fees</span>
+                <span class="val yellow">{fmt_num(ds_fees)}</span>
+            </div>
+            <div class="ind-item">
+                <span class="label">Slippage</span>
+                <span class="val">{fmt_num(ds_slip, 4)}</span>
+            </div>
+        </div>
+        {'<div style="margin-top:12px;"><div class="card-title" style="font-size:12px;">Go-Live Checklist</div>' + checklist_html + '</div>' if checklist_html else ''}
+        {f'<div style="margin-top:8px;font-size:11px;color:var(--text-dim);">{ds_recommendation}</div>' if ds_recommendation else ''}
+    </div>'''
+        except Exception as e:
+            print(f'[DASHBOARD] Demo section error: {e}')
+            demo_html = ''
+
     html = build_html(
         bot_alive=bot_alive, l1_ok=l1_ok, l2_ok=l2_ok,
         ks_reason=ks_reason, ks_time=ks_time, ks_by=ks_by,
@@ -189,6 +290,7 @@ def generate_dashboard(state_path='live_bot/state.json',
         recent_trades=recent_trades,
         last_trade_date=last_trade_date,
         now=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        demo_html=demo_html,
     )
 
     # Write output
@@ -247,6 +349,7 @@ def build_html(**kw) -> str:
     portfolio_series = kw['portfolio_series']
     now_str = kw['now']
     last_trade_date = kw.get('last_trade_date', '—')
+    demo_html = kw.get('demo_html', '')
 
     # Status badge
     if bot_alive:
@@ -790,6 +893,8 @@ def build_html(**kw) -> str:
             </tbody>
         </table>
     </div>
+
+    {demo_html}
 
     <!-- Footer -->
     <div class="footer">

@@ -2,6 +2,10 @@
 
 Orchestrates: kill switch check, fetch data, compute indicators,
 run strategy, execute trades, update state, record trade log, send notifications.
+
+Modes:
+    - run_daily():      Standard run (dry-run or live)
+    - run_demo():       Demo portfolio simulation (isolated state, slippage, validation)
 '''
 
 import math
@@ -482,3 +486,179 @@ def _snapshot_indicators(bot_state: dict, price: float, currency: str,
         bot_state['last_dry_run'] = dry_run
     except Exception as e:
         print(f'[BOT] Indicator snapshot failed: {e}')
+
+
+def run_demo(exchange, demo_state: dict, project_root: str,
+             scenario: str = 'default', force: bool = False,
+             validate: bool = False) -> dict:
+    '''Demo portfolio simulation run.
+
+    Like run_daily() but:
+    - Uses isolated demo state (demo_state.json, demo_trades.json)
+    - Simulates slippage on every trade
+    - Records portfolio history for charting
+    - Generates validation report on --validate
+    - NEVER calls exchange trade APIs
+
+    Returns updated demo_state dict.
+    '''
+    from . import demo_portfolio as dp
+
+    currency = exchange.currency
+    today = date.today()
+
+    # ── 0. Idempotency guard ──
+    if not force and demo_state.get('last_run_date') == today.isoformat():
+        print(f'[DEMO] Already ran today ({today}). Skipping.')
+        print(f'[DEMO] Use --force to override.')
+        return demo_state
+
+    print(f'[DEMO] ═══════════════════════════════════════════════════')
+    print(f'[DEMO]   DEMO PORTFOLIO SIMULATION')
+    print(f'[DEMO]   Scenario: {scenario}')
+    print(f'[DEMO]   Cash: {demo_state["cash"]:,.2f} {currency}')
+    print(f'[DEMO]   BTC:  {demo_state["btc"]:.8f}')
+    print(f'[DEMO] ═══════════════════════════════════════════════════')
+
+    # ── 1. Fetch current price ──
+    print(f'[DEMO] Fetching price from {exchange.__class__.__name__}...')
+    price = exchange.get_price()
+    print(f'[DEMO] Current price: {price:,.2f} {currency}')
+
+    # ── 2. Fetch price history ──
+    print('[DEMO] Fetching price history (500d)...')
+    klines = _fetch_price_history_with_dates(exchange)
+    closes = [k['close'] for k in klines]
+    print(f'[DEMO] Got {len(closes)} daily closes')
+
+    if len(closes) < 50:
+        print('[DEMO] ERROR: Not enough price history')
+        return demo_state
+
+    # ── 3. Compute technical indicators (same as live) ──
+    print('[DEMO] Computing indicators...')
+    sma_200 = ind.sma(closes, 200)
+    sma_365 = ind.sma(closes, 365)
+    rsi_val = ind.rsi(closes, 14)
+    macd_line, macd_sig, macd_h = ind.macd(closes)
+    macd_hist_series = ind.compute_all_macd_hist(closes)
+    rsi_series = ind.compute_all_rsi(closes, 14)
+    macd_bear = ind.macd_cross_bear(macd_hist_series)
+    macd_declining = ind.macd_hist_declining(macd_hist_series, 4)
+    rsi_div = ind.rsi_divergence(closes, rsi_series, 40)
+    ath = max(closes) if closes else 0
+
+    print(f'[DEMO] SMA200={sma_200:,.2f} RSI={rsi_val:.1f} MACD_H={macd_h:.4f}')
+
+    # ── 4. Get MVRV ──
+    mvrv_val = strategy.get_mvrv_for_date(today)
+    if math.isnan(mvrv_val):
+        print(f'[DEMO] No embedded MVRV for {today}, trying web fallback...')
+        from . import mvrv_fetcher
+        web_mvrv, web_date, web_source = mvrv_fetcher.fetch_mvrv_from_web()
+        if web_mvrv is not None:
+            mvrv_val = web_mvrv
+            print(f'[DEMO] Web MVRV: {web_mvrv:.4f}')
+        else:
+            print(f'[DEMO] WARNING: No MVRV data. Skipping.')
+            return demo_state
+
+    mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val)
+    mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val)
+    nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 else 0
+    realized_price = price / mvrv_val if mvrv_val > 0 else float('nan')
+
+    # ── 4b. BGeometrics metrics ──
+    try:
+        from . import bg_metrics
+        sopr = bg_metrics.get_sth_sopr(today)
+        lth_rp = bg_metrics.get_lth_realized_price(today)
+        bg_rp = bg_metrics.get_realized_price(today)
+        if not math.isnan(bg_rp):
+            realized_price = bg_rp
+        sopr_source = 'BG' if not math.isnan(sopr) else 'proxy'
+        lth_source = 'BG' if not math.isnan(lth_rp) else 'N/A'
+    except ImportError:
+        ema30 = ind.ema(closes, 30)
+        sopr = price / ema30 if ema30 > 0 else 1.0
+        lth_rp = float('nan')
+        sopr_source = 'proxy'
+
+    print(f'[DEMO] MVRV={mvrv_val:.3f} Pct={mvrv_pct:.3f} Z={mvrv_z:.2f}')
+
+    # ── 5. Convert budget ──
+    if currency == 'USDT':
+        base_budget = config.DAILY_BUDGET_THB / config.USD_THB_RATE
+        max_buy = config.MAX_BUY_THB / config.USD_THB_RATE
+    else:
+        base_budget = config.DAILY_BUDGET_THB
+        max_buy = config.MAX_BUY_THB
+
+    # ── 6. Run strategy (same logic as live) ──
+    print('[DEMO] Running Phoenix v5.1 strategy...')
+    decision = strategy.phoenix_v5_1_decision(
+        mvrv=mvrv_val, rsi=rsi_val, sopr=sopr, nupl=nupl,
+        price=price, sma_200=sma_200, sma_365=sma_365,
+        realized_price=realized_price, lth_realized_price=lth_rp,
+        mvrv_pct=mvrv_pct, mvrv_z=mvrv_z,
+        macd_cross_bear=macd_bear, macd_hist_declining=macd_declining,
+        rsi_divergence_flag=rsi_div, ath=ath,
+        btc_balance=demo_state['btc'],
+        cash_reserve=demo_state['cash'],
+        cooldown=demo_state['cooldown'],
+        base_budget=base_budget, max_buy=max_buy,
+    )
+
+    print(f'[DEMO] Decision: buy={decision["buy_amount"]:.2f} '
+          f'sell={decision["sell_amount"]:.2f} '
+          f'score={decision["sell_score"]} path={decision["path_taken"]}')
+
+    # ── 7. Process trade through demo portfolio (with slippage) ──
+    demo_state = dp.process_demo_trade(
+        demo_state, decision, price, currency,
+        fee_pct=config.BUY_FEE_PCT,
+        use_slippage=True,
+        project_root=project_root,
+        scenario=scenario,
+    )
+
+    # ── 8. Snapshot indicators ──
+    indicators_snapshot = {
+        'price': round(price, 2),
+        'mvrv': round(mvrv_val, 3),
+        'mvrv_pct': round(mvrv_pct, 3),
+        'mvrv_z': round(mvrv_z, 2),
+        'rsi': round(rsi_val, 1),
+        'macd_h': round(macd_h, 4),
+        'nupl': round(nupl, 3),
+        'sopr': round(sopr, 3),
+        'sopr_source': sopr_source,
+        'sma_200': round(sma_200, 2) if not math.isnan(sma_200) else None,
+        'sma_365': round(sma_365, 2) if not math.isnan(sma_365) else None,
+        'macd_bear': macd_bear,
+        'macd_declining': macd_declining,
+        'rsi_divergence': rsi_div,
+        'ath': round(ath, 2),
+        'sell_score': decision.get('sell_score', 0),
+        'path_taken': decision.get('path_taken', 'none'),
+        'in_bear': decision.get('in_bear', False),
+        'cooldown': decision.get('new_cooldown', 0),
+    }
+    dp.snapshot_indicators(demo_state, indicators_snapshot)
+
+    # ── 9. Send notification ──
+    msg = notifier.format_report(
+        decision, price, mvrv_val,
+        demo_state['btc'], demo_state['cash'],
+        currency, dry_run=True,
+    )
+    msg = msg.replace('DRY RUN', 'DEMO')
+    if notifier.send_telegram(msg):
+        print('[DEMO] Telegram notification sent')
+
+    # ── 10. Validation report (optional) ──
+    if validate:
+        report = dp.generate_validation_report(demo_state, project_root, scenario)
+        dp.print_validation_report(report)
+
+    return demo_state

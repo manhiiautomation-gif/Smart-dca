@@ -5,6 +5,10 @@ Usage:
     python live_bot/main.py --exchange binance
     python live_bot/main.py --exchange bitkub --dry-run
     python live_bot/main.py --exchange binance --budget 200
+    python live_bot/main.py --demo                           # Demo portfolio
+    python live_bot/main.py --demo --validate                 # Demo + validation
+    python live_bot/main.py --demo --reset                    # Reset demo
+    python live_bot/main.py --demo --scenario aggressive      # Named scenario
 
 Environment variables (or GitHub Secrets):
     BINANCE_API_KEY, BINANCE_API_SECRET
@@ -51,6 +55,17 @@ def main():
                         help='Force run even if already ran today (for testing)')
     parser.add_argument('--loop', '-l', type=int, default=0,
                         help='Loop mode: run every N minutes (dry-run only, e.g. --loop 10)')
+    # Demo portfolio simulation flags
+    parser.add_argument('--demo', action='store_true',
+                        help='Run demo portfolio simulation (isolated state, slippage, validation)')
+    parser.add_argument('--reset', action='store_true',
+                        help='Reset demo portfolio to initial state')
+    parser.add_argument('--validate', action='store_true',
+                        help='Generate validation report after demo run')
+    parser.add_argument('--scenario', '-S', default='default',
+                        help='Demo scenario name (default: "default")')
+    parser.add_argument('--demo-cash', type=float, default=None,
+                        help='Initial cash for new demo portfolio (default: 10000)')
     args = parser.parse_args()
 
     # Override config
@@ -60,6 +75,74 @@ def main():
         config.DAILY_BUDGET_THB = args.budget
     state_path = args.state_file or config.STATE_FILE
 
+    # ── DEMO MODE (isolated portfolio simulation) ──
+    if args.demo:
+        from live_bot import demo_portfolio as dp
+
+        print(f'========================================')
+        print(f'  Phoenix v5.1 — DEMO PORTFOLIO')
+        print(f'  Exchange: {exchange_name.upper()}')
+        print(f'  Budget: {config.DAILY_BUDGET_THB} THB/day')
+        print(f'  Scenario: {args.scenario}')
+        print(f'========================================')
+
+        # Always use dummy keys for demo (public API only)
+        mod_name, cls_name = EXCHANGE_MAP[exchange_name]
+        mod = __import__(mod_name, fromlist=[cls_name])
+        cls = getattr(mod, cls_name)
+        exchange = cls('__demo_key__', '__demo_secret__')
+
+        # Handle --reset
+        if args.reset:
+            demo_state = dp.reset_demo(
+                PROJECT_ROOT, scenario=args.scenario,
+                initial_cash=args.demo_cash,
+            )
+            print(f'[DEMO] Portfolio reset complete.')
+            sys.exit(0)
+
+        # Handle --validate only (no new run)
+        if args.validate and not args.force:
+            demo_state = dp.load_demo_state(PROJECT_ROOT, args.scenario)
+            if demo_state.get('run_count', 0) > 0:
+                report = dp.generate_validation_report(demo_state, PROJECT_ROOT, args.scenario)
+                dp.print_validation_report(report)
+                sys.exit(0)
+
+        # Load or init demo state
+        demo_state = dp.load_demo_state(PROJECT_ROOT, args.scenario)
+        if args.demo_cash and demo_state.get('run_count', 0) == 0:
+            demo_state = dp.init_demo(
+                initial_cash=args.demo_cash,
+                currency='USDT' if exchange_name == 'binance' else 'THB',
+                exchange=exchange_name,
+                scenario=args.scenario,
+                project_root=PROJECT_ROOT,
+            )
+
+        try:
+            demo_state = engine.run_demo(
+                exchange, demo_state,
+                project_root=PROJECT_ROOT,
+                scenario=args.scenario,
+                force=args.force,
+                validate=args.validate,
+            )
+        except KeyboardInterrupt:
+            print('\n[DEMO] Stopped by user.')
+        except Exception as e:
+            print(f'[DEMO] FATAL ERROR: {e}')
+            import traceback
+            traceback.print_exc()
+            notifier.send_telegram(f'Phoenix v5.1 DEMO ERROR: {e}')
+            sys.exit(1)
+
+        dp.save_demo_state(demo_state, PROJECT_ROOT, args.scenario)
+        print(f'[DEMO] State saved.')
+        print('[DEMO] All done.')
+        sys.exit(0)
+
+    # ── STANDARD MODE (dry-run or live) ──
     # Derive paths relative to project root
     trade_log_path = os.path.join(PROJECT_ROOT, 'trade_log.json')
     kill_switch_path = os.path.join(PROJECT_ROOT, 'kill_switch.json')

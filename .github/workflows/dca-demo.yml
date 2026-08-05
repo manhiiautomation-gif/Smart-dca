@@ -1,0 +1,128 @@
+name: Phoenix v5.1 DEMO Portfolio
+
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  DEMO PORTFOLIO SIMULATION                                 ║
+# ║                                                          ║
+# ║  Isolated paper trading with slippage simulation.         ║
+# ║  Runs daily at 02:00 UTC (09:00 Bangkok).                ║
+# ║  NO real trades, NO real API keys needed.                 ║
+# ║  Tracks portfolio history + go-live validation.          ║
+# ║                                                          ║
+# ║  Files: demo_state.json, demo_trades.json, demo_report.json
+# ╚══════════════════════════════════════════════════════════════╝
+
+on:
+  schedule:
+    # Daily at 02:00 UTC (09:00 Bangkok) — 1hr after main bot
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      exchange:
+        description: 'Exchange'
+        type: choice
+        options:
+          - binance
+          - bitkub
+        default: binance
+      budget:
+        description: 'Per-run budget in THB'
+        type: number
+        default: 100
+      scenario:
+        description: 'Scenario name (for multi-portfolio testing)'
+        type: string
+        default: 'default'
+      demo_cash:
+        description: 'Initial cash for NEW portfolio only'
+        type: number
+        default: 10000
+      reset:
+        description: 'Reset portfolio to initial state'
+        type: boolean
+        default: false
+      validate:
+        description: 'Generate validation report after run'
+        type: boolean
+        default: false
+
+concurrency:
+  group: demo-${{ github.event.inputs.scenario || 'default' }}
+  cancel-in-progress: false
+
+jobs:
+  demo_run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r live_bot/requirements.txt
+
+      - name: Set exchange
+        id: ex
+        run: |
+          echo "value=${{ github.event.inputs.exchange || 'binance' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Reset demo portfolio (if requested)
+        if: github.event.inputs.reset == 'true'
+        env:
+          DAILY_BUDGET_THB: ${{ github.event.inputs.budget || '100' }}
+          USD_THB_RATE: ${{ secrets.USD_THB_RATE || '33.426' }}
+        run: |
+          python live_bot/main.py --demo --reset --exchange ${{ steps.ex.outputs.value }} --scenario "${{ github.event.inputs.scenario || 'default' }}" --demo-cash ${{ github.event.inputs.demo_cash || '10000' }}
+
+      - name: Run demo portfolio simulation
+        env:
+          DAILY_BUDGET_THB: ${{ github.event.inputs.budget || '100' }}
+          MAX_BUY_THB: ${{ secrets.MAX_BUY_THB || '1000' }}
+          USD_THB_RATE: ${{ secrets.USD_THB_RATE || '33.426' }}
+          BOT_ENABLED: 'true'
+        run: |
+          python live_bot/main.py --demo --force --exchange ${{ steps.ex.outputs.value }} --scenario "${{ github.event.inputs.scenario || 'default' }}" ${{ github.event.inputs.validate == 'true' && '--validate' || '' }}
+
+      - name: Generate validation report (after 7+ runs)
+        if: github.event.inputs.validate != 'true'
+        run: |
+          python3 -c "import json; s=json.load(open('demo_state.json')); print(s.get('run_count',0))" > /tmp/druns.txt
+          RUNS=$(cat /tmp/druns.txt)
+          if [ "$RUNS" -ge 7 ] 2>/dev/null; then
+            echo "Generating validation report (run #$RUNS >= 7)"
+            python live_bot/main.py --demo --validate --exchange ${{ steps.ex.outputs.value }} --scenario "${{ github.event.inputs.scenario || 'default' }}"
+          else
+            echo "Skipping validation (only $RUNS runs, need 7+)"
+          fi
+
+      - name: Generate dashboard
+        run: python scripts/generate_dashboard.py
+
+      - name: Commit and push (with retry)
+        run: |
+          git config user.name "Phoenix Bot"
+          git config user.email "phoenix-bot@users.noreply.github.com"
+          git add demo_state.json demo_trades.json demo_report.json dashboard/dist/index.html live_bot/demo_portfolio.py live_bot/engine.py live_bot/main.py scripts/generate_dashboard.py
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            for i in 1 2 3; do
+              git commit -m "demo: portfolio run $(date -u +%Y-%m-%d\ %H:%M\ UTC)" && \
+              git pull --rebase && \
+              git push && \
+              break || \
+              sleep 10
+            done
+          fi
+
+      - name: Trigger Netlify deploy
+        env:
+          HOOK_URL: ${{ secrets.NETLIFY_DEPLOY_HOOK }}
+        run: |
+          [ -n "$HOOK_URL" ] && curl -s -X POST "$HOOK_URL" || true
