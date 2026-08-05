@@ -516,11 +516,7 @@ def build_html(**kw) -> str:
         .ctrl-btn .spinner {{ width: 12px; height: 12px; border: 2px solid transparent; border-top-color: currentColor; border-radius: 50%; animation: spin 0.6s linear infinite; display: none; }}
         .ctrl-btn.loading .spinner {{ display: inline-block; }}
         @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
-        .ctrl-settings {{ margin-left: auto; display: flex; align-items: center; gap: 6px; }}
-        .ctrl-settings input {{ padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 0.75rem; width: 200px; }}
-        .ctrl-settings input::placeholder {{ color: var(--text-dim); }}
-        .ctrl-settings .save-btn {{ padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); color: var(--text-dim); font-size: 0.75rem; cursor: pointer; }}
-        .ctrl-settings .save-btn:hover {{ border-color: var(--blue); }}
+
         .toast-container {{ position: fixed; top: 16px; right: 16px; z-index: 9999; }}
         .toast {{ padding: 10px 16px; border-radius: 8px; margin-bottom: 8px; font-size: 0.8rem; font-weight: 500; animation: slideIn 0.3s ease; max-width: 320px; }}
         .toast.success {{ background: var(--green-bg); color: var(--green); border: 1px solid var(--green); }}
@@ -576,10 +572,6 @@ def build_html(**kw) -> str:
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                 Logs
             </a>
-            <div class="ctrl-settings">
-                <input type="password" id="tokenInput" placeholder="GitHub PAT (saved in browser)" />
-                <button class="save-btn" onclick="saveToken()">Save</button>
-            </div>
         </div>
     </div>
 
@@ -801,22 +793,8 @@ def build_html(**kw) -> str:
 
     <script>
     (function() {{
-        var REPO = 'manhiiautomation-gif/Smart-dca';
-        var WORKFLOW = 'dashboard-trigger.yml';
-        var API = 'https://api.github.com/repos/' + REPO + '/actions/workflows/' + WORKFLOW + '/dispatches';
-        function getToken() {{ return localStorage.getItem('gh_pat') || ''; }}
-        function setToken(t) {{ localStorage.setItem('gh_pat', t); }}
-        var savedToken = getToken();
-        if (savedToken) document.getElementById('tokenInput').value = '\u2022\u2022\u2022\u2022' + savedToken.slice(-4);
-        window.saveToken = function() {{
-            var input = document.getElementById('tokenInput');
-            var val = input.value;
-            if (val && !val.startsWith('\u2022')) {{
-                setToken(val.trim());
-                input.value = '\u2022\u2022\u2022\u2022' + val.trim().slice(-4);
-                showToast('Token saved', 'success');
-            }}
-        }};
+        var API = '/api/trigger';
+
         function showToast(msg, type) {{
             var c = document.getElementById('toasts');
             var t = document.createElement('div');
@@ -825,34 +803,39 @@ def build_html(**kw) -> str:
             c.appendChild(t);
             setTimeout(function() {{ t.remove(); }}, 4000);
         }}
+
         function setLoading(btn, on) {{
             if (on) btn.classList.add('loading'); else btn.classList.remove('loading');
             btn.disabled = on;
         }}
+
         function dispatch(action, reason) {{
-            var token = getToken();
-            if (!token) {{ showToast('Please enter GitHub PAT first', 'error'); return false; }}
-            var body = {{ ref: 'main', inputs: {{ action: action }} }};
-            if (reason) body.inputs.reason = reason;
+            var body = {{ action: action }};
+            if (reason) body.reason = reason;
             fetch(API, {{
                 method: 'POST',
-                headers: {{ 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github.v3+json', 'Content-Type': 'application/json' }},
+                headers: {{ 'Content-Type': 'application/json' }},
                 body: JSON.stringify(body)
             }}).then(function(r) {{
-                if (r.status === 204) return true;
-                return r.json().then(function(e) {{ throw new Error(e.message || 'HTTP ' + r.status); }});
-            }}).then(function() {{
-                var labels = {{ update: 'Bot update + dashboard refresh started', kill: 'Kill switch activated', resume: 'Bot resumed' }};
-                showToast(labels[action] || 'Action dispatched', 'success');
-            }}).catch(function(e) {{ showToast('Error: ' + e.message, 'error'); }});
+                return r.json().then(function(data) {{
+                    if (!r.ok) throw new Error(data.error || 'Error ' + r.status);
+                    return data;
+                }});
+            }}).then(function(data) {{
+                showToast(data.message || 'Done', 'success');
+            }}).catch(function(e) {{
+                showToast('Error: ' + e.message, 'error');
+            }});
             return false;
         }}
+
         window.doUpdate = function() {{
             var btn = document.getElementById('btnUpdate');
             setLoading(btn, true);
             dispatch('update', '');
             setTimeout(function() {{ setLoading(btn, false); }}, 5000);
         }};
+
         var confirmCallback = null;
         window.doKillSwitch = function() {{
             var isAlive = {str(bot_alive).lower()};
@@ -861,6 +844,7 @@ def build_html(**kw) -> str:
             var okBtn = document.getElementById('confirmOk');
             var title = document.getElementById('confirmTitle');
             var msg = document.getElementById('confirmMsg');
+
             if (isAlive) {{
                 title.textContent = 'Kill Bot?';
                 msg.textContent = 'Bot \u0e08\u0e30\u0e2b\u0e22\u0e38\u0e14\u0e0b\u0e37\u0e49\u0e2d\u0e02\u0e32\u0e22\u0e17\u0e31\u0e19\u0e17\u0e35';
@@ -890,10 +874,12 @@ def build_html(**kw) -> str:
             }}
             overlay.classList.add('active');
         }};
+
         window.closeConfirm = function() {{
             document.getElementById('confirmOverlay').classList.remove('active');
             confirmCallback = null;
         }};
+
         document.getElementById('confirmOk').addEventListener('click', function() {{
             if (confirmCallback) confirmCallback();
             closeConfirm();
