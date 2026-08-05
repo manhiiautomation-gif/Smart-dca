@@ -1,0 +1,95 @@
+name: Dashboard Action
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action'
+        required: true
+        type: choice
+        options:
+          - update
+          - kill
+          - resume
+      reason:
+        description: 'Kill reason (for kill action)'
+        required: false
+        type: string
+        default: 'Manual kill from dashboard'
+
+jobs:
+  action:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r live_bot/requirements.txt
+
+      - name: Handle action
+        env:
+          BITKUB_API_KEY: ${{ secrets.BITKUB_API_KEY }}
+          BITKUB_API_SECRET: ${{ secrets.BITKUB_API_SECRET }}
+          BOT_ENABLED: 'true'
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          ACTION="${{ github.event.inputs.action }}"
+          REASON="${{ github.event.inputs.reason }}"
+
+          if [ "$ACTION" = "kill" ]; then
+            echo "[ACTION] Activating kill switch: $REASON"
+            python -c "
+import json
+from datetime import datetime, timezone
+ks = {
+    'enabled': False,
+    'reason': '''$REASON''',
+    'activated_at': datetime.now(timezone.utc).isoformat(),
+    'activated_by': 'dashboard'
+}
+with open('kill_switch.json', 'w') as f:
+    json.dump(ks, f, indent=2)
+print('Kill switch activated')
+"
+          elif [ "$ACTION" = "resume" ]; then
+            echo "[ACTION] Resuming bot (deactivating kill switch)"
+            python -c "
+import json
+ks = {
+    'enabled': True,
+    'reason': '',
+    'activated_at': None,
+    'activated_by': 'dashboard'
+}
+with open('kill_switch.json', 'w') as f:
+    json.dump(ks, f, indent=2)
+print('Kill switch deactivated')
+"
+          elif [ "$ACTION" = "update" ]; then
+            echo "[ACTION] Running bot dry-run + updating dashboard"
+            python live_bot/main.py --exchange bitkub --state-file live_bot/state.json --dry-run || true
+          fi
+
+      - name: Generate dashboard
+        run: python scripts/generate_dashboard.py
+
+      - name: Commit & push
+        run: |
+          git config user.name "Phoenix Bot"
+          git config user.email "phoenix-bot@users.noreply.github.com"
+          git add live_bot/state.json trade_log.json kill_switch.json dashboard/dist/index.html
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "dashboard: ${{ github.event.inputs.action }} $(date +%Y-%m-%d\ %H:%M)"
+            git push
+          fi
