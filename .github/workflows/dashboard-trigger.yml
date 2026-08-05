@@ -41,39 +41,16 @@ jobs:
           BOT_ENABLED: 'true'
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          KILL_REASON: ${{ github.event.inputs.reason }}
         run: |
           ACTION="${{ github.event.inputs.action }}"
-          REASON="${{ github.event.inputs.reason }}"
 
           if [ "$ACTION" = "kill" ]; then
-            echo "[ACTION] Activating kill switch: $REASON"
-            python -c "
-import json
-from datetime import datetime, timezone
-ks = {
-    'enabled': False,
-    'reason': '''$REASON''',
-    'activated_at': datetime.now(timezone.utc).isoformat(),
-    'activated_by': 'dashboard'
-}
-with open('kill_switch.json', 'w') as f:
-    json.dump(ks, f, indent=2)
-print('Kill switch activated')
-"
+            echo "[ACTION] Activating kill switch: $KILL_REASON"
+            python3 -c 'import json,os;from datetime import datetime,timezone;ks={"enabled":False,"reason":os.environ.get("KILL_REASON","Manual kill from dashboard"),"activated_at":datetime.now(timezone.utc).isoformat(),"activated_by":"dashboard"};open("kill_switch.json","w").write(json.dumps(ks,indent=2));print("Kill switch activated")'
           elif [ "$ACTION" = "resume" ]; then
             echo "[ACTION] Resuming bot (deactivating kill switch)"
-            python -c "
-import json
-ks = {
-    'enabled': True,
-    'reason': '',
-    'activated_at': None,
-    'activated_by': 'dashboard'
-}
-with open('kill_switch.json', 'w') as f:
-    json.dump(ks, f, indent=2)
-print('Kill switch deactivated')
-"
+            python3 -c 'import json;ks={"enabled":True,"reason":"","activated_at":None,"activated_by":"dashboard"};open("kill_switch.json","w").write(json.dumps(ks,indent=2));print("Kill switch deactivated")'
           elif [ "$ACTION" = "update" ]; then
             echo "[ACTION] Running bot dry-run + updating dashboard"
             python live_bot/main.py --exchange bitkub --state-file live_bot/state.json --dry-run || true
