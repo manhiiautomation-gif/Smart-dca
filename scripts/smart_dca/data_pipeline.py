@@ -3,8 +3,8 @@
 Sources:
   - Binance Spot API (BTC/USDT daily klines) — primary price data
   - CoinMetrics Community API (CapMVRVCur) — primary on-chain MVRV
-  - BGeometrics API (sopr) — fallback SOPR, rate-limited
-  - Derived: NUPL = 1 - 1/MVRV, SOPR proxy = Price/EMA30, MVRV proxy = Price/SMA365
+  - BGeometrics API (sth-sopr, lth-realized-price, realized-price) — STH-SOPR, LTH-RP
+  - Derived: NUPL = 1 - 1/MVRV, SOPR proxy = Price/EMA30 (fallback only)
 """
 
 import os
@@ -208,10 +208,12 @@ def compute_technical_indicators(df):
     df['macd_line'] = ema12 - ema26
     df['macd_signal'] = df['macd_line'].ewm(span=9, adjust=False).mean()
     df['macd_hist'] = df['macd_line'] - df['macd_signal']
-    # Realized Price = Price / MVRV
-    df['realized_price'] = df['price_usd'] / df['mvrv'].clip(lower=0.01)
-    # LTH Realized Price proxy: 180-day SMA of Realized Price
-    df['lth_realized_price'] = df['realized_price'].rolling(180, min_periods=60).mean()
+    # Realized Price — use BGeometrics data if already merged, else compute
+    if 'realized_price' not in df.columns or df['realized_price'].isna().all():
+        df['realized_price'] = df['price_usd'] / df['mvrv'].clip(lower=0.01)
+    # LTH Realized Price — use BGeometrics data if already merged, else proxy
+    if 'lth_realized_price' not in df.columns or df['lth_realized_price'].isna().all():
+        df['lth_realized_price'] = df['realized_price'].rolling(180, min_periods=60).mean()
     df['price_to_lth_rp'] = df['price_usd'] / df['lth_realized_price'].clip(lower=1)
     return df
 
@@ -237,12 +239,41 @@ def build_master_dataframe(years=5):
     print(f'\n[DATA] === ON-CHAIN DATA PIPELINE ===')
     print(f'        Primary source: CoinMetrics Community API (CapMVRVCur)')
     print(f'        NUPL: Derived from MVRV (NUPL = 1 - 1/MVRV)')
-    print(f'        SOPR: BGeometrics fallback -> Proxy (Price/EMA30)')
+    print(f'        SOPR: BGeometrics (sth-sopr) -> Proxy (Price/EMA30)')
+    print(f'        LTH-RP: BGeometrics (lth-realized-price) -> Proxy (180d SMA of RP)')
 
     mvrv_df = fetch_coinmetrics_mvrv(data_start, data_end)
 
-    time.sleep(2)
-    sopr_df = fetch_bgeometrics_metric('sopr')
+    # Fetch on-chain metrics from BGeometrics via bg_cache
+    sth_sopr_df = None
+    lth_rp_df = None
+    rp_df = None
+    try:
+        import sys
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        from live_bot.bg_metrics import ensure_cache, get_cached_series_as_dates
+        token = os.environ.get('BGEOMETRICS_TOKEN', '')
+        if token:
+            ensure_cache(token=token, metrics=['sth_sopr', 'lth_realized_price', 'realized_price'])
+            # Convert to DataFrames
+            for metric_name, col_name in [('sth_sopr', 'sopr'), ('lth_realized_price', 'lth_realized_price'), ('realized_price', 'realized_price')]:
+                series = get_cached_series_as_dates(metric_name)
+                if series:
+                    df = pd.DataFrame([{'date': d, col_name: v} for d, v in series.items()])
+                    df['date'] = pd.to_datetime(df['date']).dt.date
+                    if col_name == 'sopr':
+                        sth_sopr_df = df
+                        print(f'        STH-SOPR from BGeometrics cache: {len(df)} days')
+                    elif col_name == 'lth_realized_price':
+                        lth_rp_df = df
+                        print(f'        LTH-RP from BGeometrics cache: {len(df)} days')
+                    elif col_name == 'realized_price':
+                        rp_df = df
+                        print(f'        Realized Price from BGeometrics cache: {len(df)} days')
+        else:
+            print(f'        [!] No BGEOMETRICS_TOKEN, using proxies')
+    except Exception as e:
+        print(f'        [!] BGeometrics cache failed: {e}')
 
     # Merge on-chain data
     onchain_df = price_df[['date']].copy()
@@ -251,15 +282,36 @@ def build_master_dataframe(years=5):
     onchain_df['sopr'] = np.nan
     if mvrv_df is not None:
         onchain_df = onchain_df.drop(columns=['mvrv']).merge(mvrv_df, on='date', how='left')
-    if sopr_df is not None:
-        onchain_df = onchain_df.drop(columns=['sopr']).merge(sopr_df, on='date', how='left')
+    if sth_sopr_df is not None:
+        onchain_df['sopr'] = np.nan
+        onchain_df = onchain_df.merge(sth_sopr_df[['date', 'sopr']], on='date', how='left', suffixes=('', '_bg'))
+        if 'sopr_bg' in onchain_df.columns:
+            onchain_df['sopr'] = onchain_df['sopr_bg']
+            onchain_df.drop(columns=['sopr_bg'], inplace=True)
 
     master = price_df.merge(onchain_df, on='date', how='left')
     master = master.sort_values('date').reset_index(drop=True)
 
+    # Merge LTH-RP if available (before technical indicators)
+    if lth_rp_df is not None:
+        master = master.merge(lth_rp_df, on='date', how='left', suffixes=('', '_bg'))
+        if 'lth_realized_price_bg' in master.columns:
+            master['lth_realized_price'] = master['lth_realized_price_bg']
+            master.drop(columns=['lth_realized_price_bg'], inplace=True)
+            print(f'        LTH-RP merged: {master["lth_realized_price"].notna().sum()} days with real data')
+
+    # Merge Realized Price if available
+    if rp_df is not None:
+        master = master.merge(rp_df, on='date', how='left', suffixes=('', '_bg'))
+        if 'realized_price_bg' in master.columns:
+            master['realized_price'] = master['realized_price_bg']
+            master.drop(columns=['realized_price_bg'], inplace=True)
+            print(f'        Realized Price merged: {master["realized_price"].notna().sum()} days with real data')
+
     # Forward-fill missing on-chain (up to 2 days)
     for col in ['mvrv', 'nupl', 'sopr']:
-        master[col] = master[col].ffill(limit=2)
+        if col in master.columns:
+            master[col] = master[col].ffill(limit=2)
 
     # Proxy fallback — FIX (Risk 6): Regression-calibrated proxy
     # Real MVRV ≈ 1.30 * (Price/SMA365) + 0.47 (fitted on historical data)
@@ -279,20 +331,38 @@ def build_master_dataframe(years=5):
     master['nupl'] = master['nupl'].fillna(nupl_proxy)
     master.drop(columns=['nupl_real'], inplace=True)
 
-    # SOPR proxy: Price/EMA30
+    # SOPR proxy: Price/EMA30 (fallback only when BGeometrics unavailable)
+    sth_sopr_count = master['sopr'].notna().sum() if 'sopr' in master.columns else 0
     ema30 = master['price_usd'].ewm(span=30, adjust=False).mean()
     sopr_proxy = master['price_usd'] / ema30
-    master['sopr'] = master['sopr'].fillna(sopr_proxy)
+    if 'sopr' in master.columns:
+        proxy_count = master['sopr'].isna().sum()
+        master['sopr'] = master['sopr'].fillna(sopr_proxy)
+        if proxy_count > 0:
+            print(f'        SOPR: {sth_sopr_count}d real (STH-SOPR) + {proxy_count}d proxy (Price/EMA30)')
+    else:
+        master['sopr'] = sopr_proxy
+        print(f'        SOPR: all proxy (Price/EMA30) — no BGeometrics data')
+
+    # LTH-RP proxy (only if not from BGeometrics)
+    if 'lth_realized_price' not in master.columns or master['lth_realized_price'].isna().all():
+        master['lth_realized_price'] = master.get('realized_price', np.nan).rolling(180, min_periods=60).mean()
+        print(f'        LTH-RP: proxy (180d SMA of Realized Price)')
+    else:
+        lth_real_count = master['lth_realized_price'].notna().sum()
+        print(f'        LTH-RP: {lth_real_count}d real (BGeometrics)')
+
+    # Realized Price proxy if not from BGeometrics
+    if 'realized_price' not in master.columns or master['realized_price'].isna().all():
+        master['realized_price'] = master['price_usd'] / master['mvrv'].clip(lower=0.01)
 
     # Report data coverage
     real_mvrv_count = len(mvrv_df) if mvrv_df is not None else 0
-    real_sopr_count = len(sopr_df) if sopr_df is not None else 0
 
     print(f'\n[DATA] === DATA SOURCE SUMMARY ===')
     print(f'        Price:  Binance REAL ({len(master)} days)')
     print(f'        MVRV:   CoinMetrics REAL ({real_mvrv_count}d) + Proxy ({max(0, len(master)-real_mvrv_count)}d)')
-    print(f'        NUPL:   Derived from MVRV ({real_mvrv_count}d) + Proxy ({max(0, len(master)-real_mvrv_count)}d)')
-    print(f'        SOPR:   BGeometrics REAL ({real_sopr_count}d) + Proxy ({max(0, len(master)-real_sopr_count)}d)')
+    print(f'        NUPL:   Derived from MVRV')
     print(f'        Cache dir: {CACHE_DIR}/')
     print(f'        Cache TTL : {CACHE_MAX_AGE_HOURS}h (7 days)')
     print(f'        To force re-fetch: rm {CACHE_DIR}/*.csv')
@@ -303,9 +373,6 @@ def build_master_dataframe(years=5):
         print(f'             Days with MVRV > 3.0: {(mvrv_df["mvrv"] > 3.0).sum()}')
     else:
         print(f'\n  [!] WARNING: MVRV uses PROXY (CoinMetrics failed).')
-
-    if real_sopr_count == 0:
-        print(f'        [i] SOPR uses Proxy (Price/EMA30) — BGeometrics rate-limited.')
 
     # Technical indicators
     master = compute_technical_indicators(master)

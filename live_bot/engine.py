@@ -190,12 +190,26 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 else 0
     realized_price = price / mvrv_val if mvrv_val > 0 else float('nan')
 
-    # SOPR proxy (Price / EMA30) — same as backtest fallback
-    ema30 = ind.ema(closes, 30)
-    sopr = price / ema30 if ema30 > 0 else 1.0
-
-    # LTH Realized Price — not available via free API; set NaN (non-critical)
-    lth_rp = float('nan')
+    # ── 4b. Fetch on-chain metrics from BGeometrics ──
+    # STH-SOPR, LTH Realized Price, Realized Price
+    # Falls back to proxy/NaN if unavailable.
+    try:
+        from . import bg_metrics
+        sopr = bg_metrics.get_sth_sopr(today)
+        lth_rp = bg_metrics.get_lth_realized_price(today)
+        bg_rp = bg_metrics.get_realized_price(today)
+        if not math.isnan(bg_rp):
+            realized_price = bg_rp
+        sopr_source = 'BG' if not math.isnan(sopr) else 'proxy'
+        lth_source = 'BG' if not math.isnan(lth_rp) else 'N/A'
+        print(f'[BOT] STH-SOPR={sopr:.4f} ({sopr_source}) '
+              f'LTH-RP={lth_rp:,.2f} ({lth_source})')
+    except ImportError:
+        # bg_metrics not available — use fallbacks
+        print('[BOT] bg_metrics not found, using proxy')
+        ema30 = ind.ema(closes, 30)
+        sopr = price / ema30 if ema30 > 0 else 1.0
+        lth_rp = float('nan')
 
     print(f'[BOT] MVRV={mvrv_val:.3f} Pct={mvrv_pct:.3f} Z={mvrv_z:.2f} NUPL={nupl:.3f}')
 
