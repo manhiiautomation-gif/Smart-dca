@@ -20,8 +20,9 @@ BITKUB_API_SECRET = os.environ.get('BITKUB_API_SECRET', '')
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
 
-# ── Safety ──
+# ── Dry Run Testing ──
 DRY_RUN = os.environ.get('DRY_RUN', 'false').lower() == 'true'
+DRY_RUN_INITIAL_CASH = float(os.environ.get('DRY_RUN_INITIAL_CASH', '10000'))  # Virtual THB for simulation
 MIN_BUY_USDT = 10.0   # Binance minimum order
 MIN_BUY_THB = 100.0   # Bitkub minimum order
 

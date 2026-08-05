@@ -47,6 +47,8 @@ def main():
                         help='Daily budget in THB')
     parser.add_argument('--state-file', '-s', default=None,
                         help='Path to state JSON file')
+    parser.add_argument('--force', '-f', action='store_true',
+                        help='Force run even if already ran today (for testing)')
     args = parser.parse_args()
 
     # Override config
@@ -89,7 +91,12 @@ def main():
             print(f'WARNING: No API keys. Running in dry-run mode.')
             dry_run = True
 
-    exchange = cls(api_key, api_secret) if not dry_run else None
+    # In dry-run, create client with dummy keys for public API (price/klines)
+    # market_buy/market_sell will NEVER be called (enforced by engine.py)
+    if dry_run:
+        exchange = cls('__dummy_key__', '__dummy_secret__')
+    else:
+        exchange = cls(api_key, api_secret)
 
     # ── Load state ──
     bot_state = state_mod.load_state(state_path)
@@ -98,15 +105,23 @@ def main():
 
     # ── Run engine ──
     if dry_run:
-        print('[BOT] DRY RUN MODE — no real trades')
-        if exchange is None:
-            exchange = cls('__dummy_key__', '__dummy_secret__')
+        print('[BOT] ═══════════════════════════════════════════════════')
+        print('[BOT]   DRY RUN MODE — NO REAL TRADES')
+        print(f'[BOT]   Virtual cash: {config.DRY_RUN_INITIAL_CASH:,.0f} THB')
+        if args.force:
+            print('[BOT]   --force enabled (bypass daily limit)')
+        print('[BOT] ═══════════════════════════════════════════════════')
+    else:
+        print('[BOT] ═══════════════════════════════════════════════════')
+        print('[BOT]   LIVE MODE — REAL TRADES WILL BE EXECUTED')
+        print('[BOT] ═══════════════════════════════════════════════════')
 
     try:
         bot_state = engine.run_daily(
             exchange, bot_state, dry_run=dry_run,
             trade_log_path=trade_log_path,
             kill_switch_path=kill_switch_path,
+            force=args.force,
         )
     except Exception as e:
         print(f'[BOT] FATAL ERROR: {e}')

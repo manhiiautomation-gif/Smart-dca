@@ -66,20 +66,21 @@ def _get_btc_balance(exchange) -> float:
 
 def run_daily(exchange, bot_state: dict, dry_run: bool = False,
               trade_log_path: str = 'trade_log.json',
-              kill_switch_path: str = 'kill_switch.json') -> dict:
+              kill_switch_path: str = 'kill_switch.json',
+              force: bool = False) -> dict:
     '''Main daily run. Returns updated state.
 
     Steps:
-        0. Idempotency guard
+        0. Idempotency guard (bypassed with --force)
         -1. Kill switch check (L1 + L2)
         1.  Fetch price & history
         2.  Compute indicators
         3.  Get MVRV
-        4.  Get balances
+        4.  Get balances (virtual in dry-run, real in live)
         5.  Convert budget
         6.  Decrement cooldown
         7.  Run strategy
-        8.  Execute trades
+        8.  Execute trades (simulated in dry-run, real in live)
         9.  Update state + trade log
         10. Snapshot indicators for dashboard
         11. Send notification
@@ -87,9 +88,10 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     currency = exchange.currency
     today = date.today()
 
-    # ── 0. Idempotency guard: skip if already ran today ──
-    if bot_state.get('last_run_date') == today.isoformat():
+    # ── 0. Idempotency guard: skip if already ran today (unless --force) ──
+    if not force and bot_state.get('last_run_date') == today.isoformat():
         print(f'[BOT] Already ran today ({today}). Skipping to prevent duplicate trades.')
+        print(f'[BOT] Use --force to override (e.g. for testing).')
         return bot_state
 
     # ── -1. Kill Switch Check ──
@@ -173,15 +175,26 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
 
     print(f'[BOT] MVRV={mvrv_val:.3f} Pct={mvrv_pct:.3f} Z={mvrv_z:.2f} NUPL={nupl:.3f}')
 
-    # ── 5. Get exchange balances (skip API call in dry run) ──
+    # ── 5. Get exchange balances ──
+    # ╔═══════════════════════════════════════════════════════════════╗
+    # ║  DRY RUN SAFETY: Virtual balances — NO real API balance calls ║
+    # ║  LIVE MODE: Real balances fetched from exchange API           ║
+    # ╚═══════════════════════════════════════════════════════════════╝
     if dry_run:
-        btc_balance = 0.0
-        cash_balance = 0.0
-        print(f'[BOT] Balances: DRY RUN (skip API)')
+        # DRY RUN: Use virtual balances from state (no real API calls)
+        if bot_state.get('dry_run_cash') is None:
+            bot_state['dry_run_cash'] = config.DRY_RUN_INITIAL_CASH
+            bot_state['dry_run_btc'] = 0.0
+            print(f'[BOT] DRY RUN: Initialized virtual wallet')
+            print(f'[BOT]   Virtual cash: {config.DRY_RUN_INITIAL_CASH:,.2f} {currency}')
+        btc_balance = bot_state.get('dry_run_btc', 0.0)
+        cash_balance = bot_state.get('dry_run_cash', config.DRY_RUN_INITIAL_CASH)
+        print(f'[BOT] DRY RUN: Virtual BTC={btc_balance:.8f} Cash={cash_balance:,.2f} {currency}')
     else:
+        # LIVE MODE: Fetch real balances from exchange
         btc_balance = _get_btc_balance(exchange)
         cash_balance = _get_cash_balance(exchange)
-    print(f'[BOT] Balances: BTC={btc_balance:.8f} Cash={cash_balance:,.2f} {currency}')
+        print(f'[BOT] LIVE MODE: Real BTC={btc_balance:.8f} Cash={cash_balance:,.2f} {currency}')
 
     # ── 6. Convert budget to exchange currency ──
     if currency == 'USDT':
@@ -237,8 +250,13 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             else:
                 decision['buy_amount'] = 0
 
+    # ═══════════════════════════════════════════════════════════════
+    # DRY RUN SAFETY GATE
+    # When dry_run=True, exchange.market_buy() is NEVER called.
+    # Trades are simulated locally with virtual balances only.
+    # ═══════════════════════════════════════════════════════════════
     if decision['buy_amount'] > 0 and not dry_run:
-        print(f'[BOT] BUYING {decision["buy_amount"]:.2f} {currency} of BTC...')
+        print(f'[BOT] LIVE BUY: {decision["buy_amount"]:.2f} {currency} of BTC...')
         try:
             result = exchange.market_buy(decision['buy_amount'])
             buy_btc_got = float(result.get('executed_qty', result.get('amount', 0)))
@@ -253,9 +271,13 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         buy_btc_got = decision['buy_amount'] / price
         buy_cost_actual = decision['buy_amount']
         buy_fee = buy_cost_actual * config.BUY_FEE_PCT
-        print(f'[BOT] [DRY RUN] Would buy {decision["buy_amount"]:.2f} {currency}')
+        print(f'[BOT] DRY RUN BUY: {decision["buy_amount"]:.2f} {currency} → {buy_btc_got:.8f} BTC @ {price:,.2f} (fee: {buy_fee:.2f})')
 
     # SELL
+    # ═══════════════════════════════════════════════════════════════
+    # DRY RUN SAFETY GATE (SELL)
+    # When dry_run=True, exchange.market_sell() is NEVER called.
+    # ═══════════════════════════════════════════════════════════════
     if decision['sell_amount'] > 0 and not dry_run:
         btc_to_sell = decision['sell_amount'] / price
         if btc_to_sell >= btc_balance * 0.99:
@@ -265,7 +287,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             print(f'[BOT] Sell amount {btc_to_sell * price:.2f} below minimum {min_sell}. Skipping.')
             decision['sell_amount'] = 0
         else:
-            print(f'[BOT] SELLING {btc_to_sell:.8f} BTC (~{decision["sell_amount"]:.2f} {currency})...')
+            print(f'[BOT] LIVE SELL: {btc_to_sell:.8f} BTC (~{decision["sell_amount"]:.2f} {currency})...')
             try:
                 result = exchange.market_sell(btc_to_sell)
                 sell_btc_sold = float(result.get('executed_qty', result.get('amount', 0)))
@@ -282,7 +304,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         sell_btc_sold = decision['sell_amount'] / price
         sell_proceeds_actual = decision['sell_amount']
         sell_fee = sell_proceeds_actual * config.SELL_FEE_PCT
-        print(f'[BOT] [DRY RUN] Would sell {decision["sell_amount"]:.2f} {currency} of BTC')
+        print(f'[BOT] DRY RUN SELL: {sell_btc_sold:.8f} BTC → {sell_proceeds_actual:.2f} {currency} (fee: {sell_fee:.2f})')
 
     # ── 10. Update state ──
     bot_state = state_mod.update_state_after_run(
@@ -307,8 +329,18 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         )
 
     # Track portfolio value
-    current_btc = _get_btc_balance(exchange) if not dry_run else btc_balance + buy_btc_got - sell_btc_sold
-    current_cash = _get_cash_balance(exchange) if not dry_run else cash_balance - buy_cost_actual + sell_proceeds_actual - buy_fee - sell_fee
+    if dry_run:
+        # DRY RUN: Use virtual balances (no exchange API calls)
+        current_btc = btc_balance + buy_btc_got - sell_btc_sold
+        current_cash = cash_balance - buy_cost_actual + sell_proceeds_actual - buy_fee - sell_fee
+        # Save updated virtual balances to state for next run
+        bot_state['dry_run_btc'] = round(current_btc, 8)
+        bot_state['dry_run_cash'] = round(current_cash, 2)
+        print(f'[BOT] DRY RUN portfolio: BTC={current_btc:.8f} Cash={current_cash:,.2f} {currency}')
+    else:
+        # LIVE: Fetch latest real balances from exchange
+        current_btc = _get_btc_balance(exchange)
+        current_cash = _get_cash_balance(exchange)
     portfolio = current_btc * price + current_cash
 
     if portfolio > bot_state['peak_value']:

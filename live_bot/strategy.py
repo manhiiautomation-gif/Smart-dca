@@ -24,10 +24,23 @@ _MVRV_HISTORY_MAX = max(_MVRV_LOOKUP.keys())
 
 
 def get_mvrv_for_date(d: date) -> float:
-    """Get embedded MVRV value for a date. Returns NaN if out of range."""
+    """Get embedded MVRV value for a date.
+
+    Falls back to the most recent available value if exact date is missing
+    (e.g. embedded data is 1 day behind). Returns NaN only if entirely
+    out of range.
+    """
     if not isinstance(d, date):
         d = date.fromisoformat(str(d))
-    return _MVRV_LOOKUP.get(d, float('nan'))
+    if d in _MVRV_LOOKUP:
+        return _MVRV_LOOKUP[d]
+    # Fallback: use most recent available MVRV value
+    if _MVRV_HISTORY_MIN <= d <= _MVRV_HISTORY_MAX + timedelta(days=7):
+        best = _MVRV_HISTORY_MAX
+        print(f'[BOT] MVRV: No data for {d}, using latest available: {best} '
+              f'(MVRV={_MVRV_LOOKUP[best]:.3f})')
+        return _MVRV_LOOKUP[best]
+    return float('nan')
 
 
 def compute_mvrv_percentile(d: date, current_mvrv: float, window: int = 365) -> float:

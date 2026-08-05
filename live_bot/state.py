@@ -35,6 +35,10 @@ DEFAULT_STATE = {
     'last_price': 0.0,
     'last_exchange_currency': 'USDT',
     'last_dry_run': False,
+    # Dry-run virtual balances (only used when dry_run=True)
+    # These allow the bot to simulate trades without real money
+    'dry_run_cash': None,   # None = not initialized yet, will be set on first dry-run
+    'dry_run_btc': None,
     # Price cache for indicator calculation (list of [date_str, price])
     'price_history': [],
 }
@@ -71,7 +75,9 @@ def update_state_after_run(state: dict, decision: dict,
                           exchange_currency: str,
                           buy_fee: float = 0.0, sell_fee: float = 0.0) -> dict:
     """Update state after a trading decision has been executed."""
+    from datetime import datetime as _dt
     today = date.today().isoformat()
+    now_str = _dt.now().strftime('%Y-%m-%d %H:%M')
     state['last_run_date'] = today
     state['run_count'] += 1
     state['cooldown'] = decision['new_cooldown']
@@ -83,12 +89,12 @@ def update_state_after_run(state: dict, decision: dict,
         state['buy_count'] += 1
         state['total_invested'] += decision['buy_amount']
         state['adjusted_invested'] += decision['buy_amount']
-        state['last_trade_date'] = today
+        state['last_trade_date'] = now_str
 
     if decision['sell_amount'] > 0:
         state['sell_count'] += 1
         state['total_sell_proceeds'] += decision['sell_amount']
-        state['last_sell_date'] = today
+        state['last_sell_date'] = now_str
 
     return state
 
@@ -105,9 +111,10 @@ def append_trade_log(log_path: str, trade_type: str, amount: float,
                      btc_amount: float, price: float, fee: float = 0.0,
                      extra: dict = None):
     """Append a trade record to the trade log. Atomic write."""
+    from datetime import datetime as _dt
     log = load_trade_log(log_path)
     record = {
-        'date': date.today().isoformat(),
+        'date': _dt.now().strftime('%Y-%m-%d %H:%M'),
         'type': trade_type,  # 'buy' or 'sell'
         'amount': round(amount, 2),
         'btc': round(btc_amount, 8),
