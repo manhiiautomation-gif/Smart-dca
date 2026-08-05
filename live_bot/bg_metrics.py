@@ -9,8 +9,10 @@ Fetches real on-chain data from BGeometrics API:
 
 Cache strategy:
   - Full history cached in bg_cache.json (up to 5 years)
-  - Live mode: incremental fetch if cache is stale (>12h old)
-  - Backtest: load full cache, fetch only if missing
+  - Historical data is IMMUTABLE — never re-fetched once cached
+  - Only fetches data AFTER the newest cached date (incremental gap-fill)
+  - Live mode: fetches only if cache newest date < yesterday
+  - Backtest: uses full cache as-is, fetches only missing tail
   - Rate limit: max 10 req/hr on free tier, tracked via timestamps
 
 Usage:
@@ -19,7 +21,7 @@ Usage:
 
     # Backtest: pre-load full history
     from live_bot.bg_metrics import ensure_cache, get_cached_series
-    ensure_cache()  # fetches all metrics if cache missing/stale
+    ensure_cache()  # fetches only missing data (respects existing cache)
     series = get_cached_series('sth_sopr')  # {date: float, ...}
 """
 
@@ -49,8 +51,9 @@ _METRIC_DEFS = {
     'mvrv':               ('mvrv',               'mvrv'),
 }
 
-# Max age before cache is considered stale (seconds)
-_CACHE_FRESHNESS = 12 * 3600  # 12 hours
+# For live mode: how far back from today we consider "needs fresh data"
+# If cache newest date >= (today - LIVE_FRESHNESS_DAYS), skip fetch
+_LIVE_FRESHNESS_DAYS = 2  # cache covers up to yesterday = fresh enough
 
 # Rate limit tracking
 _MAX_REQUESTS_PER_HOUR = 10
@@ -140,8 +143,13 @@ def _fetch_endpoint(endpoint: str, token: str, timeout: int = 20) -> Optional[Li
         return None
 
 
-def _parse_series(raw: List[dict], json_key: str) -> Dict[str, float]:
-    """Parse API response into {date_str: float} dict."""
+def _parse_series(raw: List[dict], json_key: str, metric_name: str = '') -> Dict[str, float]:
+    """Parse API response into {date_str: float} dict.
+
+    Smart key detection: if the expected json_key yields 0 results,
+    auto-detect the value key by finding the first non-'d' key
+    with numeric values.
+    """
     result = {}
     for row in raw:
         d_str = row.get('d', '')
@@ -150,10 +158,36 @@ def _parse_series(raw: List[dict], json_key: str) -> Dict[str, float]:
             continue
         try:
             fval = float(val)
-            if fval > 0 or not math.isnan(fval):
+            if not math.isnan(fval):
                 result[d_str] = fval
         except (ValueError, TypeError):
             continue
+
+    # Smart fallback: if expected key yielded nothing, try auto-detect
+    if not result and len(raw) > 0:
+        sample = raw[0]
+        for key, val in sample.items():
+            if key == 'd':
+                continue
+            # Try this key
+            candidate = {}
+            for row in raw:
+                d_str = row.get('d', '')
+                v = row.get(key)
+                if not d_str or v is None:
+                    continue
+                try:
+                    fval = float(v)
+                    if not math.isnan(fval):
+                        candidate[d_str] = fval
+                except (ValueError, TypeError):
+                    continue
+            if len(candidate) > len(result):
+                result = candidate
+                if metric_name:
+                    print(f'[BG] {metric_name}: auto-detected key "{key}" ' +
+                          f'(expected "{json_key}", got {len(result)} records)')
+
     return result
 
 
@@ -191,8 +225,58 @@ def get_sopr(target_date, cache=None, token=None) -> float:
     return _lookup(series, target_date)
 
 
+def _merge_and_trim(metric_data: Dict[str, float], new_series: Dict[str, float], metric_name: str, cache: dict) -> Dict[str, float]:
+    """Merge new data into existing cache, trim to 5 years, save to disk."""
+    merged = {**metric_data, **new_series}
+
+    # Trim to max 5 years (1826 days) from newest
+    if merged:
+        newest_date = max(merged.keys())
+        cutoff = (date.fromisoformat(newest_date) - timedelta(days=1826)).isoformat()
+        merged = {d: v for d, v in merged.items() if d >= cutoff}
+
+    if 'metrics' not in cache:
+        cache['metrics'] = {}
+    cache['metrics'][metric_name] = merged
+    if 'last_fetch' not in cache:
+        cache['last_fetch'] = {}
+    cache['last_fetch'][metric_name] = datetime.now(timezone.utc).isoformat()
+    _save_cache(cache)
+    print(f'[BG] {metric_name}: cached {len(merged)} days '
+          f'({min(merged.keys())} → {max(merged.keys())})')
+    return merged
+
+
+def _needs_incremental_fetch(metric_data: Dict[str, float], min_days: int = 30) -> bool:
+    """Check if there's a gap between cached data and today.
+
+    Historical data is immutable, so we ONLY fetch if the cache doesn't
+    reach recent dates. Returns True if we need to fetch.
+
+    Args:
+        metric_data: existing cached {date_str: float} dict
+        min_days: minimum days of data to consider cache "complete enough"
+                   to skip re-fetch. If cache has fewer days, it's likely
+                   a failed partial fetch (e.g. only 1 day due to key mismatch).
+    """
+    if not metric_data or len(metric_data) < min_days:
+        return True  # No data or too little — must fetch
+
+    newest = max(metric_data.keys())
+    gap_days = _days_ago(newest)
+
+    if gap_days <= _LIVE_FRESHNESS_DAYS:
+        return False
+
+    return True
+
+
 def _get_metric_series(metric_name: str, cache=None, token=None) -> Optional[Dict[str, float]]:
-    """Get full series for a metric, fetching if cache is stale."""
+    """Get full series for a metric, fetching only if gap detected.
+
+    Key behavior: HISTORICAL DATA IS NEVER RE-FETCHED.
+    Only the gap between newest cached date and today is filled.
+    """
     tkn = token or _TOKEN
     if not tkn:
         return None
@@ -203,45 +287,23 @@ def _get_metric_series(metric_name: str, cache=None, token=None) -> Optional[Dic
     metrics = cache.get('metrics', {})
     metric_data = metrics.get(metric_name, {})
 
-    # Check if cache has recent data
-    if metric_data:
-        dates_in_cache = sorted(metric_data.keys())
-        newest = dates_in_cache[-1] if dates_in_cache else ''
-        last_fetch = cache.get('last_fetch', {}).get(metric_name, '')
+    # Check if we need to fetch (only for missing recent data)
+    if not _needs_incremental_fetch(metric_data):
+        return metric_data
 
-        # Cache is fresh if newest data is within 2 days and fetched recently
-        if (newest and _days_ago(newest) <= 2
-                and last_fetch and _seconds_ago(last_fetch) < _CACHE_FRESHNESS):
-            return metric_data
-
-    # Need to fetch
+    # Need to fetch — but API returns ALL history, we just merge
     endpoint, json_key = _METRIC_DEFS[metric_name]
-    print(f'[BG] Fetching {metric_name} from BGeometrics...')
+    newest_cached = max(metric_data.keys()) if metric_data else ''
+    print(f'[BG] {metric_name}: cache ends {newest_cached}, fetching incremental...')
     raw = _fetch_endpoint(endpoint, tkn)
     if raw is None:
-        # Return stale cache if available
+        # Return existing cache even if stale
         return metric_data if metric_data else None
 
-    # Parse and merge with existing cache
-    new_series = _parse_series(raw, json_key)
+    # Parse and merge
+    new_series = _parse_series(raw, json_key, metric_name=metric_name)
     if new_series:
-        # Merge: new data overwrites old
-        merged = {**metric_data, **new_series}
-
-        # Trim to max 5 years (1826 days) from newest
-        if merged:
-            newest_date = max(merged.keys())
-            cutoff = (date.fromisoformat(newest_date) - timedelta(days=1826)).isoformat()
-            merged = {d: v for d, v in merged.items() if d >= cutoff}
-
-        metrics[metric_name] = merged
-        cache['metrics'] = metrics
-        if 'last_fetch' not in cache:
-            cache['last_fetch'] = {}
-        cache['last_fetch'][metric_name] = datetime.now(timezone.utc).isoformat()
-        _save_cache(cache)
-        print(f'[BG] {metric_name}: cached {len(merged)} days '
-              f'({min(merged.keys())} → {max(merged.keys())})')
+        merged = _merge_and_trim(metric_data, new_series, metric_name, cache)
         return merged
 
     return metric_data if metric_data else None
@@ -288,15 +350,20 @@ def _seconds_ago(iso_str: str) -> float:
 
 # ── Public API: backtest support ────────────────────────────────────────
 
-def ensure_cache(token=None, metrics=None) -> dict:
-    """Ensure cache is populated with full history for backtest.
+def ensure_cache(token=None, metrics=None, force_refetch=False) -> dict:
+    """Ensure cache is populated for backtest.
 
-    Fetches specified metrics (or all) if cache is missing/stale.
-    Returns the full cache dict.
+    SMART FETCH: Only fetches if there's a gap between cached data and today.
+    Historical data (already in cache) is NEVER re-fetched.
+    Use force_refetch=True only if you suspect data corruption.
 
     Args:
         token: BGeometrics token (default: from env)
         metrics: list of metric names to fetch (default: core 3)
+        force_refetch: if True, ignore cache and re-fetch everything
+
+    Returns:
+        The full cache dict.
     """
     tkn = token or _TOKEN
     if not tkn:
@@ -310,43 +377,35 @@ def ensure_cache(token=None, metrics=None) -> dict:
 
     for metric_name in metrics:
         metric_data = cache.get('metrics', {}).get(metric_name, {})
-        last_fetch = cache.get('last_fetch', {}).get(metric_name, '')
 
-        # Skip if cache has data and is fresh
-        if (metric_data and last_fetch
-                and _seconds_ago(last_fetch) < _CACHE_FRESHNESS):
-            print(f'[BG] {metric_name}: using cache ({len(metric_data)} days)')
+        if force_refetch:
+            # Wipe and re-fetch
+            print(f'[BG] {metric_name}: force re-fetching...')
+            metric_data = {}
+        elif not _needs_incremental_fetch(metric_data):
+            # Cache has recent data — no fetch needed
+            newest = max(metric_data.keys()) if metric_data else 'N/A'
+            print(f'[BG] {metric_name}: using cache ({len(metric_data)} days, newest={newest})')
             continue
 
-        # Fetch
+        # Need to fetch (first time or gap detected)
         endpoint, json_key = _METRIC_DEFS[metric_name]
-        print(f'[BG] Fetching {metric_name} for backtest...')
+        newest_cached = max(metric_data.keys()) if metric_data else 'empty'
+        print(f'[BG] {metric_name}: cache ends {newest_cached}, fetching...')
         raw = _fetch_endpoint(endpoint, tkn)
         if raw is None:
             if metric_data:
-                print(f'[BG] {metric_name}: using stale cache ({len(metric_data)} days)')
+                print(f'[BG] {metric_name}: fetch failed, using existing cache ({len(metric_data)} days)')
             else:
                 print(f'[BG] {metric_name}: no data available')
             continue
 
-        new_series = _parse_series(raw, json_key)
+        new_series = _parse_series(raw, json_key, metric_name=metric_name)
         if new_series:
-            merged = {**metric_data, **new_series}
-            # Trim to 5 years
-            if merged:
-                newest_date = max(merged.keys())
-                cutoff = (date.fromisoformat(newest_date) - timedelta(days=1826)).isoformat()
-                merged = {d: v for d, v in merged.items() if d >= cutoff}
-
-            if 'metrics' not in cache:
-                cache['metrics'] = {}
-            cache['metrics'][metric_name] = merged
-            if 'last_fetch' not in cache:
-                cache['last_fetch'] = {}
-            cache['last_fetch'][metric_name] = datetime.now(timezone.utc).isoformat()
-            _save_cache(cache)
-            print(f'[BG] {metric_name}: cached {len(merged)} days '
-                  f'({min(merged.keys())} → {max(merged.keys())})')
+            _merge_and_trim(metric_data, new_series, metric_name, cache)
+            cache = _load_cache()  # re-read after save
+        else:
+            print(f'[BG] {metric_name}: API returned no usable data')
 
     return cache
 
