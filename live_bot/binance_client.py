@@ -1,9 +1,9 @@
-'Binance Spot API client for Phoenix v5.1 bot.
+"""Binance Spot API client for Phoenix v5.1 bot.
 
 Supports: get price, get klines, get balance, market buy, market sell.
 All trading in USDT (BTCUSDT pair).
 Includes retry with exponential backoff and proper klines pagination.
-'
+"""
 
 import time
 import hmac
