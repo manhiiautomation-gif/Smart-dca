@@ -11,6 +11,14 @@ on:
           - update
           - kill
           - resume
+      exchange:
+        description: 'Exchange for update action'
+        required: false
+        type: choice
+        default: 'binance'
+        options:
+          - binance
+          - bitkub
       reason:
         description: 'Kill reason (for kill action)'
         required: false
@@ -20,6 +28,7 @@ on:
 jobs:
   action:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
@@ -36,12 +45,15 @@ jobs:
 
       - name: Handle action
         env:
+          BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
+          BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}
           BITKUB_API_KEY: ${{ secrets.BITKUB_API_KEY }}
           BITKUB_API_SECRET: ${{ secrets.BITKUB_API_SECRET }}
           BOT_ENABLED: 'true'
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           KILL_REASON: ${{ github.event.inputs.reason }}
+          UPDATE_EXCHANGE: ${{ github.event.inputs.exchange || 'binance' }}
         run: |
           ACTION="${{ github.event.inputs.action }}"
 
@@ -52,8 +64,8 @@ jobs:
             echo "[ACTION] Resuming bot (deactivating kill switch)"
             python3 -c 'import json;ks={"enabled":True,"reason":"","activated_at":None,"activated_by":"dashboard"};open("kill_switch.json","w").write(json.dumps(ks,indent=2));print("Kill switch deactivated")'
           elif [ "$ACTION" = "update" ]; then
-            echo "[ACTION] Running bot dry-run + updating dashboard"
-            python live_bot/main.py --exchange bitkub --state-file live_bot/state.json --dry-run || true
+            echo "[ACTION] Running bot dry-run on $UPDATE_EXCHANGE + updating dashboard"
+            python live_bot/main.py --exchange "$UPDATE_EXCHANGE" --state-file live_bot/state.json --dry-run || true
           fi
 
       - name: Generate dashboard
@@ -68,7 +80,9 @@ jobs:
             echo "No changes to commit"
           else
             git commit -m "dashboard: ${{ github.event.inputs.action }} $(date +%Y-%m-%d\ %H:%M)"
-            git push
+            for i in 1 2 3; do
+              git pull --rebase && git push && break || sleep 10
+            done
           fi
 
       - name: Trigger Netlify deploy

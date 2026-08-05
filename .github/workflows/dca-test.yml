@@ -32,6 +32,7 @@ on:
 jobs:
   dca_test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
@@ -81,3 +82,9 @@ jobs:
               sleep 10
             done
           fi
+
+      - name: Trigger Netlify deploy
+        env:
+          HOOK_URL: ${{ secrets.NETLIFY_DEPLOY_HOOK }}
+        run: |
+          [ -n "$HOOK_URL" ] && curl -s -X POST "$HOOK_URL" || true
