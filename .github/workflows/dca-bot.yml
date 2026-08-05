@@ -89,3 +89,8 @@ jobs:
             git commit -m "bot: daily update $(date +%Y-%m-%d)"
             git push
           fi
+
+      - name: Trigger Netlify deploy
+        if: ${{ secrets.NETLIFY_DEPLOY_HOOK != '' }}
+        run: |
+          curl -s -X POST "${{ secrets.NETLIFY_DEPLOY_HOOK }}" || true

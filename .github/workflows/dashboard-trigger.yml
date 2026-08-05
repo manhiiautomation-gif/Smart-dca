@@ -93,3 +93,8 @@ print('Kill switch deactivated')
             git commit -m "dashboard: ${{ github.event.inputs.action }} $(date +%Y-%m-%d\ %H:%M)"
             git push
           fi
+
+      - name: Trigger Netlify deploy
+        if: ${{ secrets.NETLIFY_DEPLOY_HOOK != '' }}
+        run: |
+          curl -s -X POST "${{ secrets.NETLIFY_DEPLOY_HOOK }}" || true
