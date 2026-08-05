@@ -72,6 +72,7 @@ jobs:
           fi
 
       - name: Trigger Netlify deploy
-        if: ${{ secrets.NETLIFY_DEPLOY_HOOK != '' }}
+        env:
+          HOOK_URL: ${{ secrets.NETLIFY_DEPLOY_HOOK }}
         run: |
-          curl -s -X POST "${{ secrets.NETLIFY_DEPLOY_HOOK }}" || true
+          [ -n "$HOOK_URL" ] && curl -s -X POST "$HOOK_URL" || true
