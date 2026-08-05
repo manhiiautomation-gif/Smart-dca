@@ -212,36 +212,36 @@ def phoenix_v5_1_decision(
     new_cooldown = cooldown
     path_taken = 'none'
 
-    portfolio_val = btc_balance * price + cash_reserve
+    btc_val = btc_balance * price  # max sellable value in currency
 
     if cooldown == 0 and btc_balance > 0:
         if path_a and sell_score >= 45:
             path_taken = 'A'
             if sell_score >= 75:
-                sell_amount = portfolio_val * 0.40
+                sell_amount = btc_val * 0.40
                 new_cooldown = 35
             elif sell_score >= 60:
-                sell_amount = portfolio_val * 0.18
+                sell_amount = btc_val * 0.18
                 new_cooldown = 28
             elif sell_score >= 50:
-                sell_amount = portfolio_val * 0.08
+                sell_amount = btc_val * 0.08
                 new_cooldown = 22
             else:
-                sell_amount = portfolio_val * 0.04
+                sell_amount = btc_val * 0.04
                 new_cooldown = 18
 
         elif path_a_ext and sell_score >= 48:
             path_taken = 'A-Ext'
-            sell_amount = portfolio_val * 0.08
+            sell_amount = btc_val * 0.08
             new_cooldown = 22
 
         elif path_b and sell_score >= 48:
             path_taken = 'B'
             if sell_score >= 56:
-                sell_amount = portfolio_val * 0.08
+                sell_amount = btc_val * 0.08
                 new_cooldown = 28
             else:
-                sell_amount = portfolio_val * 0.04
+                sell_amount = btc_val * 0.04
                 new_cooldown = 22
 
     # If buy_amount is effectively zero, set to 0

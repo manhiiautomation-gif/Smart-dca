@@ -49,6 +49,8 @@ def main():
                         help='Path to state JSON file')
     parser.add_argument('--force', '-f', action='store_true',
                         help='Force run even if already ran today (for testing)')
+    parser.add_argument('--loop', '-l', type=int, default=0,
+                        help='Loop mode: run every N minutes (dry-run only, e.g. --loop 10)')
     args = parser.parse_args()
 
     # Override config
@@ -117,12 +119,39 @@ def main():
         print('[BOT] ═══════════════════════════════════════════════════')
 
     try:
-        bot_state = engine.run_daily(
-            exchange, bot_state, dry_run=dry_run,
-            trade_log_path=trade_log_path,
-            kill_switch_path=kill_switch_path,
-            force=args.force,
-        )
+        if args.loop > 0:
+            # ── Loop mode: dry-run testing at N-minute intervals ──
+            import time
+            if not dry_run:
+                print('ERROR: --loop is only allowed in dry-run mode.')
+                sys.exit(1)
+            interval_sec = args.loop * 60
+            print(f'[BOT] Loop mode: running every {args.loop} minutes (Ctrl+C to stop)')
+            run_num = 0
+            while True:
+                run_num += 1
+                print(f'\n{"="*50}')
+                print(f'[BOT] Loop iteration #{run_num} — {time.strftime("%Y-%m-%d %H:%M:%S")}')
+                print(f'{"="*50}')
+                bot_state = engine.run_daily(
+                    exchange, bot_state, dry_run=True,
+                    trade_log_path=trade_log_path,
+                    kill_switch_path=kill_switch_path,
+                    force=True,  # Always force in loop mode
+                )
+                state_mod.save_state(bot_state, state_path)
+                print(f'[BOT] Sleeping {args.loop} minutes...')
+                time.sleep(interval_sec)
+        else:
+            # Single run mode
+            bot_state = engine.run_daily(
+                exchange, bot_state, dry_run=dry_run,
+                trade_log_path=trade_log_path,
+                kill_switch_path=kill_switch_path,
+                force=args.force,
+            )
+    except KeyboardInterrupt:
+        print('\n[BOT] Loop stopped by user.')
     except Exception as e:
         print(f'[BOT] FATAL ERROR: {e}')
         import traceback

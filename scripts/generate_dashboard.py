@@ -138,8 +138,10 @@ def generate_dashboard(state_path='live_bot/state.json',
     recent_trades = trade_log[-10:][::-1]  # newest first
 
     # Kill switch status
-    bot_alive = ks_status['is_alive']
-    l1_ok = ks_status['l1_enabled']
+    # Use L2 (kill_switch.json) as primary source for dashboard generation.
+    # L1 (BOT_ENABLED env var) is only meaningful at runtime, not at static gen time.
+    bot_alive = ks_status['l2_enabled']
+    l1_ok = True  # Cannot reliably check L1 at dashboard gen time
     l2_ok = ks_status['l2_enabled']
     ks_reason = ks_status.get('l2_reason', '')
     ks_time = ks_status.get('l2_activated_at', '')

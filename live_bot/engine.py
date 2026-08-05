@@ -151,15 +151,39 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     print(f'[BOT] SMA200={sma_200:,.2f} RSI={rsi_val:.1f} MACD_H={macd_h:.4f}')
     print(f'[BOT] MACD_bear={macd_bear} MACD_declining={macd_declining} RSI_div={rsi_div}')
 
-    # ── 4. Get MVRV from embedded history ──
+    # ── 4. Get MVRV from embedded history, with web fallback ──
     mvrv_val = strategy.get_mvrv_for_date(today)
     if math.isnan(mvrv_val):
-        print(f'[BOT] WARNING: No embedded MVRV for {today}. Skipping.')
-        notifier.send_telegram(
-            f'Phoenix v5.1 WARNING: No MVRV data for {today}. '
-            'Embedded data may need updating. Skipping trade.'
-        )
-        return bot_state
+        # Embedded data is stale — try web fetch (ahasignals/BGeometrics)
+        print(f'[BOT] No embedded MVRV for {today}, trying web fallback...')
+        from . import mvrv_fetcher
+        web_mvrv, web_date, web_source = mvrv_fetcher.fetch_mvrv_from_web()
+        if web_mvrv is not None:
+            print(f'[BOT] Web MVRV: {web_mvrv:.4f} ({web_date}, {web_source})')
+            # Append to embedded history for future runs
+            if web_date and web_date > strategy._MVRV_HISTORY_MAX:
+                mvrv_fetcher.append_mvrv_to_history(web_mvrv, web_date)
+            mvrv_val = web_mvrv
+        else:
+            print(f'[BOT] WARNING: Web fetch also failed: {web_source}')
+            notifier.send_telegram(
+                f'Phoenix v5.1 WARNING: No MVRV data for {today}. '
+                'Embedded + web fallback both failed. Skipping trade.'
+            )
+            return bot_state
+    else:
+        # Embedded data exists — check if it's stale (>1 day old)
+        # and try to update history in background
+        from datetime import timedelta as td
+        if today - strategy._MVRV_HISTORY_MAX > td(days=1):
+            print(f'[BOT] MVRV history stale (ends {strategy._MVRV_HISTORY_MAX}), '
+                  f'attempting background update...')
+            try:
+                from . import mvrv_fetcher
+                ok, msg = mvrv_fetcher.try_update_mvrv()
+                print(f'[BOT] MVRV update: {msg}')
+            except Exception as e:
+                print(f'[BOT] MVRV background update failed: {e}')
 
     mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val)
     mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val)
@@ -271,6 +295,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         buy_btc_got = decision['buy_amount'] / price
         buy_cost_actual = decision['buy_amount']
         buy_fee = buy_cost_actual * config.BUY_FEE_PCT
+        bot_state['total_btc_bought'] += buy_btc_got
         print(f'[BOT] DRY RUN BUY: {decision["buy_amount"]:.2f} {currency} → {buy_btc_got:.8f} BTC @ {price:,.2f} (fee: {buy_fee:.2f})')
 
     # SELL
@@ -304,6 +329,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         sell_btc_sold = decision['sell_amount'] / price
         sell_proceeds_actual = decision['sell_amount']
         sell_fee = sell_proceeds_actual * config.SELL_FEE_PCT
+        bot_state['total_btc_sold'] += sell_btc_sold
         print(f'[BOT] DRY RUN SELL: {sell_btc_sold:.8f} BTC → {sell_proceeds_actual:.2f} {currency} (fee: {sell_fee:.2f})')
 
     # ── 10. Update state ──
