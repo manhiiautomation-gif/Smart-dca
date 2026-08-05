@@ -503,9 +503,52 @@ def build_html(**kw) -> str:
         .mvrv-zone.yellow {{ background: var(--yellow-bg); color: var(--yellow); }}
         .mvrv-zone.red {{ background: var(--red-bg); color: var(--red); }}
         .mvrv-zone.neutral {{ background: rgba(139,148,158,0.1); color: var(--text-dim); }}
+
+        /* Control Panel */
+        .ctrl-panel {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }}
+        .ctrl-btn {{ padding: 7px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px; }}
+        .ctrl-btn:hover:not(:disabled) {{ border-color: var(--blue); background: var(--blue-bg); }}
+        .ctrl-btn:disabled {{ opacity: 0.5; cursor: not-allowed; }}
+        .ctrl-btn.kill {{ border-color: var(--red); color: var(--red); }}
+        .ctrl-btn.kill:hover:not(:disabled) {{ background: var(--red-bg); }}
+        .ctrl-btn.resume {{ border-color: var(--green); color: var(--green); }}
+        .ctrl-btn.resume:hover:not(:disabled) {{ background: var(--green-bg); }}
+        .ctrl-btn .spinner {{ width: 12px; height: 12px; border: 2px solid transparent; border-top-color: currentColor; border-radius: 50%; animation: spin 0.6s linear infinite; display: none; }}
+        .ctrl-btn.loading .spinner {{ display: inline-block; }}
+        @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+        .ctrl-settings {{ margin-left: auto; display: flex; align-items: center; gap: 6px; }}
+        .ctrl-settings input {{ padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 0.75rem; width: 200px; }}
+        .ctrl-settings input::placeholder {{ color: var(--text-dim); }}
+        .ctrl-settings .save-btn {{ padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); color: var(--text-dim); font-size: 0.75rem; cursor: pointer; }}
+        .ctrl-settings .save-btn:hover {{ border-color: var(--blue); }}
+        .toast-container {{ position: fixed; top: 16px; right: 16px; z-index: 9999; }}
+        .toast {{ padding: 10px 16px; border-radius: 8px; margin-bottom: 8px; font-size: 0.8rem; font-weight: 500; animation: slideIn 0.3s ease; max-width: 320px; }}
+        .toast.success {{ background: var(--green-bg); color: var(--green); border: 1px solid var(--green); }}
+        .toast.error {{ background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }}
+        .toast.info {{ background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue); }}
+        @keyframes slideIn {{ from {{ transform: translateX(100%); opacity: 0; }} to {{ transform: translateX(0); opacity: 1; }} }}
+        .confirm-overlay {{ position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 9998; }}
+        .confirm-overlay.active {{ display: flex; }}
+        .confirm-box {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; max-width: 400px; width: 90%; }}
+        .confirm-box h3 {{ margin-bottom: 8px; }}
+        .confirm-box p {{ color: var(--text-dim); font-size: 0.85rem; margin-bottom: 16px; }}
+        .confirm-box input {{ width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 0.85rem; margin-bottom: 12px; }}
+        .confirm-actions {{ display: flex; gap: 8px; justify-content: flex-end; }}
     </style>
 </head>
 <body>
+    <div class="toast-container" id="toasts"></div>
+    <div class="confirm-overlay" id="confirmOverlay">
+        <div class="confirm-box">
+            <h3 id="confirmTitle">Confirm</h3>
+            <p id="confirmMsg"></p>
+            <input type="text" id="confirmInput" placeholder="Reason (optional)">
+            <div class="confirm-actions">
+                <button class="ctrl-btn" onclick="closeConfirm()">Cancel</button>
+                <button class="ctrl-btn kill" id="confirmOk">Confirm</button>
+            </div>
+        </div>
+    </div>
     <!-- Header -->
     <div class="header">
         <div class="header-left">
@@ -514,6 +557,29 @@ def build_html(**kw) -> str:
         </div>
         <div class="header-right">
             {status_html}
+        </div>
+    </div>
+
+    <!-- Control Panel -->
+    <div class="card" style="margin-bottom:16px;">
+        <div class="ctrl-panel">
+            <button class="ctrl-btn" id="btnUpdate" onclick="doUpdate()">
+                <span class="spinner"></span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+                Update
+            </button>
+            <button class="ctrl-btn {'kill' if bot_alive else 'resume'}" id="btnKill" onclick="doKillSwitch()">
+                <span class="spinner"></span>
+                {'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> Kill Bot' if bot_alive else '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> Resume Bot'}
+            </button>
+            <a href="https://github.com/manhiiautomation-gif/Smart-dca/actions/workflows/dashboard-trigger.yml" target="_blank" class="ctrl-btn" style="text-decoration:none;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                Logs
+            </a>
+            <div class="ctrl-settings">
+                <input type="password" id="tokenInput" placeholder="GitHub PAT (saved in browser)" />
+                <button class="save-btn" onclick="saveToken()">Save</button>
+            </div>
         </div>
     </div>
 
@@ -732,6 +798,114 @@ def build_html(**kw) -> str:
     <div class="footer">
         Phoenix v5.1 DCA Bot | Generated: {now_str} | Updated daily
     </div>
+
+    <script>
+    (function() {{
+        var REPO = 'manhiiautomation-gif/Smart-dca';
+        var WORKFLOW = 'dashboard-trigger.yml';
+        var API = 'https://api.github.com/repos/' + REPO + '/actions/workflows/' + WORKFLOW + '/dispatches';
+        function getToken() {{ return localStorage.getItem('gh_pat') || ''; }}
+        function setToken(t) {{ localStorage.setItem('gh_pat', t); }}
+        var savedToken = getToken();
+        if (savedToken) document.getElementById('tokenInput').value = '\u2022\u2022\u2022\u2022' + savedToken.slice(-4);
+        window.saveToken = function() {{
+            var input = document.getElementById('tokenInput');
+            var val = input.value;
+            if (val && !val.startsWith('\u2022')) {{
+                setToken(val.trim());
+                input.value = '\u2022\u2022\u2022\u2022' + val.trim().slice(-4);
+                showToast('Token saved', 'success');
+            }}
+        }};
+        function showToast(msg, type) {{
+            var c = document.getElementById('toasts');
+            var t = document.createElement('div');
+            t.className = 'toast ' + (type || 'info');
+            t.textContent = msg;
+            c.appendChild(t);
+            setTimeout(function() {{ t.remove(); }}, 4000);
+        }}
+        function setLoading(btn, on) {{
+            if (on) btn.classList.add('loading'); else btn.classList.remove('loading');
+            btn.disabled = on;
+        }}
+        function dispatch(action, reason) {{
+            var token = getToken();
+            if (!token) {{ showToast('Please enter GitHub PAT first', 'error'); return false; }}
+            var body = {{ ref: 'main', inputs: {{ action: action }} }};
+            if (reason) body.inputs.reason = reason;
+            fetch(API, {{
+                method: 'POST',
+                headers: {{ 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github.v3+json', 'Content-Type': 'application/json' }},
+                body: JSON.stringify(body)
+            }}).then(function(r) {{
+                if (r.status === 204) return true;
+                return r.json().then(function(e) {{ throw new Error(e.message || 'HTTP ' + r.status); }});
+            }}).then(function() {{
+                var labels = {{ update: 'Bot update + dashboard refresh started', kill: 'Kill switch activated', resume: 'Bot resumed' }};
+                showToast(labels[action] || 'Action dispatched', 'success');
+            }}).catch(function(e) {{ showToast('Error: ' + e.message, 'error'); }});
+            return false;
+        }}
+        window.doUpdate = function() {{
+            var btn = document.getElementById('btnUpdate');
+            setLoading(btn, true);
+            dispatch('update', '');
+            setTimeout(function() {{ setLoading(btn, false); }}, 5000);
+        }};
+        var confirmCallback = null;
+        window.doKillSwitch = function() {{
+            var isAlive = {str(bot_alive).lower()};
+            var overlay = document.getElementById('confirmOverlay');
+            var input = document.getElementById('confirmInput');
+            var okBtn = document.getElementById('confirmOk');
+            var title = document.getElementById('confirmTitle');
+            var msg = document.getElementById('confirmMsg');
+            if (isAlive) {{
+                title.textContent = 'Kill Bot?';
+                msg.textContent = 'Bot \u0e08\u0e30\u0e2b\u0e22\u0e38\u0e14\u0e0b\u0e37\u0e49\u0e2d\u0e02\u0e32\u0e22\u0e17\u0e31\u0e19\u0e17\u0e35';
+                input.value = '';
+                input.placeholder = 'Reason (optional)';
+                input.style.display = 'block';
+                okBtn.textContent = 'Kill';
+                okBtn.className = 'ctrl-btn kill';
+                confirmCallback = function() {{
+                    var btn = document.getElementById('btnKill');
+                    setLoading(btn, true);
+                    dispatch('kill', input.value || 'Manual kill from dashboard');
+                    setTimeout(function() {{ setLoading(btn, false); }}, 5000);
+                }};
+            }} else {{
+                title.textContent = 'Resume Bot?';
+                msg.textContent = 'Bot \u0e08\u0e30\u0e01\u0e25\u0e31\u0e1a\u0e21\u0e32\u0e17\u0e33\u0e07\u0e32\u0e19\u0e1b\u0e01\u0e15\u0e34';
+                input.style.display = 'none';
+                okBtn.textContent = 'Resume';
+                okBtn.className = 'ctrl-btn resume';
+                confirmCallback = function() {{
+                    var btn = document.getElementById('btnKill');
+                    setLoading(btn, true);
+                    dispatch('resume', '');
+                    setTimeout(function() {{ setLoading(btn, false); }}, 5000);
+                }};
+            }}
+            overlay.classList.add('active');
+        }};
+        window.closeConfirm = function() {{
+            document.getElementById('confirmOverlay').classList.remove('active');
+            confirmCallback = null;
+        }};
+        document.getElementById('confirmOk').addEventListener('click', function() {{
+            if (confirmCallback) confirmCallback();
+            closeConfirm();
+        }});
+        document.getElementById('confirmOverlay').addEventListener('click', function(e) {{
+            if (e.target === this) closeConfirm();
+        }});
+        document.addEventListener('keydown', function(e) {{
+            if (e.key === 'Escape') closeConfirm();
+        }});
+    }})();
+    </script>
 
     <!-- ECharts -->
     <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
