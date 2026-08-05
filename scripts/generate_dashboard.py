@@ -155,6 +155,7 @@ def generate_dashboard(state_path='live_bot/state.json',
     macd_h = indicators.get('macd_h')
     nupl = indicators.get('nupl', 0)
     sopr = indicators.get('sopr', 0)
+    sopr_source = indicators.get('sopr_source', 'proxy')
     sma200 = indicators.get('sma_200')
     sma365 = indicators.get('sma_365')
     sell_score = indicators.get('sell_score', 0)
@@ -180,6 +181,7 @@ def generate_dashboard(state_path='live_bot/state.json',
         total_reserve=total_reserve,
         mvrv=mvrv, mvrv_pct=mvrv_pct, mvrv_z=mvrv_z,
         rsi_val=rsi_val, macd_h=macd_h, nupl=nupl, sopr=sopr,
+        sopr_source=sopr_source,
         sma200=sma200, sma365=sma365, ath=ath,
         sell_score=sell_score, path_taken=path_taken,
         in_bear=in_bear, cooldown=cooldown,
@@ -232,6 +234,7 @@ def build_html(**kw) -> str:
     macd_h = kw['macd_h']
     nupl = kw['nupl']
     sopr = kw['sopr']
+    sopr_source = kw.get('sopr_source', 'proxy')
     sma200 = kw['sma200']
     sma365 = kw['sma365']
     ath = kw['ath']

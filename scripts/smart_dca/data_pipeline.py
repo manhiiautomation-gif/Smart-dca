@@ -308,10 +308,18 @@ def build_master_dataframe(years=5):
             master.drop(columns=['realized_price_bg'], inplace=True)
             print(f'        Realized Price merged: {master["realized_price"].notna().sum()} days with real data')
 
-    # Forward-fill missing on-chain (up to 2 days)
+    # Forward-fill missing on-chain (up to 2 days for daily metrics, up to 7 for sparse metrics)
     for col in ['mvrv', 'nupl', 'sopr']:
         if col in master.columns:
             master[col] = master[col].ffill(limit=2)
+    # LTH-RP and Realized Price from BGeometrics may be sparse — forward-fill longer
+    for col in ['lth_realized_price', 'realized_price']:
+        if col in master.columns:
+            before = master[col].notna().sum()
+            master[col] = master[col].ffill(limit=7)
+            after = master[col].notna().sum()
+            if after > before:
+                print(f'        {col}: forward-filled {after - before} gaps (7d max)')
 
     # Proxy fallback — FIX (Risk 6): Regression-calibrated proxy
     # Real MVRV ≈ 1.30 * (Price/SMA365) + 0.47 (fitted on historical data)

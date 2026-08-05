@@ -210,6 +210,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         ema30 = ind.ema(closes, 30)
         sopr = price / ema30 if ema30 > 0 else 1.0
         lth_rp = float('nan')
+        sopr_source = 'proxy'
 
     print(f'[BOT] MVRV={mvrv_val:.3f} Pct={mvrv_pct:.3f} Z={mvrv_z:.2f} NUPL={nupl:.3f}')
 
@@ -400,6 +401,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         'macd_h': round(macd_h, 4),
         'nupl': round(nupl, 3),
         'sopr': round(sopr, 3),
+        'sopr_source': sopr_source,
         'sma_200': round(sma_200, 2) if not math.isnan(sma_200) else None,
         'sma_365': round(sma_365, 2) if not math.isnan(sma_365) else None,
         'macd_bear': macd_bear,
