@@ -903,7 +903,30 @@ def build_html(**kw) -> str:
 
     <script>
     (function() {{
-        var API = '/api/trigger';
+        // GitHub Actions direct dispatch (replaces Netlify serverless function)
+        var REPO = 'manhiiautomation-gif/Smart-dca';
+        var API_BASE = 'https://api.github.com/repos/' + REPO + '/actions/workflows';
+        // Workflow IDs
+        var WORKFLOWS = {{
+            update: 'dashboard-trigger.yml',
+            kill: 'dashboard-trigger.yml',
+            resume: 'dashboard-trigger.yml'
+        }};
+
+        function getGitHubToken() {{
+            // Token must be provided via URL param or prompt
+            // GitHub Fine-grained PAT with actions:write permission
+            var params = new URLSearchParams(window.location.search);
+            var token = params.get('token');
+            if (!token) {{
+                try {{ token = localStorage.getItem('gh_pat'); }} catch(e) {{}}
+            }}
+            return token;
+        }}
+
+        function setGitHubToken(token) {{
+            try {{ localStorage.setItem('gh_pat', token); }} catch(e) {{}}
+        }}
 
         function showToast(msg, type) {{
             var c = document.getElementById('toasts');
@@ -911,7 +934,7 @@ def build_html(**kw) -> str:
             t.className = 'toast ' + (type || 'info');
             t.textContent = msg;
             c.appendChild(t);
-            setTimeout(function() {{ t.remove(); }}, 4000);
+            setTimeout(function() {{ t.remove(); }}, 5000);
         }}
 
         function setLoading(btn, on) {{
@@ -919,31 +942,51 @@ def build_html(**kw) -> str:
             btn.disabled = on;
         }}
 
-        function dispatch(action, reason) {{
-            var body = {{ action: action }};
-            if (reason) body.reason = reason;
-            fetch(API, {{
+        function dispatchWorkflow(workflowFile, inputs, token) {{
+            return fetch(API_BASE + '/' + workflowFile + '/dispatches', {{
                 method: 'POST',
-                headers: {{ 'Content-Type': 'application/json' }},
-                body: JSON.stringify(body)
-            }}).then(function(r) {{
-                return r.json().then(function(data) {{
-                    if (!r.ok) throw new Error(data.error || 'Error ' + r.status);
-                    return data;
-                }});
-            }}).then(function(data) {{
-                showToast(data.message || 'Done', 'success');
-            }}).catch(function(e) {{
-                showToast('Error: ' + e.message, 'error');
+                headers: {{
+                    'Authorization': 'Bearer ' + token,
+                    'Accept': 'application/vnd.github.v3+json',
+                    'Content-Type': 'application/json'
+                }},
+                body: JSON.stringify({{ ref: 'main', inputs: inputs }})
             }});
-            return false;
+        }}
+
+        function requireToken(callback) {{
+            var token = getGitHubToken();
+            if (token) {{
+                callback(token);
+                return;
+            }}
+            // Prompt for token once
+            var input = prompt('GitHub PAT token needed (actions:write permission):\n\nCreate at: github.com/settings/tokens\nThe token is stored in your browser only.');
+            if (input && input.trim()) {{
+                setGitHubToken(input.trim());
+                callback(input.trim());
+            }} else {{
+                showToast('Token required for dashboard actions', 'error');
+            }}
         }}
 
         window.doUpdate = function() {{
             var btn = document.getElementById('btnUpdate');
             setLoading(btn, true);
-            dispatch('update', '');
-            setTimeout(function() {{ setLoading(btn, false); }}, 5000);
+            requireToken(function(token) {{
+                dispatchWorkflow('dashboard-trigger.yml', {{ action: 'update' }}, token)
+                .then(function(r) {{
+                    if (r.status === 204) {{
+                        showToast('Update dispatched! Check Actions tab.', 'success');
+                    }} else {{
+                        return r.json().then(function(d) {{
+                            throw new Error(d.message || 'HTTP ' + r.status);
+                        }});
+                    }}
+                }})
+                .catch(function(e) {{ showToast('Error: ' + e.message, 'error'); }})
+                .finally(function() {{ setTimeout(function() {{ setLoading(btn, false); }}, 3000); }});
+            }});
         }};
 
         var confirmCallback = null;
@@ -966,8 +1009,15 @@ def build_html(**kw) -> str:
                 confirmCallback = function() {{
                     var btn = document.getElementById('btnKill');
                     setLoading(btn, true);
-                    dispatch('kill', input.value || 'Manual kill from dashboard');
-                    setTimeout(function() {{ setLoading(btn, false); }}, 5000);
+                    requireToken(function(token) {{
+                        dispatchWorkflow('dashboard-trigger.yml', {{ action: 'kill', reason: input.value || 'Manual kill from dashboard' }}, token)
+                        .then(function(r) {{
+                            if (r.status === 204) showToast('Kill switch activated!', 'success');
+                            else throw new Error('HTTP ' + r.status);
+                        }})
+                        .catch(function(e) {{ showToast('Error: ' + e.message, 'error'); }})
+                        .finally(function() {{ setTimeout(function() {{ setLoading(btn, false); }}, 3000); }});
+                    }});
                 }};
             }} else {{
                 title.textContent = 'Resume Bot?';
@@ -978,8 +1028,15 @@ def build_html(**kw) -> str:
                 confirmCallback = function() {{
                     var btn = document.getElementById('btnKill');
                     setLoading(btn, true);
-                    dispatch('resume', '');
-                    setTimeout(function() {{ setLoading(btn, false); }}, 5000);
+                    requireToken(function(token) {{
+                        dispatchWorkflow('dashboard-trigger.yml', {{ action: 'resume' }}, token)
+                        .then(function(r) {{
+                            if (r.status === 204) showToast('Bot resumed!', 'success');
+                            else throw new Error('HTTP ' + r.status);
+                        }})
+                        .catch(function(e) {{ showToast('Error: ' + e.message, 'error'); }})
+                        .finally(function() {{ setTimeout(function() {{ setLoading(btn, false); }}, 3000); }});
+                    }});
                 }};
             }}
             overlay.classList.add('active');
