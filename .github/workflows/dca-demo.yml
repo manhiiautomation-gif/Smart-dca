@@ -123,8 +123,9 @@ jobs:
             done
           fi
 
-      - name: Deploy dashboard to GitHub Pages
-        uses: ./.github/workflows/deploy-pages.yml
-        with:
-          skip_build: true  # dashboard already generated above
-        secrets: inherit
+  deploy:
+    needs: demo_run
+    uses: ./.github/workflows/deploy-pages.yml
+    with:
+      skip_build: true
+    secrets: inherit
