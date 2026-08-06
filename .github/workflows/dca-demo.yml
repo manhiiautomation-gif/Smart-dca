@@ -4,7 +4,8 @@ name: Phoenix v5.1 DEMO Portfolio
 # ║  DEMO PORTFOLIO SIMULATION                                 ║
 # ║                                                          ║
 # ║  Isolated paper trading with slippage simulation.         ║
-# ║  Runs daily at 02:00 UTC (09:00 Bangkok).                ║
+# ║  Runs hourly at :50 (accelerated demo).                    ║
+# ║  Change back to daily (0 2 * * *) after 14 runs.          ║
 # ║  NO real trades, NO real API keys needed.                 ║
 # ║  Tracks portfolio history + go-live validation.          ║
 # ║                                                          ║
@@ -13,8 +14,9 @@ name: Phoenix v5.1 DEMO Portfolio
 
 on:
   schedule:
-    # Daily at 02:00 UTC (09:00 Bangkok) — 1hr after main bot
-    - cron: '0 2 * * *'
+    # Hourly at :50 UTC (every hour, accelerated for validation)
+    # After 14 runs, consider changing back to daily: 0 2 * * *
+    - cron: '50 * * * *'
   workflow_dispatch:
     inputs:
       exchange:
