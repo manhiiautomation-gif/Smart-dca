@@ -484,8 +484,9 @@ def _get_recommendation(val: dict, state: dict, checks: list) -> str:
                 f'Need at least 14 runs (2 weeks daily) for meaningful validation. '
                 f'Keep the demo running.')
     if total_runs < 14:
+        signal_word = 'good' if all(c["passed"] for c in checks[:3]) else 'concerning'
         return (f'GETTING THERE: {total_runs}/14 minimum runs. '
-                f'Strategy signals look {'good' if all(c["passed"] for c in checks[:3]) else 'concerning'}. '
+                f'Strategy signals look {signal_word}. '
                 f'Wait for 14+ runs before considering go-live.')
 
     failed = [c for c in checks if not c['passed']]
