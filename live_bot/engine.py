@@ -427,7 +427,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     # ── 12. Send notification ──
     msg = notifier.format_report(
         decision, price, mvrv_val, current_btc, current_cash,
-        currency, dry_run
+        currency, is_dry_run=dry_run
     )
     if notifier.send_telegram(msg):
         print('[BOT] Telegram notification sent')
@@ -650,7 +650,7 @@ def run_demo(exchange, demo_state: dict, project_root: str,
     msg = notifier.format_report(
         decision, price, mvrv_val,
         demo_state['btc'], demo_state['cash'],
-        currency, dry_run=True,
+        currency, is_dry_run=True,
     )
     msg = msg.replace('DRY RUN', 'DEMO')
     if notifier.send_telegram(msg):
