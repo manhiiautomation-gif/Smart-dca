@@ -1,28 +1,28 @@
 {
-  "generated_at": "2026-08-07T11:15:21.515080",
+  "generated_at": "2026-08-07T21:23:11.891675",
   "scenario": "default",
   "summary": {
-    "total_runs": 3,
-    "buy_signals": 3,
+    "total_runs": 7,
+    "buy_signals": 7,
     "sell_signals": 0,
-    "actual_buys": 3,
+    "actual_buys": 7,
     "actual_sells": 0,
     "signal_exec_ratio_buy": 100.0,
     "signal_exec_ratio_sell": 100
   },
   "performance": {
     "initial_cash": 10000.0,
-    "current_portfolio": 10005.58,
-    "net_pnl": 5.58,
-    "roi_pct": 0.06,
-    "total_invested": 2508.04,
-    "total_fees": 3.76,
-    "total_slippage": 0.9798,
-    "avg_slippage_pct": 0.0391,
+    "current_portfolio": 7562.69,
+    "net_pnl": -2437.31,
+    "roi_pct": -24.37,
+    "total_invested": 4139.07,
+    "total_fees": 6.21,
+    "total_slippage": 1.5328,
+    "avg_slippage_pct": 0.037,
     "peak_value": 10005.58,
-    "max_drawdown_pct": 0.08,
-    "sharpe_like": 5.94,
-    "avg_daily_return_pct": 0.0346
+    "max_drawdown_pct": 24.42,
+    "sharpe_like": -8.52,
+    "avg_daily_return_pct": -4.0581
   },
   "skipped_trades": {
     "buys": {},
@@ -32,7 +32,7 @@
     {
       "name": "Minimum runs",
       "passed": false,
-      "detail": "3/14 runs"
+      "detail": "7/14 runs"
     },
     {
       "name": "Buy signals executed",
@@ -47,29 +47,29 @@
     {
       "name": "Fees reasonable",
       "passed": true,
-      "detail": "Total fees: 3.76 (0.04% of capital)"
+      "detail": "Total fees: 6.21 (0.06% of capital)"
     },
     {
       "name": "Slippage acceptable",
       "passed": true,
-      "detail": "Avg slippage: 0.0391%"
+      "detail": "Avg slippage: 0.0370%"
     },
     {
       "name": "Max drawdown known",
       "passed": true,
-      "detail": "Max DD: 0.08%"
+      "detail": "Max DD: 24.42%"
     },
     {
       "name": "Portfolio positive or acceptable",
-      "passed": true,
-      "detail": "P&L: +5.58 (+0.06%)"
+      "passed": false,
+      "detail": "P&L: -2437.31 (-24.37%)"
     },
     {
       "name": "At least 1 buy executed",
       "passed": true,
-      "detail": "3 buys"
+      "detail": "7 buys"
     }
   ],
   "go_live_ready": false,
-  "recommendation": "TOO EARLY: Only 3 runs. Need at least 14 runs (2 weeks daily) for meaningful validation. Keep the demo running."
+  "recommendation": "GETTING THERE: 7/14 minimum runs. Strategy signals look concerning. Wait for 14+ runs before considering go-live."
 }
