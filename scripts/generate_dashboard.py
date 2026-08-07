@@ -107,6 +107,13 @@ def generate_dashboard(state_path='live_bot/state.json',
     last_trade_date = trade_log[-1]['date'] if trade_log else '—'
     roi = ((portfolio - invested) / invested * 100) if invested > 0 else 0.0
 
+    # --- Investment control metrics ---
+    net_btc = total_btc_bought - total_btc_sold
+    avg_buy_price = (invested / net_btc) if net_btc > 0 else 0
+    unrealized_pnl = (current_price - avg_buy_price) * btc_bal if avg_buy_price > 0 else 0
+    unrealized_pnl_pct = (unrealized_pnl / invested * 100) if invested > 0 else 0
+    avg_buy_size = (invested / buy_count) if buy_count > 0 else 0
+
     # Time series for chart — value BTC at current price for accurate P&L
     portfolio_series = []
     if trade_log and current_price > 0:
@@ -137,6 +144,25 @@ def generate_dashboard(state_path='live_bot/state.json',
     # Recent trades (last 10)
     recent_trades = trade_log[-10:][::-1]  # newest first
 
+    # 24h / since-last-trade change
+    change_pct = None
+    change_abs = None
+    change_label = '24h Change'
+    if len(portfolio_series) >= 2:
+        prev_val = portfolio_series[-2]['value']
+        if prev_val > 0:
+            change_abs = portfolio - prev_val
+            change_pct = (change_abs / prev_val) * 100
+            from datetime import datetime as dt
+            try:
+                last_dt = dt.strptime(portfolio_series[-2]['date'], '%Y-%m-%d %H:%M')
+                now_dt = dt.now()
+                diff_days = (now_dt - last_dt).total_seconds() / 86400
+                if diff_days > 2:
+                    change_label = 'Since Last Trade'
+            except Exception:
+                pass
+
     # Kill switch status
     # Use L2 (kill_switch.json) as primary source for dashboard generation.
     # L1 (BOT_ENABLED env var) is only meaningful at runtime, not at static gen time.
@@ -163,6 +189,31 @@ def generate_dashboard(state_path='live_bot/state.json',
     in_bear = indicators.get('in_bear', False)
     cooldown = indicators.get('cooldown', 0)
     ath = indicators.get('ath', 0)
+
+    # Next expected action
+    next_action = ''
+    next_action_class = 'neutral'
+    if cooldown > 0:
+        next_action = f'COOLDOWN — ขายแล้ว รอ {cooldown} วัน'
+        next_action_class = 'yellow'
+    elif sell_score >= 50:
+        next_action = f'SELL WATCHING — score {sell_score}/100 (need 50+ to trigger)'
+        next_action_class = 'red'
+    elif mvrv is not None and mvrv < 1.0:
+        next_action = 'BUY EXPECTED — MVRV accumulation zone'
+        next_action_class = 'green'
+    elif rsi_val is not None and rsi_val < 35:
+        next_action = 'BUY LIKELY — RSI oversold zone'
+        next_action_class = 'green'
+    elif in_bear and mvrv is not None and mvrv < 1.5:
+        next_action = 'BUY EXPECTED — Bear + low MVRV = good accumulation'
+        next_action_class = 'green'
+    elif sell_score >= 30:
+        next_action = f'HOLD — sell score rising ({sell_score}/100), watching'
+        next_action_class = 'yellow'
+    else:
+        next_action = 'HOLD — ไม่มีสัญญาณชัดเจน รอรอบถัดไป'
+        next_action_class = 'blue'
 
     # Build HTML
     # Load demo portfolio data if exists
@@ -291,6 +342,15 @@ def generate_dashboard(state_path='live_bot/state.json',
         last_trade_date=last_trade_date,
         now=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         demo_html=demo_html,
+        avg_buy_price=avg_buy_price,
+        unrealized_pnl=unrealized_pnl,
+        unrealized_pnl_pct=unrealized_pnl_pct,
+        avg_buy_size=avg_buy_size,
+        change_pct=change_pct,
+        change_abs=change_abs,
+        change_label=change_label,
+        next_action=next_action,
+        next_action_class=next_action_class,
     )
 
     # Write output
@@ -350,6 +410,17 @@ def build_html(**kw) -> str:
     now_str = kw['now']
     last_trade_date = kw.get('last_trade_date', '—')
     demo_html = kw.get('demo_html', '')
+    avg_buy_price = kw.get('avg_buy_price', 0)
+    unrealized_pnl = kw.get('unrealized_pnl', 0)
+    unrealized_pnl_pct = kw.get('unrealized_pnl_pct', 0)
+    avg_buy_size = kw.get('avg_buy_size', 0)
+    change_pct = kw.get('change_pct')
+    change_abs = kw.get('change_abs')
+    change_label = kw.get('change_label', '24h Change')
+    next_action = kw.get('next_action', '')
+    next_action_class = kw.get('next_action_class', 'neutral')
+    upnl_class = 'green' if unrealized_pnl > 0 else ('red' if unrealized_pnl < 0 else 'neutral')
+    chg_class = 'green' if (change_pct or 0) > 0 else ('red' if (change_pct or 0) < 0 else 'neutral')
 
     # Status badge
     if bot_alive:
@@ -444,7 +515,7 @@ def build_html(**kw) -> str:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="refresh" content="86400">  <!-- Auto refresh daily -->
+    <meta http-equiv="refresh" content="300">  <!-- Auto refresh every 5 min -->
     <title>Phoenix v5.1 Dashboard</title>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
@@ -676,7 +747,7 @@ def build_html(**kw) -> str:
                 <span class="spinner"></span>
                 {'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> Kill Bot' if bot_alive else '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> Resume Bot'}
             </button>
-            <a href="https://github.com/manhiiautomation-gif/Smart-dca/actions/workflows/dashboard-trigger.yml" target="_blank" class="ctrl-btn" style="text-decoration:none;">
+            <a href="https://github.com/manhiiautomation-gif/Smart-dca/actions" target="_blank" class="ctrl-btn" style="text-decoration:none;">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                 Logs
             </a>
@@ -692,6 +763,7 @@ def build_html(**kw) -> str:
                 <div class="metric-label">Portfolio Value</div>
                 <div class="metric-value {roi_class}">{fmt_num(portfolio)} {currency}</div>
             </div>
+            {('<div class="metric" style="margin-top:-4px;"><div class="metric-label">' + change_label + '</div><div class="metric-value ' + chg_class + '" style="font-size:0.95rem;">' + fmt_num(change_abs, 2) + ' ' + currency + ' (' + f'{change_pct:+.2f}' + '%)</div></div>') if change_pct is not None else ''}
             <div class="metric">
                 <div class="metric-label">BTC Holdings</div>
                 <div class="metric-value blue">{btc_bal:.8f} BTC</div>
@@ -701,6 +773,9 @@ def build_html(**kw) -> str:
                 <div class="metric-label">Cash Balance</div>
                 <div class="metric-value">{fmt_num(cash_bal)} {currency}</div>
             </div>
+            {('<div class="metric" style="margin-top:-4px;"><div class="metric-label">Avg Buy Price</div><div class="metric-value dim" style="font-size:0.95rem;">' + fmt_num(avg_buy_price) + ' ' + currency + '</div></div>') if avg_buy_price > 0 else ''}
+            {('<div class="metric" style="margin-top:-4px;"><div class="metric-label">Unrealized P&L</div><div class="metric-value ' + upnl_class + '" style="font-size:0.95rem;">' + fmt_num(unrealized_pnl) + ' ' + currency + ' (' + f'{unrealized_pnl_pct:+.1f}' + '%)</div></div>') if avg_buy_price > 0 else ''}
+            {('<div class="metric" style="margin-top:-4px;"><div class="metric-label">Avg Buy Size</div><div class="metric-value dim" style="font-size:0.95rem;">' + fmt_num(avg_buy_size) + ' ' + currency + '/trade</div></div>') if avg_buy_size > 0 else ''}
             <div class="grid grid-2" style="margin-top:12px; gap:8px;">
                 <div class="metric">
                     <div class="metric-label">ROI</div>
@@ -805,6 +880,10 @@ def build_html(**kw) -> str:
                     <span class="val">{fmt_num(sma365)}</span>
                 </div>
             </div>
+            <div style="margin-top:12px;padding:10px;border-radius:8px;background:var(--{next_action_class}-bg, rgba(139,148,158,0.1));border:1px solid var(--{next_action_class}, var(--border));">
+                <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">NEXT EXPECTED ACTION</div>
+                <div style="font-size:13px;font-weight:600;color:var(--{next_action_class}, var(--text));">{next_action}</div>
+            </div>
         </div>
 
         <!-- Sell Logic -->
@@ -898,7 +977,7 @@ def build_html(**kw) -> str:
 
     <!-- Footer -->
     <div class="footer">
-        Phoenix v5.1 DCA Bot | Generated: {now_str} | Updated daily
+        Phoenix v5.1 DCA Bot | Generated: {now_str} | Auto-refresh: 5 min | <a href="https://github.com/manhiiautomation-gif/Smart-dca" target="_blank" style="color:var(--blue);text-decoration:none;">GitHub</a>
     </div>
 
     <script>
@@ -1000,7 +1079,10 @@ def build_html(**kw) -> str:
 
             if (isAlive) {{
                 title.textContent = 'Kill Bot?';
-                msg.textContent = 'Bot \u0e08\u0e30\u0e2b\u0e22\u0e38\u0e14\u0e0b\u0e37\u0e49\u0e2d\u0e02\u0e32\u0e22\u0e17\u0e31\u0e19\u0e17\u0e35';
+                msg.innerHTML = '\u26a0\ufe0f ก่อน Kill:<br>' +
+                    '\u2022 กำลังถือ: <b>' + {fmt_num(btc_bal)} + ' BTC</b> (~' + {fmt_num(btc_bal * current_price)} + ' {currency})<br>' +
+                    '\u2022 ถ้าราคาเปลี่ยน จะไม่มี auto-sell<br>' +
+                    '\u2022 ต้อง Resume ด้วยมือเท่านั้น';
                 input.value = '';
                 input.placeholder = 'Reason (optional)';
                 input.style.display = 'block';
