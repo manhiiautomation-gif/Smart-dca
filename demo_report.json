@@ -1,28 +1,28 @@
 {
-  "generated_at": "2026-08-07T04:05:00.526212",
+  "generated_at": "2026-08-07T11:15:21.515080",
   "scenario": "default",
   "summary": {
-    "total_runs": 2,
-    "buy_signals": 2,
+    "total_runs": 3,
+    "buy_signals": 3,
     "sell_signals": 0,
-    "actual_buys": 2,
+    "actual_buys": 3,
     "actual_sells": 0,
     "signal_exec_ratio_buy": 100.0,
     "signal_exec_ratio_sell": 100
   },
   "performance": {
     "initial_cash": 10000.0,
-    "current_portfolio": 9991.0,
-    "net_pnl": -9.0,
-    "roi_pct": -0.09,
-    "total_invested": 1723.32,
-    "total_fees": 2.58,
-    "total_slippage": 0.7101,
-    "avg_slippage_pct": 0.0412,
-    "peak_value": 9998.67,
+    "current_portfolio": 10005.58,
+    "net_pnl": 5.58,
+    "roi_pct": 0.06,
+    "total_invested": 2508.04,
+    "total_fees": 3.76,
+    "total_slippage": 0.9798,
+    "avg_slippage_pct": 0.0391,
+    "peak_value": 10005.58,
     "max_drawdown_pct": 0.08,
-    "sharpe_like": 0,
-    "avg_daily_return_pct": -0.0767
+    "sharpe_like": 5.94,
+    "avg_daily_return_pct": 0.0346
   },
   "skipped_trades": {
     "buys": {},
@@ -32,7 +32,7 @@
     {
       "name": "Minimum runs",
       "passed": false,
-      "detail": "2/14 runs"
+      "detail": "3/14 runs"
     },
     {
       "name": "Buy signals executed",
@@ -47,12 +47,12 @@
     {
       "name": "Fees reasonable",
       "passed": true,
-      "detail": "Total fees: 2.58 (0.03% of capital)"
+      "detail": "Total fees: 3.76 (0.04% of capital)"
     },
     {
       "name": "Slippage acceptable",
       "passed": true,
-      "detail": "Avg slippage: 0.0412%"
+      "detail": "Avg slippage: 0.0391%"
     },
     {
       "name": "Max drawdown known",
@@ -62,14 +62,14 @@
     {
       "name": "Portfolio positive or acceptable",
       "passed": true,
-      "detail": "P&L: -9.00 (-0.09%)"
+      "detail": "P&L: +5.58 (+0.06%)"
     },
     {
       "name": "At least 1 buy executed",
       "passed": true,
-      "detail": "2 buys"
+      "detail": "3 buys"
     }
   ],
   "go_live_ready": false,
-  "recommendation": "TOO EARLY: Only 2 runs. Need at least 14 runs (2 weeks daily) for meaningful validation. Keep the demo running."
+  "recommendation": "TOO EARLY: Only 3 runs. Need at least 14 runs (2 weeks daily) for meaningful validation. Keep the demo running."
 }
