@@ -16,6 +16,10 @@ download/
 
 # Environment / secrets
 .env
+.git-credentials
+*.pem
+*.key
+credentials*
 
 # Tool intermediate files
 tool-results/
