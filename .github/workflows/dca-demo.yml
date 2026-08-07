@@ -125,6 +125,10 @@ jobs:
 
   deploy:
     needs: demo_run
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
     uses: ./.github/workflows/deploy-pages.yml
     with:
       skip_build: true
