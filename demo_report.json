@@ -1,28 +1,28 @@
 {
-  "generated_at": "2026-08-09T13:37:35.283466",
+  "generated_at": "2026-08-09T14:20:33.766517",
   "scenario": "default",
   "summary": {
-    "total_runs": 42,
-    "buy_signals": 42,
+    "total_runs": 43,
+    "buy_signals": 43,
     "sell_signals": 0,
-    "actual_buys": 42,
+    "actual_buys": 43,
     "actual_sells": 0,
     "signal_exec_ratio_buy": 100.0,
     "signal_exec_ratio_sell": 100
   },
   "performance": {
     "initial_cash": 10000.0,
-    "current_portfolio": 7570.43,
-    "net_pnl": -2429.57,
-    "roi_pct": -24.3,
-    "total_invested": 9272.75,
-    "total_fees": 13.91,
-    "total_slippage": 3.0475,
-    "avg_slippage_pct": 0.0329,
+    "current_portfolio": 7578.85,
+    "net_pnl": -2421.15,
+    "roi_pct": -24.21,
+    "total_invested": 9312.53,
+    "total_fees": 13.97,
+    "total_slippage": 3.0547,
+    "avg_slippage_pct": 0.0328,
     "peak_value": 10005.58,
     "max_drawdown_pct": 24.69,
-    "sharpe_like": -3.0,
-    "avg_daily_return_pct": -0.5913
+    "sharpe_like": -2.95,
+    "avg_daily_return_pct": -0.5746
   },
   "skipped_trades": {
     "buys": {},
@@ -32,7 +32,7 @@
     {
       "name": "Minimum runs",
       "passed": true,
-      "detail": "42/14 runs"
+      "detail": "43/14 runs"
     },
     {
       "name": "Buy signals executed",
@@ -47,12 +47,12 @@
     {
       "name": "Fees reasonable",
       "passed": true,
-      "detail": "Total fees: 13.91 (0.14% of capital)"
+      "detail": "Total fees: 13.97 (0.14% of capital)"
     },
     {
       "name": "Slippage acceptable",
       "passed": true,
-      "detail": "Avg slippage: 0.0329%"
+      "detail": "Avg slippage: 0.0328%"
     },
     {
       "name": "Max drawdown known",
@@ -62,12 +62,12 @@
     {
       "name": "Portfolio positive or acceptable",
       "passed": false,
-      "detail": "P&L: -2429.57 (-24.30%)"
+      "detail": "P&L: -2421.15 (-24.21%)"
     },
     {
       "name": "At least 1 buy executed",
       "passed": true,
-      "detail": "42 buys"
+      "detail": "43 buys"
     }
   ],
   "go_live_ready": false,
