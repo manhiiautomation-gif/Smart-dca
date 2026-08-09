@@ -1,28 +1,28 @@
 {
-  "generated_at": "2026-08-08T23:11:41.412135",
+  "generated_at": "2026-08-09T00:34:49.274557",
   "scenario": "default",
   "summary": {
-    "total_runs": 31,
-    "buy_signals": 31,
+    "total_runs": 32,
+    "buy_signals": 32,
     "sell_signals": 0,
-    "actual_buys": 31,
+    "actual_buys": 32,
     "actual_sells": 0,
     "signal_exec_ratio_buy": 100.0,
     "signal_exec_ratio_sell": 100
   },
   "performance": {
     "initial_cash": 10000.0,
-    "current_portfolio": 7550.9,
-    "net_pnl": -2449.1,
-    "roi_pct": -24.49,
-    "total_invested": 8625.62,
-    "total_fees": 12.94,
-    "total_slippage": 2.8575,
+    "current_portfolio": 7553.13,
+    "net_pnl": -2446.87,
+    "roi_pct": -24.47,
+    "total_invested": 8704.3,
+    "total_fees": 13.06,
+    "total_slippage": 2.8783,
     "avg_slippage_pct": 0.0331,
     "peak_value": 10005.58,
     "max_drawdown_pct": 24.53,
-    "sharpe_like": -3.56,
-    "avg_daily_return_pct": -0.8168
+    "sharpe_like": -3.5,
+    "avg_daily_return_pct": -0.7895
   },
   "skipped_trades": {
     "buys": {},
@@ -32,7 +32,7 @@
     {
       "name": "Minimum runs",
       "passed": true,
-      "detail": "31/14 runs"
+      "detail": "32/14 runs"
     },
     {
       "name": "Buy signals executed",
@@ -47,7 +47,7 @@
     {
       "name": "Fees reasonable",
       "passed": true,
-      "detail": "Total fees: 12.94 (0.13% of capital)"
+      "detail": "Total fees: 13.06 (0.13% of capital)"
     },
     {
       "name": "Slippage acceptable",
@@ -62,12 +62,12 @@
     {
       "name": "Portfolio positive or acceptable",
       "passed": false,
-      "detail": "P&L: -2449.10 (-24.49%)"
+      "detail": "P&L: -2446.87 (-24.47%)"
     },
     {
       "name": "At least 1 buy executed",
       "passed": true,
-      "detail": "31 buys"
+      "detail": "32 buys"
     }
   ],
   "go_live_ready": false,
