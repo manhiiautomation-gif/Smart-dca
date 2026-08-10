@@ -1,1 +1,77 @@
-{}
+{
+  "generated_at": "2026-08-10T23:20:19.062746",
+  "scenario": "default",
+  "summary": {
+    "total_runs": 7,
+    "buy_signals": 7,
+    "sell_signals": 0,
+    "actual_buys": 7,
+    "actual_sells": 0,
+    "signal_exec_ratio_buy": 100.0,
+    "signal_exec_ratio_sell": 100
+  },
+  "performance": {
+    "initial_cash": 10000.0,
+    "current_portfolio": 9999.89,
+    "net_pnl": -0.11,
+    "roi_pct": -0.0,
+    "total_invested": 62.88,
+    "total_fees": 0.09,
+    "total_slippage": 0.0237,
+    "avg_slippage_pct": 0.0377,
+    "peak_value": 10000.0,
+    "max_drawdown_pct": 0.0,
+    "sharpe_like": -10.68,
+    "avg_daily_return_pct": -0.0002
+  },
+  "skipped_trades": {
+    "buys": {
+      "below_min (8.98 < 10.0)": 7
+    },
+    "sells": {}
+  },
+  "go_live_checklist": [
+    {
+      "name": "Minimum runs",
+      "passed": false,
+      "detail": "7/14 runs"
+    },
+    {
+      "name": "Buy signals executed",
+      "passed": true,
+      "detail": "100% of buy signals executed"
+    },
+    {
+      "name": "No excessive skipped buys",
+      "passed": true,
+      "detail": "0 skipped"
+    },
+    {
+      "name": "Fees reasonable",
+      "passed": true,
+      "detail": "Total fees: 0.09 (0.00% of capital)"
+    },
+    {
+      "name": "Slippage acceptable",
+      "passed": true,
+      "detail": "Avg slippage: 0.0377%"
+    },
+    {
+      "name": "Max drawdown known",
+      "passed": true,
+      "detail": "Max DD: 0.00%"
+    },
+    {
+      "name": "Portfolio positive or acceptable",
+      "passed": true,
+      "detail": "P&L: -0.11 (-0.00%)"
+    },
+    {
+      "name": "At least 1 buy executed",
+      "passed": true,
+      "detail": "7 buys"
+    }
+  ],
+  "go_live_ready": false,
+  "recommendation": "GETTING THERE: 7/14 minimum runs. Strategy signals look concerning. Wait for 14+ runs before considering go-live."
+}
