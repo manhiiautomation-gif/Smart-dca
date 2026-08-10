@@ -5,19 +5,19 @@
   "exchange": "binance",
   "created_at": "2026-08-06T09:02:36.319711",
   "last_run_date": "2026-08-10",
-  "run_count": 63,
+  "run_count": 64,
   "cash": 0.0,
   "btc": 0.11252059391598468,
   "total_invested": 9985.022466300548,
   "total_sell_proceeds": 0.0,
   "total_btc_bought": 0.11252059391598468,
   "total_btc_sold": 0.0,
-  "buy_count": 63,
+  "buy_count": 64,
   "sell_count": 0,
   "cumulative_fees": 14.977533699450825,
   "cumulative_slippage": 3.1858757772737607,
   "peak_value": 240053.2567687772,
-  "max_drawdown": 0.9698642016961537,
+  "max_drawdown": 0.9699777285368778,
   "cooldown": 0,
   "history": [
     {
@@ -523,6 +523,14 @@
       "cash": 0.0,
       "price": 64292.2,
       "decision": "buy"
+    },
+    {
+      "date": "2026-08-10",
+      "portfolio_value": 7206.94,
+      "btc": 0.11252059,
+      "cash": 0.0,
+      "price": 64050.0,
+      "decision": "buy"
     }
   ],
   "last_decision": {
@@ -533,19 +541,19 @@
     "reserve_injection": 0.0,
     "in_bear": true
   },
-  "last_price": 64292.2,
+  "last_price": 64050.0,
   "last_indicators": {
-    "price": 64292.2,
+    "price": 64050.0,
     "mvrv": 1.185,
     "mvrv_pct": 0.064,
     "mvrv_z": -1.08,
-    "rsi": 50.6,
-    "macd_h": 57.4021,
+    "rsi": 49.2,
+    "macd_h": 41.9518,
     "nupl": 0.156,
     "sopr": NaN,
     "sopr_source": "proxy",
-    "sma_200": 70005.68,
-    "sma_365": 84952.22,
+    "sma_200": 70004.47,
+    "sma_365": 84951.55,
     "macd_bear": false,
     "macd_declining": false,
     "rsi_divergence": false,
@@ -556,13 +564,13 @@
     "cooldown": 0
   },
   "validation": {
-    "total_runs": 63,
-    "buy_signals": 63,
+    "total_runs": 64,
+    "buy_signals": 64,
     "sell_signals": 0,
-    "actual_buys": 63,
+    "actual_buys": 64,
     "actual_sells": 0,
     "skipped_buys_reason": {
-      "below_min (8.98 < 10.0)": 1
+      "below_min (8.98 < 10.0)": 2
     },
     "skipped_sells_reason": {},
     "avg_buy_slippage_pct": 0.0,
