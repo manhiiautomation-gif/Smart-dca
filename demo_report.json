@@ -1,28 +1,28 @@
 {
-  "generated_at": "2026-08-10T14:07:42.958795",
+  "generated_at": "2026-08-10T14:57:36.137932",
   "scenario": "default",
   "summary": {
-    "total_runs": 61,
-    "buy_signals": 61,
+    "total_runs": 62,
+    "buy_signals": 62,
     "sell_signals": 0,
-    "actual_buys": 61,
+    "actual_buys": 62,
     "actual_sells": 0,
     "signal_exec_ratio_buy": 100.0,
     "signal_exec_ratio_sell": 100
   },
   "performance": {
     "initial_cash": 10000.0,
-    "current_portfolio": 7519.76,
-    "net_pnl": -2480.24,
-    "roi_pct": -24.8,
-    "total_invested": 9730.84,
-    "total_fees": 14.6,
+    "current_portfolio": 240053.26,
+    "net_pnl": 230053.26,
+    "roi_pct": 2300.53,
+    "total_invested": 9985.02,
+    "total_fees": 14.98,
     "total_slippage": 3.1859,
-    "avg_slippage_pct": 0.0327,
-    "peak_value": 10005.58,
+    "avg_slippage_pct": 0.0319,
+    "peak_value": 240053.26,
     "max_drawdown_pct": 24.84,
-    "sharpe_like": -2.54,
-    "avg_daily_return_pct": -0.4152
+    "sharpe_like": 2.45,
+    "avg_daily_return_pct": 50.285
   },
   "skipped_trades": {
     "buys": {},
@@ -32,7 +32,7 @@
     {
       "name": "Minimum runs",
       "passed": true,
-      "detail": "61/14 runs"
+      "detail": "62/14 runs"
     },
     {
       "name": "Buy signals executed",
@@ -47,12 +47,12 @@
     {
       "name": "Fees reasonable",
       "passed": true,
-      "detail": "Total fees: 14.60 (0.15% of capital)"
+      "detail": "Total fees: 14.98 (0.15% of capital)"
     },
     {
       "name": "Slippage acceptable",
       "passed": true,
-      "detail": "Avg slippage: 0.0327%"
+      "detail": "Avg slippage: 0.0319%"
     },
     {
       "name": "Max drawdown known",
@@ -61,15 +61,15 @@
     },
     {
       "name": "Portfolio positive or acceptable",
-      "passed": false,
-      "detail": "P&L: -2480.24 (-24.80%)"
+      "passed": true,
+      "detail": "P&L: +230053.26 (+2300.53%)"
     },
     {
       "name": "At least 1 buy executed",
       "passed": true,
-      "detail": "61 buys"
+      "detail": "62 buys"
     }
   ],
-  "go_live_ready": false,
-  "recommendation": "NOT YET: 1 check(s) failed: Portfolio positive or acceptable. Address these issues before going live."
+  "go_live_ready": true,
+  "recommendation": "GO-LIVE READY: All checks passed. The demo portfolio shows consistent strategy execution. Consider starting with a small live amount (10-20% of intended capital) and monitor for 1-2 weeks."
 }
