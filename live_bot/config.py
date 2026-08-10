@@ -10,11 +10,24 @@ Currency Resolution:
 
 import os
 
+
+def _env_float(key: str, default: str) -> float:
+    """Get float from env var, treating empty string as default."""
+    val = os.environ.get(key, default)
+    return float(val) if val and val.strip() else float(default)
+
+
+def _env_int(key: str, default: str) -> int:
+    """Get int from env var, treating empty string as default."""
+    val = os.environ.get(key, default)
+    return int(val) if val and val.strip() else int(default)
+
+
 # ═══════════════════════════════════════════════════════════════
 #  EXCHANGE & CURRENCY
 # ═══════════════════════════════════════════════════════════════
 EXCHANGE = os.environ.get('EXCHANGE', 'binance').lower()  # 'binance' or 'bitkub'
-USD_THB_RATE = float(os.environ.get('USD_THB_RATE', '33.426'))
+USD_THB_RATE = _env_float('USD_THB_RATE', '33.426')
 
 # Currency derived from exchange — do NOT override manually
 EXCHANGE_CURRENCY_MAP = {
@@ -27,32 +40,32 @@ CURRENCY = EXCHANGE_CURRENCY_MAP.get(EXCHANGE, 'USDT')
 #  DCA BUY PARAMETERS (configurable)
 # ═══════════════════════════════════════════════════════════════
 # Daily DCA budget — always specified in THB, auto-converted for USDT
-DAILY_BUDGET_THB = float(os.environ.get('DAILY_BUDGET_THB', '100'))
+DAILY_BUDGET_THB = _env_float('DAILY_BUDGET_THB', '100')
 # Maximum single buy amount (hard cap per trade)
-MAX_BUY_THB = float(os.environ.get('MAX_BUY_THB', '1000'))
+MAX_BUY_THB = _env_float('MAX_BUY_THB', '1000')
 # Maximum total DCA buys per day (e.g. 3 means up to 3x DCA per day)
-MAX_DCA_BUYS_PER_DAY = int(os.environ.get('MAX_DCA_BUYS_PER_DAY', '1'))
+MAX_DCA_BUYS_PER_DAY = _env_int('MAX_DCA_BUYS_PER_DAY', '1')
 
 # ═══════════════════════════════════════════════════════════════
 #  RESERVE DEPLOYMENT PARAMETERS (configurable)
 # ═══════════════════════════════════════════════════════════════
 # Reserve = profits from BTC sales, held for buy-the-dip deployment
 # Minimum reserve floor (in exchange currency) — keep this much cash untouched
-RESERVE_FLOOR = float(os.environ.get('RESERVE_FLOOR', '0'))
+RESERVE_FLOOR = _env_float('RESERVE_FLOOR', '0')
 # Maximum single reserve injection (in exchange currency)
-MAX_RESERVE_INJECTION = float(os.environ.get('MAX_RESERVE_INJECTION', '0'))
+MAX_RESERVE_INJECTION = _env_float('MAX_RESERVE_INJECTION', '0')
 # Boost multiplier when price < realized_price * threshold
-RESERVE_BOOST_MULTIPLIER = float(os.environ.get('RESERVE_BOOST_MULTIPLIER', '1.8'))
+RESERVE_BOOST_MULTIPLIER = _env_float('RESERVE_BOOST_MULTIPLIER', '1.8')
 # Price threshold for boost: inject more if price < realized_price * this
-RESERVE_BOOST_PRICE_RATIO = float(os.environ.get('RESERVE_BOOST_PRICE_RATIO', '1.05'))
+RESERVE_BOOST_PRICE_RATIO = _env_float('RESERVE_BOOST_PRICE_RATIO', '1.05')
 
 # ═══════════════════════════════════════════════════════════════
 #  BALANCE ALERT PARAMETERS
 # ═══════════════════════════════════════════════════════════════
 # Low balance warning threshold (in exchange currency)
-LOW_BALANCE_THRESHOLD = float(os.environ.get('LOW_BALANCE_THRESHOLD', '0'))
+LOW_BALANCE_THRESHOLD = _env_float('LOW_BALANCE_THRESHOLD', '0')
 # Days of DCA budget remaining before warning
-LOW_BALANCE_DAYS = int(os.environ.get('LOW_BALANCE_DAYS', '7'))
+LOW_BALANCE_DAYS = _env_int('LOW_BALANCE_DAYS', '7')
 
 # ═══════════════════════════════════════════════════════════════
 #  HELPER: Convert THB amounts to exchange currency
@@ -132,7 +145,7 @@ TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
 #  DRY RUN TESTING
 # ═══════════════════════════════════════════════════════════════
 DRY_RUN = os.environ.get('DRY_RUN', 'false').lower() == 'true'
-DRY_RUN_INITIAL_CASH = float(os.environ.get('DRY_RUN_INITIAL_CASH', '10000'))
+DRY_RUN_INITIAL_CASH = _env_float('DRY_RUN_INITIAL_CASH', '10000')
 MIN_BUY_USDT = 10.0   # Binance minimum order
 MIN_BUY_THB = 100.0   # Bitkub minimum order
 
