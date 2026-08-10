@@ -1,38 +1,40 @@
 {
-  "generated_at": "2026-08-10T14:57:36.137932",
+  "generated_at": "2026-08-10T15:42:56.521375",
   "scenario": "default",
   "summary": {
-    "total_runs": 62,
-    "buy_signals": 62,
+    "total_runs": 63,
+    "buy_signals": 63,
     "sell_signals": 0,
-    "actual_buys": 62,
+    "actual_buys": 63,
     "actual_sells": 0,
     "signal_exec_ratio_buy": 100.0,
     "signal_exec_ratio_sell": 100
   },
   "performance": {
     "initial_cash": 10000.0,
-    "current_portfolio": 240053.26,
-    "net_pnl": 230053.26,
-    "roi_pct": 2300.53,
+    "current_portfolio": 7234.2,
+    "net_pnl": -2765.8,
+    "roi_pct": -27.66,
     "total_invested": 9985.02,
     "total_fees": 14.98,
     "total_slippage": 3.1859,
     "avg_slippage_pct": 0.0319,
     "peak_value": 240053.26,
-    "max_drawdown_pct": 24.84,
-    "sharpe_like": 2.45,
-    "avg_daily_return_pct": 50.285
+    "max_drawdown_pct": 96.99,
+    "sharpe_like": 2.35,
+    "avg_daily_return_pct": 47.9097
   },
   "skipped_trades": {
-    "buys": {},
+    "buys": {
+      "below_min (8.98 < 10.0)": 1
+    },
     "sells": {}
   },
   "go_live_checklist": [
     {
       "name": "Minimum runs",
       "passed": true,
-      "detail": "62/14 runs"
+      "detail": "63/14 runs"
     },
     {
       "name": "Buy signals executed",
@@ -57,19 +59,19 @@
     {
       "name": "Max drawdown known",
       "passed": true,
-      "detail": "Max DD: 24.84%"
+      "detail": "Max DD: 96.99%"
     },
     {
       "name": "Portfolio positive or acceptable",
-      "passed": true,
-      "detail": "P&L: +230053.26 (+2300.53%)"
+      "passed": false,
+      "detail": "P&L: -2765.80 (-27.66%)"
     },
     {
       "name": "At least 1 buy executed",
       "passed": true,
-      "detail": "62 buys"
+      "detail": "63 buys"
     }
   ],
-  "go_live_ready": true,
-  "recommendation": "GO-LIVE READY: All checks passed. The demo portfolio shows consistent strategy execution. Consider starting with a small live amount (10-20% of intended capital) and monitor for 1-2 weeks."
+  "go_live_ready": false,
+  "recommendation": "NOT YET: 1 check(s) failed: Portfolio positive or acceptable. Address these issues before going live."
 }
