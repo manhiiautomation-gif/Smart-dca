@@ -1,26 +1,21 @@
-# Work Log — Phoenix v5.1 Bot
+# Work Log
 
 ---
 Task ID: 1
-Agent: main
-Task: Dashboard + Kill Switch system for Phoenix v5.1 bot
+Agent: Main
+Task: Fix currency unit mismatch, configurable DCA params, reserve separation
 
 Work Log:
-- Created `live_bot/kill_switch.py` — two-layer kill switch (L1 env var, L2 JSON file)
-- Created `kill_switch.json` — default `{enabled: true}`
-- Created `trade_log.json` — empty array `[]`
-- Modified `live_bot/state.py` — added `last_indicators`, balance fields, `load_trade_log()`, `append_trade_log()`
-- Rewrote `live_bot/engine.py` — added kill switch check at step -1, trade log recording, indicator snapshot for dashboard, dry-run balance tracking
-- Created `scripts/generate_dashboard.py` — generates dark-themed HTML dashboard with ECharts portfolio chart, 7 panels
-- Updated `live_bot/main.py` — pass `trade_log_path` and `kill_switch_path` to engine
-- Created `.github/workflows/dca-bot.yml` — daily cron + manual trigger with BOT_ENABLED secret
-- Created `.github/workflows/dashboard-manual.yml` — manual dashboard-only update
-- Created `dashboard/netlify.toml` + placeholder `dashboard/dist/index.html`
-- Ran audit (agent) — 0 critical/high issues, fixed 1 medium (last_trade_date display)
-- All tests passed: kill switch L1/L2, trade log, state, dashboard generation
+- Rewrote config.py: Added CURRENCY auto-derivation from EXCHANGE, helper functions (thb_to_local, get_daily_budget, get_max_buy, get_reserve_floor, get_max_reserve_injection, get_max_reserve_boosted), configurable DCA/reserve params via env vars
+- Rewrote strategy.py v5.1.1: Removed hardcoded THB values (200/900/1200), added reserve_floor/max_reserve_injection/max_reserve_boosted/reserve_boost_multiplier/reserve_boost_price_ratio parameters
+- Updated demo_portfolio.py: Added currency integrity validation on load (raises ValueError on mismatch), added sell_proceeds_reserve tracking, added buy_status tracking, added low balance warning
+- Updated engine.py: Strategy calls pass reserve config params, cash_reserve changed to sell_proceeds_reserve only, added BUY STATUS reporting, added low balance warning with Telegram alert, tracks sell_proceeds_reserve in state
+- Updated dca-demo.yml: Passes new config env vars
+- Reset corrupted demo data (THB/USDT mixed)
+- All syntax and unit tests passed, pushed to main
 
 Stage Summary:
-- Dashboard: 20KB HTML, dark theme, 7 panels (Portfolio, Kill Switch, Indicators, Sell Logic, Chart, Trade Table, Footer)
-- Kill Switch: L1 (GitHub Secret `BOT_ENABLED`) + L2 (`kill_switch.json` in repo)
-- Deploy: Netlify from `dashboard/dist/`, manual workflow_dispatch for on-demand dashboard refresh
-- No new dependencies added (uses f-string for HTML, ECharts from CDN)
+- Root cause of 33x over-buying FIXED: strategy.py hardcoded 200/900/1200 THB values used directly as USDT
+- 6 files modified, 1 new file (scripts/reset_demo.py), pushed as commit 79b0100
+- Config now fully configurable: DAILY_BUDGET_THB, MAX_BUY_THB, MAX_DCA_BUYS_PER_DAY, RESERVE_FLOOR, MAX_RESERVE_INJECTION, RESERVE_BOOST_MULTIPLIER, RESERVE_BOOST_PRICE_RATIO, LOW_BALANCE_THRESHOLD, LOW_BALANCE_DAYS
+- Currency integrity lock prevents future THB/USDT data corruption
