@@ -78,6 +78,7 @@ jobs:
         if: github.event.inputs.reset == 'true'
         env:
           DAILY_BUDGET_THB: ${{ github.event.inputs.budget || '100' }}
+          MAX_BUY_THB: ${{ secrets.MAX_BUY_THB || '1000' }}
           USD_THB_RATE: ${{ secrets.USD_THB_RATE || '33.426' }}
         run: |
           python live_bot/main.py --demo --reset --exchange ${{ steps.ex.outputs.value }} --scenario "${{ github.event.inputs.scenario || 'default' }}" --demo-cash ${{ github.event.inputs.demo_cash || '10000' }}
@@ -86,6 +87,13 @@ jobs:
         env:
           DAILY_BUDGET_THB: ${{ github.event.inputs.budget || '100' }}
           MAX_BUY_THB: ${{ secrets.MAX_BUY_THB || '1000' }}
+          MAX_DCA_BUYS_PER_DAY: ${{ secrets.MAX_DCA_BUYS_PER_DAY || '1' }}
+          RESERVE_FLOOR: ${{ secrets.RESERVE_FLOOR || '' }}
+          MAX_RESERVE_INJECTION: ${{ secrets.MAX_RESERVE_INJECTION || '' }}
+          RESERVE_BOOST_MULTIPLIER: ${{ secrets.RESERVE_BOOST_MULTIPLIER || '1.8' }}
+          RESERVE_BOOST_PRICE_RATIO: ${{ secrets.RESERVE_BOOST_PRICE_RATIO || '1.05' }}
+          LOW_BALANCE_THRESHOLD: ${{ secrets.LOW_BALANCE_THRESHOLD || '' }}
+          LOW_BALANCE_DAYS: ${{ secrets.LOW_BALANCE_DAYS || '7' }}
           USD_THB_RATE: ${{ secrets.USD_THB_RATE || '33.426' }}
           BOT_ENABLED: 'true'
         run: |

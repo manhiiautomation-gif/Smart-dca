@@ -40,6 +40,8 @@ DEMO_STATE_TEMPLATE = {
     'run_count': 0,
     'cash': 0.0,
     'btc': 0.0,
+    # Reserve from BTC sale profits (separate from DCA waiting cash)
+    'sell_proceeds_reserve': 0.0,
     'total_invested': 0.0,
     'total_sell_proceeds': 0.0,
     'total_btc_bought': 0.0,
@@ -51,6 +53,8 @@ DEMO_STATE_TEMPLATE = {
     'peak_value': 0.0,
     'max_drawdown': 0.0,
     'cooldown': 0,
+    # Currency integrity lock — prevents mixed THB/USDT data
+    'currency_locked': False,
     # Portfolio history: list of {date, portfolio_value, btc, cash, price, decision}
     'history': [],
     # Last run details
@@ -83,6 +87,14 @@ def get_demo_paths(project_root: str, scenario: str = 'default') -> dict:
     }
 
 
+def _validate_currency_exchange(exchange: str, currency: str) -> tuple:
+    """Validate currency matches exchange. Returns (ok, expected_currency)."""
+    expected = {'binance': 'USDT', 'bitkub': 'THB'}.get(exchange, 'USDT')
+    if currency != expected:
+        return False, expected
+    return True, expected
+
+
 def init_demo(initial_cash: float = 10000.0, currency: str = 'USDT',
               exchange: str = 'binance', scenario: str = 'default',
               project_root: str = '.') -> dict:
@@ -92,24 +104,51 @@ def init_demo(initial_cash: float = 10000.0, currency: str = 'USDT',
     state['scenario'] = scenario
     state['initial_cash'] = initial_cash
     state['cash'] = initial_cash
-    state['currency'] = currency
     state['exchange'] = exchange
+
+    # Currency validation: force correct currency for exchange
+    ok, expected = _validate_currency_exchange(exchange, currency)
+    if not ok:
+        print(f'[DEMO] WARNING: Currency {currency} mismatched with exchange {exchange}. '
+              f'Auto-correcting to {expected}.')
+        currency = expected
+    state['currency'] = currency
+    state['currency_locked'] = True  # Lock currency after first init
+
     state['created_at'] = datetime.now().isoformat()
     _save_json(state, paths['state'])
     _save_json([], paths['trades'])
     print(f'[DEMO] Initialized demo portfolio: "{scenario}"')
     print(f'[DEMO]   Initial cash: {initial_cash:,.2f} {currency}')
     print(f'[DEMO]   Exchange: {exchange}')
+    print(f'[DEMO]   Currency locked: {currency}')
     print(f'[DEMO]   Files: {paths["state"]}')
     return state
 
 
 def load_demo_state(project_root: str, scenario: str = 'default') -> dict:
-    """Load demo state, or initialize if not exists."""
+    """Load demo state, or initialize if not exists.
+
+    Validates currency integrity on load. If the loaded state's currency
+    doesn't match the expected currency for its exchange, raises ValueError
+    to prevent mixed-currency data corruption.
+    """
     paths = get_demo_paths(project_root, scenario)
     if os.path.exists(paths['state']):
         with open(paths['state'], 'r') as f:
-            return json.load(f)
+            state = json.load(f)
+        # Currency integrity check
+        loaded_exchange = state.get('exchange', 'binance')
+        loaded_currency = state.get('currency', 'USDT')
+        ok, expected = _validate_currency_exchange(loaded_exchange, loaded_currency)
+        if not ok:
+            raise ValueError(
+                f'CURRENCY INTEGRITY ERROR: demo_state has currency={loaded_currency} '
+                f'but exchange={loaded_exchange} expects {expected}. '
+                f'This state has mixed THB/USDT data and must be reset. '
+                f'Run with --reset to start fresh.'
+            )
+        return state
     # Auto-init on first load
     return init_demo(scenario=scenario, project_root=project_root)
 
@@ -204,13 +243,16 @@ def process_demo_trade(state: dict, decision: dict, price: float,
         val['sell_signals'] += 1
 
     # ── BUY ──
+    buy_status = 'none'
     if buy_signal:
         buy_amount = decision['buy_amount']
+        buy_attempted = buy_amount  # Track original for status reporting
         min_buy = 10.0 if currency == 'USDT' else 100.0
 
         if buy_amount < min_buy:
             reason = f'below_min ({buy_amount:.2f} < {min_buy})'
             val['skipped_buys_reason'][reason] = val['skipped_buys_reason'].get(reason, 0) + 1
+            buy_status = 'skipped'
             print(f'[DEMO] BUY SKIPPED: {reason}')
         elif state['cash'] < buy_amount:
             # Buy with what we have
@@ -220,6 +262,7 @@ def process_demo_trade(state: dict, decision: dict, price: float,
             else:
                 reason = f'no_cash ({state["cash"]:.2f})'
                 val['skipped_buys_reason'][reason] = val['skipped_buys_reason'].get(reason, 0) + 1
+                buy_status = 'skipped'
                 print(f'[DEMO] BUY SKIPPED: {reason}')
                 buy_amount = 0
 
@@ -251,9 +294,17 @@ def process_demo_trade(state: dict, decision: dict, price: float,
             state['cumulative_fees'] += fee
             state['cumulative_slippage'] += max(0, slip_cost)
             val['actual_buys'] += 1
+            buy_status = 'success'
+
+            # Deduct reserve injection from sell_proceeds_reserve
+            reserve_inj = decision.get('reserve_injection', 0)
+            if reserve_inj > 0:
+                state['sell_proceeds_reserve'] = max(0, state.get('sell_proceeds_reserve', 0) - reserve_inj)
 
             print(f'[DEMO] BUY: {cost_with_slippage:.2f} {currency} -> {btc_got:.8f} BTC @ {price:,.2f}')
-            print(f'[DEMO]   Fee: {fee:.2f}  Slippage: {max(0, slip_cost):.4f}')
+            print(f'[DEMO]   Fee: {fee:.2f}  Slippage: {max(0, slip_cost):.4f}  Status: {buy_status}')
+            if reserve_inj > 0:
+                print(f'[DEMO]   Reserve used: {reserve_inj:.2f} (remaining: {state["sell_proceeds_reserve"]:,.2f} {currency})')
 
             # Record trade
             _append_demo_trade(project_root, scenario, 'buy',
@@ -264,6 +315,7 @@ def process_demo_trade(state: dict, decision: dict, price: float,
                               })
 
     # ── SELL ──
+
     if sell_signal and not buy_signal:
         sell_amount = decision['sell_amount']
         btc_to_sell = sell_amount / price
@@ -290,6 +342,9 @@ def process_demo_trade(state: dict, decision: dict, price: float,
             btc_sold = proceeds_with_slippage / price
 
             state['btc'] -= btc_sold
+            # Separate: sell proceeds go to reserve (for buy-the-dip), not general cash
+            state['sell_proceeds_reserve'] = state.get('sell_proceeds_reserve', 0.0) + net_proceeds
+            # Also add to cash for portfolio value calculation
             state['cash'] += net_proceeds
             state['total_sell_proceeds'] += proceeds_with_slippage
             state['total_btc_sold'] += btc_sold
@@ -300,6 +355,7 @@ def process_demo_trade(state: dict, decision: dict, price: float,
 
             print(f'[DEMO] SELL: {btc_sold:.8f} BTC -> {proceeds_with_slippage:.2f} {currency} @ {price:,.2f}')
             print(f'[DEMO]   Fee: {fee:.2f}  Slippage: {max(0, slip_cost):.4f}')
+            print(f'[DEMO]   Proceeds -> reserve (total reserve: {state["sell_proceeds_reserve"]:,.2f} {currency})')
 
             _append_demo_trade(project_root, scenario, 'sell',
                               proceeds_with_slippage, btc_sold, price, fee,
@@ -325,7 +381,8 @@ def process_demo_trade(state: dict, decision: dict, price: float,
         'btc': round(state['btc'], 8),
         'cash': round(state['cash'], 2),
         'price': round(price, 2),
-        'decision': 'buy' if buy_signal and state.get('buy_count', 0) > (val.get('actual_buys', 0) - (1 if buy_signal else 0)) else ('sell' if sell_signal and not buy_signal else 'hold'),
+        'decision': 'buy' if buy_status == 'success' else ('sell' if sell_signal and not buy_signal else ('buy_skipped' if buy_status == 'skipped' else 'hold')),
+        'buy_status': buy_status,
     })
     # Keep last 365 history entries
     if len(state['history']) > 365:
@@ -339,6 +396,18 @@ def process_demo_trade(state: dict, decision: dict, price: float,
     print(f'[DEMO] Portfolio: {portfolio:,.2f} {currency} (ROI: {roi:+.2f}%)')
     print(f'[DEMO] BTC: {state["btc"]:.8f}  Cash: {state["cash"]:,.2f}')
     print(f'[DEMO] Peak: {state["peak_value"]:,.2f}  MaxDD: {state["max_drawdown"]*100:.2f}%')
+    print(f'[DEMO] Buy status: {buy_status}')
+    reserve = state.get('sell_proceeds_reserve', 0.0)
+    print(f'[DEMO] Sell proceeds reserve: {reserve:,.2f} {currency}')
+
+    # Low balance warning
+    from . import config as cfg
+    daily_budget = cfg.get_daily_budget()
+    if state['cash'] > 0 and daily_budget > 0:
+        days_remaining = state['cash'] / daily_budget
+        if days_remaining <= cfg.LOW_BALANCE_DAYS:
+            print(f'[DEMO] ⚠ LOW BALANCE WARNING: {state["cash"]:,.2f} {currency} remaining')
+            print(f'[DEMO] ⚠ At {daily_budget:,.2f} {currency}/run, only ~{days_remaining:.1f} runs left')
 
     return state
 

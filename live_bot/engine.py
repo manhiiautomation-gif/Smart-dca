@@ -240,12 +240,20 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         print(f'[BOT] LIVE MODE: Real BTC={btc_balance:.8f} Cash={cash_balance:,.2f} {currency}')
 
     # ── 6. Convert budget to exchange currency ──
-    if currency == 'USDT':
-        base_budget = config.DAILY_BUDGET_THB / config.USD_THB_RATE
-        max_buy = config.MAX_BUY_THB / config.USD_THB_RATE
-    else:
-        base_budget = config.DAILY_BUDGET_THB
-        max_buy = config.MAX_BUY_THB
+    base_budget = config.get_daily_budget()
+    max_buy = config.get_max_buy()
+    print(f'[BOT] Budget: {base_budget:.2f} {currency}/run (max buy: {max_buy:.2f})')
+
+    # ── 6b. Separate reserve from DCA cash ──
+    # In demo: sell_proceeds_reserve is tracked separately
+    # In live/dry-run: we track total_sell_proceeds in state as reserve proxy
+    # cash_reserve passed to strategy = ONLY profits from BTC sales
+    sell_proceeds_reserve = bot_state.get('total_sell_proceeds', 0.0) - bot_state.get('total_invested_from_reserve', 0.0)
+    sell_proceeds_reserve = max(sell_proceeds_reserve, 0.0)
+    # For dry-run, also consider virtual sell proceeds
+    if dry_run and bot_state.get('dry_run_sell_proceeds'):
+        sell_proceeds_reserve = bot_state['dry_run_sell_proceeds']
+    print(f'[BOT] Sell proceeds reserve: {sell_proceeds_reserve:,.2f} {currency}')
 
     # ── 7. Decrement cooldown ──
     if bot_state['cooldown'] > 0:
@@ -261,9 +269,16 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         mvrv_pct=mvrv_pct, mvrv_z=mvrv_z,
         macd_cross_bear=macd_bear, macd_hist_declining=macd_declining,
         rsi_divergence_flag=rsi_div, ath=ath,
-        btc_balance=btc_balance, cash_reserve=cash_balance,
+        btc_balance=btc_balance,
+        cash_reserve=sell_proceeds_reserve,  # Only BTC sale profits, not DCA cash
         cooldown=bot_state['cooldown'],
         base_budget=base_budget, max_buy=max_buy,
+        # Reserve deployment config (all in exchange currency)
+        reserve_floor=config.get_reserve_floor(),
+        max_reserve_injection=config.get_max_reserve_injection(),
+        max_reserve_boosted=config.get_max_reserve_boosted(),
+        reserve_boost_multiplier=config.RESERVE_BOOST_MULTIPLIER,
+        reserve_boost_price_ratio=config.RESERVE_BOOST_PRICE_RATIO,
     )
 
     print(f'[BOT] Decision: buy={decision["buy_amount"]:.2f} '
@@ -307,8 +322,10 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             buy_fee = float(result.get('fee', buy_cost_actual * config.BUY_FEE_PCT))
             bot_state['total_btc_bought'] += buy_btc_got
             print(f'[BOT] Bought {buy_btc_got:.8f} BTC for {buy_cost_actual:.2f} {currency} (fee: {buy_fee:.2f})')
+            print(f'[BOT] BUY STATUS: SUCCESS')
         except Exception as e:
             print(f'[BOT] BUY ERROR: {e}')
+            print(f'[BOT] BUY STATUS: FAILED')
             decision['buy_amount'] = 0
     elif decision['buy_amount'] > 0 and dry_run:
         buy_btc_got = decision['buy_amount'] / price
@@ -381,11 +398,17 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         # Save updated virtual balances to state for next run
         bot_state['dry_run_btc'] = round(current_btc, 8)
         bot_state['dry_run_cash'] = round(current_cash, 2)
+        # Track sell proceeds for reserve
+        if sell_proceeds_actual > 0:
+            bot_state['dry_run_sell_proceeds'] = bot_state.get('dry_run_sell_proceeds', 0.0) + sell_proceeds_actual - sell_fee
         print(f'[BOT] DRY RUN portfolio: BTC={current_btc:.8f} Cash={current_cash:,.2f} {currency}')
     else:
         # LIVE: Fetch latest real balances from exchange
         current_btc = _get_btc_balance(exchange)
         current_cash = _get_cash_balance(exchange)
+        # Track sell proceeds for reserve
+        if sell_proceeds_actual > 0:
+            bot_state['sell_proceeds_reserve'] = bot_state.get('sell_proceeds_reserve', 0.0) + sell_proceeds_actual - sell_fee
     portfolio = current_btc * price + current_cash
 
     if portfolio > bot_state['peak_value']:
@@ -424,7 +447,22 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     bot_state['last_exchange_currency'] = currency
     bot_state['last_dry_run'] = dry_run
 
-    # ── 12. Send notification ──
+    # ── 12. Low balance warning ──
+    daily_budget = config.get_daily_budget()
+    if current_cash > 0 and daily_budget > 0:
+        days_remaining = current_cash / daily_budget
+        if days_remaining <= config.LOW_BALANCE_DAYS:
+            warning_msg = (
+                f'\n⚠ LOW BALANCE WARNING\n'
+                f'Cash: {current_cash:,.2f} {currency}\n'
+                f'Daily budget: {daily_budget:,.2f} {currency}\n'
+                f'Runs remaining: ~{days_remaining:.1f}\n'
+                f'Consider adding funds or reducing DCA budget.'
+            )
+            print(f'[BOT] {warning_msg}')
+            notifier.send_telegram(warning_msg)
+
+    # ── 13. Send notification ──
     msg = notifier.format_report(
         decision, price, mvrv_val, current_btc, current_cash,
         currency, is_dry_run=dry_run
@@ -587,12 +625,13 @@ def run_demo(exchange, demo_state: dict, project_root: str,
     print(f'[DEMO] MVRV={mvrv_val:.3f} Pct={mvrv_pct:.3f} Z={mvrv_z:.2f}')
 
     # ── 5. Convert budget ──
-    if currency == 'USDT':
-        base_budget = config.DAILY_BUDGET_THB / config.USD_THB_RATE
-        max_buy = config.MAX_BUY_THB / config.USD_THB_RATE
-    else:
-        base_budget = config.DAILY_BUDGET_THB
-        max_buy = config.MAX_BUY_THB
+    base_budget = config.get_daily_budget()
+    max_buy = config.get_max_buy()
+    print(f'[DEMO] Budget: {base_budget:.2f} {currency}/run (max buy: {max_buy:.2f})')
+
+    # ── 5b. Reserve = sell proceeds only ──
+    demo_reserve = demo_state.get('sell_proceeds_reserve', 0.0)
+    print(f'[DEMO] Sell proceeds reserve: {demo_reserve:,.2f} {currency}')
 
     # ── 6. Run strategy (same logic as live) ──
     print('[DEMO] Running Phoenix v5.1 strategy...')
@@ -604,9 +643,15 @@ def run_demo(exchange, demo_state: dict, project_root: str,
         macd_cross_bear=macd_bear, macd_hist_declining=macd_declining,
         rsi_divergence_flag=rsi_div, ath=ath,
         btc_balance=demo_state['btc'],
-        cash_reserve=demo_state['cash'],
+        cash_reserve=demo_reserve,  # Only BTC sale profits, not DCA cash
         cooldown=demo_state['cooldown'],
         base_budget=base_budget, max_buy=max_buy,
+        # Reserve deployment config (all in exchange currency)
+        reserve_floor=config.get_reserve_floor(),
+        max_reserve_injection=config.get_max_reserve_injection(),
+        max_reserve_boosted=config.get_max_reserve_boosted(),
+        reserve_boost_multiplier=config.RESERVE_BOOST_MULTIPLIER,
+        reserve_boost_price_ratio=config.RESERVE_BOOST_PRICE_RATIO,
     )
 
     print(f'[DEMO] Decision: buy={decision["buy_amount"]:.2f} '

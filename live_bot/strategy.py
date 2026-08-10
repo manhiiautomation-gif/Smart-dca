@@ -3,6 +3,12 @@
 Adapted from backtest strategy_style_phoenix_v5_1.py.
 Accepts a flat dict of current indicators + state, returns a decision dict.
 All monetary amounts in the caller's currency (THB or USDT).
+
+v5.1.1 (2026-08-11): Removed hardcoded THB values (200/900/1200).
+  Reserve deployment parameters now passed via function arguments,
+  derived from config.py based on exchange currency.
+  Added separate tracking: cash_reserve (BTC sale profits only)
+  vs dca_reserve (funds waiting for scheduled DCA).
 '''
 
 import numpy as np
@@ -97,27 +103,35 @@ def phoenix_v5_1_decision(
     ath: float,            # all-time high in exchange currency
     # State
     btc_balance: float,
-    cash_reserve: float,
+    cash_reserve: float,    # BTC sale profits only (NOT DCA waiting funds)
     cooldown: int,
     # Config
     base_budget: float,
     max_buy: float,
+    # Reserve deployment config (v5.1.1 — all in exchange currency)
+    reserve_floor: float = 0.0,
+    max_reserve_injection: float = 0.0,
+    max_reserve_boosted: float = 0.0,
+    reserve_boost_multiplier: float = 1.8,
+    reserve_boost_price_ratio: float = 1.05,
 ) -> dict:
     """Run Phoenix v5.1 strategy for one decision point.
+
+    All monetary values (price, budget, reserve, injection) are in the
+    exchange's native currency (USDT for Binance, THB for Bitkub).
 
     Returns dict with keys:
         buy_amount, sell_amount, new_cooldown, sell_score,
         reserve_injection, path_taken
     """
     # ── Proxy detection ──
-    # In live, if MVRV is NaN we skip trading entirely
     if np.isnan(mvrv):
         return _no_trade('MVRV unavailable')
 
     # ── BEAR BLOCK CHECK ──
     in_bear = not np.isnan(sma_200) and price < sma_200
 
-    # ═══ 1. BUY SIDE ═══
+    # ═══ 1. BUY SIDE (DCA) ═══
     buy_amount = 0.0
     reserve_injection = 0.0
 
@@ -134,9 +148,11 @@ def phoenix_v5_1_decision(
 
     buy_amount = min(base_budget * multiplier, max_buy)
 
-    # ═══ 2. RESERVE DEPLOYMENT ═══
-    usable_cash = max(cash_reserve - 200.0, 0.0)
-    if usable_cash > 0 and mvrv < 1.5 and not np.isnan(realized_price):
+    # ═══ 2. RESERVE DEPLOYMENT (buy-the-dip from BTC sale profits) ═══
+    # cash_reserve = money from BTC sells, held for dip buying
+    # reserve_floor = minimum cash to keep (e.g. ~6 USDT or 200 THB)
+    usable_reserve = max(cash_reserve - reserve_floor, 0.0)
+    if usable_reserve > 0 and mvrv < 1.5 and not np.isnan(realized_price):
         if mvrv < 0.8 and in_bear:
             deploy_rate = 0.25
         elif mvrv < 0.9 and in_bear:
@@ -149,9 +165,13 @@ def phoenix_v5_1_decision(
             deploy_rate = 0.06
         else:
             deploy_rate = 0.03
-        injection = min(usable_cash * deploy_rate, 900.0)
-        if price < realized_price * 1.05:
-            injection = min(injection * 1.8, 1200.0)
+
+        injection = min(usable_reserve * deploy_rate, max_reserve_injection)
+
+        # Boost when price is below realized price
+        if price < realized_price * reserve_boost_price_ratio:
+            injection = min(injection * reserve_boost_multiplier, max_reserve_boosted)
+
         buy_amount += injection
         reserve_injection = injection
 
