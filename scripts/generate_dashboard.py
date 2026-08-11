@@ -16,6 +16,7 @@ if PROJECT_ROOT not in sys.path:
 
 from live_bot.kill_switch import get_full_status
 from live_bot.state import load_state, load_trade_log
+from live_bot import config as cfg
 
 
 def fmt_num(n, decimals=2):
@@ -317,6 +318,71 @@ def generate_dashboard(state_path='live_bot/state.json',
             print(f'[DASHBOARD] Demo section error: {e}')
             demo_html = ''
 
+    # ── Config settings for dashboard display ──
+    # Show effective values (after THB→local conversion)
+    cfg_items = [
+        ('Exchange', cfg.EXCHANGE.upper()),
+        ('Currency', cfg.CURRENCY),
+        ('USD/THB Rate', f'{cfg.USD_THB_RATE:.3f}'),
+        ('Daily DCA Budget', f'{cfg.DAILY_BUDGET_THB:,.0f} THB = {cfg.get_daily_budget():.2f} {cfg.CURRENCY}'),
+        ('Max Buy/Trade', f'{cfg.MAX_BUY_THB:,.0f} THB = {cfg.get_max_buy():.2f} {cfg.CURRENCY}'),
+        ('Max DCA Buys/Day', str(cfg.MAX_DCA_BUYS_PER_DAY)),
+        ('Reserve Floor', f'{cfg.get_reserve_floor():.2f} {cfg.CURRENCY}'),
+        ('Max Reserve Inject', f'{cfg.get_max_reserve_injection():.2f} {cfg.CURRENCY}'),
+        ('Max Boosted Inject', f'{cfg.get_max_reserve_boosted():.2f} {cfg.CURRENCY}'),
+        ('Boost Multiplier', f'{cfg.RESERVE_BOOST_MULTIPLIER}x'),
+        ('Boost Price Ratio', f'{cfg.RESERVE_BOOST_PRICE_RATIO}x realized'),
+        ('Low Balance Alert', f'< {cfg.LOW_BALANCE_DAYS} days remaining'),
+        ('Buy Fee', f'{cfg.BUY_FEE_PCT*100:.2f}%'),
+        ('Sell Fee', f'{cfg.SELL_FEE_PCT*100:.2f}%'),
+    ]
+    cfg_grid_rows = ''
+    for label, val in cfg_items:
+        cfg_grid_rows += f'<div class="ind-item"><span class="label">{label}</span><span class="val">{val}</span></div>\n'
+
+    config_html = f'''
+    <!-- Config Settings -->
+    <div class="card" style="margin-bottom:16px;border-left:3px solid var(--purple);">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+            Configuration (Active)
+            <button class="ctrl-btn" onclick="toggleHelp()" style="padding:4px 12px;font-size:0.7rem;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                วิธีตั้งค่า
+            </button>
+        </div>
+        <div class="ind-grid">
+            {cfg_grid_rows}
+        </div>
+    </div>
+
+    <!-- Help Modal -->
+    <div class="confirm-overlay" id="helpOverlay" style="z-index:10000;">
+        <div class="confirm-box" style="max-width:520px;">
+            <h3 style="margin-bottom:12px;">วิธีตั้งค่า Config</h3>
+            <div style="font-size:0.82rem;color:var(--text-dim);line-height:1.7;">
+                <p style="margin-bottom:10px;">ตั้งค่าผ่าน <b style="color:var(--text);">GitHub Secrets</b> ใน repo Settings → Secrets and variables → Actions</p>
+                <table style="width:100%;font-size:0.78rem;margin-bottom:12px;">
+                    <tr style="border-bottom:1px solid var(--border);"><th style="text-align:left;padding:4px 0;">Secret Name</th><th style="text-align:left;padding:4px 0;">ค่าเริ่มต้น</th><th style="text-align:left;padding:4px 0;">อธิบาย</th></tr>
+                    <tr><td style="padding:4px 0;font-family:monospace;">DAILY_BUDGET_THB</td><td>100</td><td>งบ DCA ต่อรอบ (THB)</td></tr>
+                    <tr><td style="padding:4px 0;font-family:monospace;">MAX_BUY_THB</td><td>1000</td><td>ซื้อสูงสุด/trade (THB)</td></tr>
+                    <tr><td style="padding:4px 0;font-family:monospace;">MAX_DCA_BUYS_PER_DAY</td><td>1</td><td>ซื้อ DCA สูงสุด/วัน</td></tr>
+                    <tr><td style="padding:4px 0;font-family:monospace;">RESERVE_FLOOR</td><td>auto</td><td>จำนวนเงิน reserve ขั้นต่ำ (สกุลเงินเดียวกับ exchange)</td></tr>
+                    <tr><td style="padding:4px 0;font-family:monospace;">MAX_RESERVE_INJECTION</td><td>auto</td><td>ฉีด reserve สูงสุด/ครั้ง</td></tr>
+                    <tr><td style="padding:4px 0;font-family:monospace;">RESERVE_BOOST_MULTIPLIER</td><td>1.8</td><td>boost x เมื่อราคา < realized</td></tr>
+                    <tr><td style="padding:4px 0;font-family:monospace;">RESERVE_BOOST_PRICE_RATIO</td><td>1.05</td><td>เงื่อนไข boost: price < realized x นี้</td></tr>
+                    <tr><td style="padding:4px 0;font-family:monospace;">LOW_BALANCE_DAYS</td><td>7</td><td>แจ้งเตือนเมื่อเงินเหลือไม่พอ N รอบ</td></tr>
+                    <tr><td style="padding:4px 0;font-family:monospace;">USD_THB_RATE</td><td>33.426</td><td>อัตราแลกเปลี่ยน (สำหรับ Binance→USDT)</td></tr>
+                </table>
+                <p style="color:var(--yellow);"><b>หมายเหตุ:</b> ค่า DCA (DAILY_BUDGET_THB, MAX_BUY_THB) ระบุเป็น THB เสมอ ระบบจะ auto-convert เป็นสกุลเงินของ exchange ให้</p>
+                <p style="margin-top:8px;">ตั้งค่าผ่าน <b style="color:var(--text);">Manual Trigger</b> ใน Actions ได้ด้วย (ช่อง budget)</p>
+            </div>
+            <div class="confirm-actions">
+                <button class="ctrl-btn" onclick="toggleHelp()">ปิด</button>
+            </div>
+        </div>
+    </div>
+    '''
+
     html = build_html(
         bot_alive=bot_alive, l1_ok=l1_ok, l2_ok=l2_ok,
         ks_reason=ks_reason, ks_time=ks_time, ks_by=ks_by,
@@ -342,6 +408,7 @@ def generate_dashboard(state_path='live_bot/state.json',
         last_trade_date=last_trade_date,
         now=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         demo_html=demo_html,
+        config_html=config_html,
         avg_buy_price=avg_buy_price,
         unrealized_pnl=unrealized_pnl,
         unrealized_pnl_pct=unrealized_pnl_pct,
@@ -410,6 +477,7 @@ def build_html(**kw) -> str:
     now_str = kw['now']
     last_trade_date = kw.get('last_trade_date', '—')
     demo_html = kw.get('demo_html', '')
+    config_html = kw.get('config_html', '')
     avg_buy_price = kw.get('avg_buy_price', 0)
     unrealized_pnl = kw.get('unrealized_pnl', 0)
     unrealized_pnl_pct = kw.get('unrealized_pnl_pct', 0)
@@ -973,6 +1041,7 @@ def build_html(**kw) -> str:
         </table>
     </div>
 
+    {config_html}
     {demo_html}
 
     <!-- Footer -->
@@ -1137,7 +1206,16 @@ def build_html(**kw) -> str:
             if (e.target === this) closeConfirm();
         }});
         document.addEventListener('keydown', function(e) {{
-            if (e.key === 'Escape') closeConfirm();
+            if (e.key === 'Escape') {{ closeConfirm(); toggleHelp(); }}
+        }});
+        // Help modal
+        window.toggleHelp = function() {{
+            var o = document.getElementById('helpOverlay');
+            if (o) o.classList.toggle('active');
+        }};
+        var helpO = document.getElementById('helpOverlay');
+        if (helpO) helpO.addEventListener('click', function(e) {{
+            if (e.target === this) toggleHelp();
         }});
     }})();
     </script>

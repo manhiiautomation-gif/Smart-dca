@@ -500,6 +500,62 @@
     </div>
 
     
+    <!-- Config Settings -->
+    <div class="card" style="margin-bottom:16px;border-left:3px solid var(--purple);">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+            Configuration (Active)
+            <button class="ctrl-btn" onclick="toggleHelp()" style="padding:4px 12px;font-size:0.7rem;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                วิธีตั้งค่า
+            </button>
+        </div>
+        <div class="ind-grid">
+            <div class="ind-item"><span class="label">Exchange</span><span class="val">BINANCE</span></div>
+<div class="ind-item"><span class="label">Currency</span><span class="val">USDT</span></div>
+<div class="ind-item"><span class="label">USD/THB Rate</span><span class="val">33.426</span></div>
+<div class="ind-item"><span class="label">Daily DCA Budget</span><span class="val">100 THB = 2.99 USDT</span></div>
+<div class="ind-item"><span class="label">Max Buy/Trade</span><span class="val">1,000 THB = 29.92 USDT</span></div>
+<div class="ind-item"><span class="label">Max DCA Buys/Day</span><span class="val">1</span></div>
+<div class="ind-item"><span class="label">Reserve Floor</span><span class="val">5.98 USDT</span></div>
+<div class="ind-item"><span class="label">Max Reserve Inject</span><span class="val">26.93 USDT</span></div>
+<div class="ind-item"><span class="label">Max Boosted Inject</span><span class="val">48.47 USDT</span></div>
+<div class="ind-item"><span class="label">Boost Multiplier</span><span class="val">1.8x</span></div>
+<div class="ind-item"><span class="label">Boost Price Ratio</span><span class="val">1.05x realized</span></div>
+<div class="ind-item"><span class="label">Low Balance Alert</span><span class="val">< 7 days remaining</span></div>
+<div class="ind-item"><span class="label">Buy Fee</span><span class="val">0.15%</span></div>
+<div class="ind-item"><span class="label">Sell Fee</span><span class="val">0.15%</span></div>
+
+        </div>
+    </div>
+
+    <!-- Help Modal -->
+    <div class="confirm-overlay" id="helpOverlay" style="z-index:10000;">
+        <div class="confirm-box" style="max-width:520px;">
+            <h3 style="margin-bottom:12px;">วิธีตั้งค่า Config</h3>
+            <div style="font-size:0.82rem;color:var(--text-dim);line-height:1.7;">
+                <p style="margin-bottom:10px;">ตั้งค่าผ่าน <b style="color:var(--text);">GitHub Secrets</b> ใน repo Settings → Secrets and variables → Actions</p>
+                <table style="width:100%;font-size:0.78rem;margin-bottom:12px;">
+                    <tr style="border-bottom:1px solid var(--border);"><th style="text-align:left;padding:4px 0;">Secret Name</th><th style="text-align:left;padding:4px 0;">ค่าเริ่มต้น</th><th style="text-align:left;padding:4px 0;">อธิบาย</th></tr>
+                    <tr><td style="padding:4px 0;font-family:monospace;">DAILY_BUDGET_THB</td><td>100</td><td>งบ DCA ต่อรอบ (THB)</td></tr>
+                    <tr><td style="padding:4px 0;font-family:monospace;">MAX_BUY_THB</td><td>1000</td><td>ซื้อสูงสุด/trade (THB)</td></tr>
+                    <tr><td style="padding:4px 0;font-family:monospace;">MAX_DCA_BUYS_PER_DAY</td><td>1</td><td>ซื้อ DCA สูงสุด/วัน</td></tr>
+                    <tr><td style="padding:4px 0;font-family:monospace;">RESERVE_FLOOR</td><td>auto</td><td>จำนวนเงิน reserve ขั้นต่ำ (สกุลเงินเดียวกับ exchange)</td></tr>
+                    <tr><td style="padding:4px 0;font-family:monospace;">MAX_RESERVE_INJECTION</td><td>auto</td><td>ฉีด reserve สูงสุด/ครั้ง</td></tr>
+                    <tr><td style="padding:4px 0;font-family:monospace;">RESERVE_BOOST_MULTIPLIER</td><td>1.8</td><td>boost x เมื่อราคา < realized</td></tr>
+                    <tr><td style="padding:4px 0;font-family:monospace;">RESERVE_BOOST_PRICE_RATIO</td><td>1.05</td><td>เงื่อนไข boost: price < realized x นี้</td></tr>
+                    <tr><td style="padding:4px 0;font-family:monospace;">LOW_BALANCE_DAYS</td><td>7</td><td>แจ้งเตือนเมื่อเงินเหลือไม่พอ N รอบ</td></tr>
+                    <tr><td style="padding:4px 0;font-family:monospace;">USD_THB_RATE</td><td>33.426</td><td>อัตราแลกเปลี่ยน (สำหรับ Binance→USDT)</td></tr>
+                </table>
+                <p style="color:var(--yellow);"><b>หมายเหตุ:</b> ค่า DCA (DAILY_BUDGET_THB, MAX_BUY_THB) ระบุเป็น THB เสมอ ระบบจะ auto-convert เป็นสกุลเงินของ exchange ให้</p>
+                <p style="margin-top:8px;">ตั้งค่าผ่าน <b style="color:var(--text);">Manual Trigger</b> ใน Actions ได้ด้วย (ช่อง budget)</p>
+            </div>
+            <div class="confirm-actions">
+                <button class="ctrl-btn" onclick="toggleHelp()">ปิด</button>
+            </div>
+        </div>
+    </div>
+    
+    
     <!-- Demo Portfolio -->
     <div class="card" style="margin-bottom:16px;border-left:3px solid var(--blue);">
         <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
@@ -554,7 +610,7 @@
 
     <!-- Footer -->
     <div class="footer">
-        Phoenix v5.1 DCA Bot | Generated: 2026-08-11 00:36:04 | Auto-refresh: 5 min | <a href="https://github.com/manhiiautomation-gif/Smart-dca" target="_blank" style="color:var(--blue);text-decoration:none;">GitHub</a>
+        Phoenix v5.1 DCA Bot | Generated: 2026-08-11 02:50:04 | Auto-refresh: 5 min | <a href="https://github.com/manhiiautomation-gif/Smart-dca" target="_blank" style="color:var(--blue);text-decoration:none;">GitHub</a>
     </div>
 
     <script>
@@ -717,7 +773,16 @@ The token is stored in your browser only.');
             if (e.target === this) closeConfirm();
         });
         document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape') closeConfirm();
+            if (e.key === 'Escape') { closeConfirm(); toggleHelp(); }
+        });
+        // Help modal
+        window.toggleHelp = function() {
+            var o = document.getElementById('helpOverlay');
+            if (o) o.classList.toggle('active');
+        };
+        var helpO = document.getElementById('helpOverlay');
+        if (helpO) helpO.addEventListener('click', function(e) {
+            if (e.target === this) toggleHelp();
         });
     })();
     </script>
