@@ -1,18 +1,45 @@
 #!/usr/bin/env python3
-"""Reset demo portfolio data to clean state."""
+"""Reset demo portfolio data to clean state.
 
+Usage:
+    python scripts/reset_demo.py                # binance/USDT
+    python scripts/reset_demo.py --exchange bitkub  # bitkub/THB
+    python scripts/reset_demo.py --exchange bitkub --cash 50000
+"""
+
+import argparse
 import json
+import sys
+import os
 
-# Reset demo_state.json with clean binance/USDT state
+# Add project root for live_bot import
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+parser = argparse.ArgumentParser(description='Reset demo portfolio')
+parser.add_argument('--exchange', '-e', default='binance',
+                    choices=['binance', 'bitkub'],
+                    help='Exchange (default: binance)')
+parser.add_argument('--cash', '-c', type=float, default=10000.0,
+                    help='Initial cash (default: 10000)')
+parser.add_argument('--scenario', '-s', default='default',
+                    help='Scenario name (default: default)')
+args = parser.parse_args()
+
+# Determine currency from exchange
+currency = 'USDT' if args.exchange == 'binance' else 'THB'
+
+# Use the proper init_demo to ensure consistency
 clean_state = {
-    'scenario': 'default',
-    'initial_cash': 10000.0,
-    'currency': 'USDT',
-    'exchange': 'binance',
-    'created_at': '2026-08-11T00:00:00',
+    'scenario': args.scenario,
+    'initial_cash': args.cash,
+    'currency': currency,
+    'exchange': args.exchange,
+    'created_at': '',
     'last_run_date': '',
     'run_count': 0,
-    'cash': 10000.0,
+    'cash': args.cash,
     'btc': 0.0,
     'sell_proceeds_reserve': 0.0,
     'total_invested': 0.0,
@@ -44,16 +71,30 @@ clean_state = {
     },
 }
 
-with open('demo_state.json', 'w') as f:
+import datetime
+clean_state['created_at'] = datetime.datetime.now().isoformat()
+
+# Use scenario-based paths if not default
+if args.scenario == 'default':
+    state_path = os.path.join(PROJECT_ROOT, 'demo_state.json')
+    trades_path = os.path.join(PROJECT_ROOT, 'demo_trades.json')
+    report_path = os.path.join(PROJECT_ROOT, 'demo_report.json')
+else:
+    state_path = os.path.join(PROJECT_ROOT, f'demo_state_{args.scenario}.json')
+    trades_path = os.path.join(PROJECT_ROOT, f'demo_trades_{args.scenario}.json')
+    report_path = os.path.join(PROJECT_ROOT, f'demo_report_{args.scenario}.json')
+
+with open(state_path, 'w') as f:
     json.dump(clean_state, f, indent=2)
 
-with open('demo_trades.json', 'w') as f:
+with open(trades_path, 'w') as f:
     json.dump([], f, indent=2)
 
-with open('demo_report.json', 'w') as f:
+with open(report_path, 'w') as f:
     json.dump({}, f, indent=2)
 
-print('Demo data reset complete.')
-print('  demo_state.json: currency=USDT, exchange=binance, cash=10000.0')
-print('  demo_trades.json: []')
-print('  demo_report.json: {}')
+print(f'Demo data reset complete.')
+print(f'  State:  {state_path}')
+print(f'  Exchange: {args.exchange.upper()} / {currency}')
+print(f'  Cash:  {args.cash:,.2f} {currency}')
+print(f'  Scenario: {args.scenario}')

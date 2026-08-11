@@ -126,12 +126,16 @@ def init_demo(initial_cash: float = 10000.0, currency: str = 'USDT',
     return state
 
 
-def load_demo_state(project_root: str, scenario: str = 'default') -> dict:
+def load_demo_state(project_root: str, scenario: str = 'default',
+                       expected_exchange: str = None) -> dict:
     """Load demo state, or initialize if not exists.
 
     Validates currency integrity on load. If the loaded state's currency
     doesn't match the expected currency for its exchange, raises ValueError
     to prevent mixed-currency data corruption.
+
+    If expected_exchange is provided and differs from the stored exchange,
+    raises ValueError to prevent running with wrong exchange data.
     """
     paths = get_demo_paths(project_root, scenario)
     if os.path.exists(paths['state']):
@@ -148,9 +152,19 @@ def load_demo_state(project_root: str, scenario: str = 'default') -> dict:
                 f'This state has mixed THB/USDT data and must be reset. '
                 f'Run with --reset to start fresh.'
             )
+        # Exchange mismatch check: if caller expects a different exchange,
+        # the existing state has wrong-exchange data and must be reset.
+        if expected_exchange and loaded_exchange != expected_exchange:
+            raise ValueError(
+                f'EXCHANGE MISMATCH: demo_state has exchange={loaded_exchange} '
+                f'but requested exchange={expected_exchange}. '
+                f'The existing portfolio data is for a different exchange. '
+                f'Run with --reset to start fresh with {expected_exchange}.'
+            )
         return state
-    # Auto-init on first load
-    return init_demo(scenario=scenario, project_root=project_root)
+    # Auto-init on first load (use expected_exchange if provided)
+    init_exchange = expected_exchange or 'binance'
+    return init_demo(scenario=scenario, exchange=init_exchange, project_root=project_root)
 
 
 def save_demo_state(state: dict, project_root: str, scenario: str = 'default'):

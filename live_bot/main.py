@@ -94,23 +94,52 @@ def main():
 
         # Handle --reset
         if args.reset:
-            demo_state = dp.reset_demo(
-                PROJECT_ROOT, scenario=args.scenario,
-                initial_cash=args.demo_cash,
+            demo_state = dp.init_demo(
+                initial_cash=args.demo_cash or 10000.0,
+                currency='USDT' if exchange_name == 'binance' else 'THB',
+                exchange=exchange_name,
+                scenario=args.scenario,
+                project_root=PROJECT_ROOT,
             )
             print(f'[DEMO] Portfolio reset complete.')
             sys.exit(0)
 
         # Handle --validate only (no new run)
         if args.validate and not args.force:
-            demo_state = dp.load_demo_state(PROJECT_ROOT, args.scenario)
+            try:
+                demo_state = dp.load_demo_state(PROJECT_ROOT, args.scenario,
+                                                  expected_exchange=exchange_name)
+            except ValueError as e:
+                print(f'[DEMO] {e}')
+                print(f'[DEMO] Auto-resetting with exchange={exchange_name}...')
+                demo_state = dp.init_demo(
+                    initial_cash=args.demo_cash or 10000.0,
+                    currency='USDT' if exchange_name == 'binance' else 'THB',
+                    exchange=exchange_name,
+                    scenario=args.scenario,
+                    project_root=PROJECT_ROOT,
+                )
             if demo_state.get('run_count', 0) > 0:
                 report = dp.generate_validation_report(demo_state, PROJECT_ROOT, args.scenario)
                 dp.print_validation_report(report)
                 sys.exit(0)
 
         # Load or init demo state
-        demo_state = dp.load_demo_state(PROJECT_ROOT, args.scenario)
+        # Pass expected_exchange so we detect mismatch with existing state
+        try:
+            demo_state = dp.load_demo_state(PROJECT_ROOT, args.scenario,
+                                              expected_exchange=exchange_name)
+        except ValueError as e:
+            print(f'[DEMO] {e}')
+            print(f'[DEMO] Auto-resetting with exchange={exchange_name}...')
+            demo_state = dp.init_demo(
+                initial_cash=args.demo_cash or 10000.0,
+                currency='USDT' if exchange_name == 'binance' else 'THB',
+                exchange=exchange_name,
+                scenario=args.scenario,
+                project_root=PROJECT_ROOT,
+            )
+
         if args.demo_cash and demo_state.get('run_count', 0) == 0:
             demo_state = dp.init_demo(
                 initial_cash=args.demo_cash,
