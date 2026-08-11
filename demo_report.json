@@ -1,32 +1,32 @@
 {
-  "generated_at": "2026-08-11T18:39:02.729662",
+  "generated_at": "2026-08-11T19:49:18.826610",
   "scenario": "default",
   "summary": {
-    "total_runs": 10,
-    "buy_signals": 10,
+    "total_runs": 11,
+    "buy_signals": 11,
     "sell_signals": 0,
-    "actual_buys": 10,
+    "actual_buys": 11,
     "actual_sells": 0,
     "signal_exec_ratio_buy": 100.0,
     "signal_exec_ratio_sell": 100
   },
   "performance": {
     "initial_cash": 10000.0,
-    "current_portfolio": 9999.1,
-    "net_pnl": -0.9,
+    "current_portfolio": 9999.15,
+    "net_pnl": -0.85,
     "roi_pct": -0.01,
-    "total_invested": 89.82,
-    "total_fees": 0.13,
-    "total_slippage": 0.0217,
-    "avg_slippage_pct": 0.0241,
+    "total_invested": 98.8,
+    "total_fees": 0.15,
+    "total_slippage": 0.0242,
+    "avg_slippage_pct": 0.0245,
     "peak_value": 10000.01,
     "max_drawdown_pct": 0.01,
-    "sharpe_like": -10.56,
-    "avg_daily_return_pct": -0.001
+    "sharpe_like": -9.15,
+    "avg_daily_return_pct": -0.0008
   },
   "skipped_trades": {
     "buys": {
-      "below_min (8.98 < 10.0)": 10
+      "below_min (8.98 < 10.0)": 11
     },
     "sells": {}
   },
@@ -34,7 +34,7 @@
     {
       "name": "Minimum runs",
       "passed": false,
-      "detail": "10/14 runs"
+      "detail": "11/14 runs"
     },
     {
       "name": "Buy signals executed",
@@ -49,12 +49,12 @@
     {
       "name": "Fees reasonable",
       "passed": true,
-      "detail": "Total fees: 0.13 (0.00% of capital)"
+      "detail": "Total fees: 0.15 (0.00% of capital)"
     },
     {
       "name": "Slippage acceptable",
       "passed": true,
-      "detail": "Avg slippage: 0.0241%"
+      "detail": "Avg slippage: 0.0245%"
     },
     {
       "name": "Max drawdown known",
@@ -64,14 +64,14 @@
     {
       "name": "Portfolio positive or acceptable",
       "passed": true,
-      "detail": "P&L: -0.90 (-0.01%)"
+      "detail": "P&L: -0.85 (-0.01%)"
     },
     {
       "name": "At least 1 buy executed",
       "passed": true,
-      "detail": "10 buys"
+      "detail": "11 buys"
     }
   ],
   "go_live_ready": false,
-  "recommendation": "GETTING THERE: 10/14 minimum runs. Strategy signals look concerning. Wait for 14+ runs before considering go-live."
+  "recommendation": "GETTING THERE: 11/14 minimum runs. Strategy signals look concerning. Wait for 14+ runs before considering go-live."
 }
