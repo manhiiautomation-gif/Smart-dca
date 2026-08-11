@@ -5,18 +5,18 @@
   "exchange": "binance",
   "created_at": "2026-08-11T00:00:00",
   "last_run_date": "2026-08-11",
-  "run_count": 9,
-  "cash": 9919.02817126169,
-  "btc": 0.001264159486383494,
+  "run_count": 10,
+  "cash": 9910.032777597851,
+  "btc": 0.0014045346797123387,
   "sell_proceeds_reserve": 0.0,
-  "total_invested": 80.8505529089459,
+  "total_invested": 89.83247369161137,
   "total_sell_proceeds": 0.0,
-  "total_btc_bought": 0.001264159486383494,
+  "total_btc_bought": 0.0014045346797123387,
   "total_btc_sold": 0.0,
-  "buy_count": 9,
+  "buy_count": 10,
   "sell_count": 0,
-  "cumulative_fees": 0.12127582936341885,
-  "cumulative_slippage": 0.030552908945891483,
+  "cumulative_fees": 0.13474871053741705,
+  "cumulative_slippage": 0.03247369161136327,
   "peak_value": 10000.004056613343,
   "max_drawdown": 1.1934137442789857e-05,
   "cooldown": 0,
@@ -102,6 +102,15 @@
       "price": 63983.3,
       "decision": "buy",
       "buy_status": "success"
+    },
+    {
+      "date": "2026-08-11",
+      "portfolio_value": 9999.9,
+      "btc": 0.00140453,
+      "cash": 9910.03,
+      "price": 63985.1,
+      "decision": "buy",
+      "buy_status": "success"
     }
   ],
   "last_decision": {
@@ -112,18 +121,18 @@
     "reserve_injection": 0.0,
     "in_bear": true
   },
-  "last_price": 63983.3,
+  "last_price": 63985.1,
   "last_indicators": {
-    "price": 63983.3,
+    "price": 63985.1,
     "mvrv": 1.185,
     "mvrv_pct": 0.064,
     "mvrv_z": -1.08,
     "rsi": 48.8,
-    "macd_h": 0.6047,
+    "macd_h": 0.7195,
     "nupl": 0.156,
     "sopr": NaN,
     "sopr_source": "proxy",
-    "sma_200": 69876.27,
+    "sma_200": 69876.28,
     "sma_365": 84801.23,
     "macd_bear": false,
     "macd_declining": false,
@@ -135,13 +144,13 @@
     "cooldown": 0
   },
   "validation": {
-    "total_runs": 9,
-    "buy_signals": 9,
+    "total_runs": 10,
+    "buy_signals": 10,
     "sell_signals": 0,
-    "actual_buys": 9,
+    "actual_buys": 10,
     "actual_sells": 0,
     "skipped_buys_reason": {
-      "below_min (8.98 < 10.0)": 9
+      "below_min (8.98 < 10.0)": 10
     },
     "skipped_sells_reason": {},
     "avg_buy_slippage_pct": 0.0,
