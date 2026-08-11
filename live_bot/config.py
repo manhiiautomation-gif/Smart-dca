@@ -62,8 +62,6 @@ RESERVE_BOOST_PRICE_RATIO = _env_float('RESERVE_BOOST_PRICE_RATIO', '1.05')
 # ═══════════════════════════════════════════════════════════════
 #  BALANCE ALERT PARAMETERS
 # ═══════════════════════════════════════════════════════════════
-# Low balance warning threshold (in exchange currency)
-LOW_BALANCE_THRESHOLD = _env_float('LOW_BALANCE_THRESHOLD', '0')
 # Days of DCA budget remaining before warning
 LOW_BALANCE_DAYS = _env_int('LOW_BALANCE_DAYS', '7')
 

@@ -92,7 +92,6 @@ jobs:
           MAX_RESERVE_INJECTION: ${{ secrets.MAX_RESERVE_INJECTION || '' }}
           RESERVE_BOOST_MULTIPLIER: ${{ secrets.RESERVE_BOOST_MULTIPLIER || '1.8' }}
           RESERVE_BOOST_PRICE_RATIO: ${{ secrets.RESERVE_BOOST_PRICE_RATIO || '1.05' }}
-          LOW_BALANCE_THRESHOLD: ${{ secrets.LOW_BALANCE_THRESHOLD || '' }}
           LOW_BALANCE_DAYS: ${{ secrets.LOW_BALANCE_DAYS || '7' }}
           USD_THB_RATE: ${{ secrets.USD_THB_RATE || '33.426' }}
           BOT_ENABLED: 'true'
