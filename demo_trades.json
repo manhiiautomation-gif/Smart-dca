@@ -268,5 +268,15 @@
     "fee": 0.01,
     "slippage": 0.0043,
     "reserve": 0.0
+  },
+  {
+    "date": "2026-08-12 18:39",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014175,
+    "price": 63378.6,
+    "fee": 0.01,
+    "slippage": 0.0042,
+    "reserve": 0.0
   }
 ]

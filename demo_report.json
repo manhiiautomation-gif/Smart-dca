@@ -1,32 +1,32 @@
 {
-  "generated_at": "2026-08-12T17:44:36.409193",
+  "generated_at": "2026-08-12T18:39:31.066541",
   "scenario": "default",
   "summary": {
-    "total_runs": 27,
-    "buy_signals": 27,
+    "total_runs": 28,
+    "buy_signals": 28,
     "sell_signals": 0,
-    "actual_buys": 27,
+    "actual_buys": 28,
     "actual_sells": 0,
     "signal_exec_ratio_buy": 100.0,
     "signal_exec_ratio_sell": 100
   },
   "performance": {
     "initial_cash": 10000.0,
-    "current_portfolio": 9998.36,
-    "net_pnl": -1.64,
+    "current_portfolio": 9998.18,
+    "net_pnl": -1.82,
     "roi_pct": -0.02,
-    "total_invested": 242.53,
-    "total_fees": 0.36,
-    "total_slippage": 0.0707,
-    "avg_slippage_pct": 0.0291,
+    "total_invested": 251.51,
+    "total_fees": 0.38,
+    "total_slippage": 0.0749,
+    "avg_slippage_pct": 0.0298,
     "peak_value": 10001.2,
     "max_drawdown_pct": 0.03,
-    "sharpe_like": -2.26,
-    "avg_daily_return_pct": -0.0006
+    "sharpe_like": -2.47,
+    "avg_daily_return_pct": -0.0007
   },
   "skipped_trades": {
     "buys": {
-      "below_min (8.98 < 10.0)": 27
+      "below_min (8.98 < 10.0)": 28
     },
     "sells": {}
   },
@@ -34,7 +34,7 @@
     {
       "name": "Minimum runs",
       "passed": true,
-      "detail": "27/14 runs"
+      "detail": "28/14 runs"
     },
     {
       "name": "Buy signals executed",
@@ -49,12 +49,12 @@
     {
       "name": "Fees reasonable",
       "passed": true,
-      "detail": "Total fees: 0.36 (0.00% of capital)"
+      "detail": "Total fees: 0.38 (0.00% of capital)"
     },
     {
       "name": "Slippage acceptable",
       "passed": true,
-      "detail": "Avg slippage: 0.0291%"
+      "detail": "Avg slippage: 0.0298%"
     },
     {
       "name": "Max drawdown known",
@@ -64,12 +64,12 @@
     {
       "name": "Portfolio positive or acceptable",
       "passed": true,
-      "detail": "P&L: -1.64 (-0.02%)"
+      "detail": "P&L: -1.82 (-0.02%)"
     },
     {
       "name": "At least 1 buy executed",
       "passed": true,
-      "detail": "27 buys"
+      "detail": "28 buys"
     }
   ],
   "go_live_ready": true,
