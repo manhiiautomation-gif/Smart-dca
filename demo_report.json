@@ -1,32 +1,32 @@
 {
-  "generated_at": "2026-08-12T14:08:28.202384",
+  "generated_at": "2026-08-12T15:42:30.286832",
   "scenario": "default",
   "summary": {
-    "total_runs": 24,
-    "buy_signals": 24,
+    "total_runs": 25,
+    "buy_signals": 25,
     "sell_signals": 0,
-    "actual_buys": 24,
+    "actual_buys": 25,
     "actual_sells": 0,
     "signal_exec_ratio_buy": 100.0,
     "signal_exec_ratio_sell": 100
   },
   "performance": {
     "initial_cash": 10000.0,
-    "current_portfolio": 9998.98,
-    "net_pnl": -1.02,
-    "roi_pct": -0.01,
-    "total_invested": 215.58,
-    "total_fees": 0.32,
-    "total_slippage": 0.0604,
-    "avg_slippage_pct": 0.028,
+    "current_portfolio": 9998.49,
+    "net_pnl": -1.51,
+    "roi_pct": -0.02,
+    "total_invested": 224.56,
+    "total_fees": 0.34,
+    "total_slippage": 0.0635,
+    "avg_slippage_pct": 0.0283,
     "peak_value": 10001.2,
-    "max_drawdown_pct": 0.02,
-    "sharpe_like": -1.51,
-    "avg_daily_return_pct": -0.0004
+    "max_drawdown_pct": 0.03,
+    "sharpe_like": -2.17,
+    "avg_daily_return_pct": -0.0006
   },
   "skipped_trades": {
     "buys": {
-      "below_min (8.98 < 10.0)": 24
+      "below_min (8.98 < 10.0)": 25
     },
     "sells": {}
   },
@@ -34,7 +34,7 @@
     {
       "name": "Minimum runs",
       "passed": true,
-      "detail": "24/14 runs"
+      "detail": "25/14 runs"
     },
     {
       "name": "Buy signals executed",
@@ -49,27 +49,27 @@
     {
       "name": "Fees reasonable",
       "passed": true,
-      "detail": "Total fees: 0.32 (0.00% of capital)"
+      "detail": "Total fees: 0.34 (0.00% of capital)"
     },
     {
       "name": "Slippage acceptable",
       "passed": true,
-      "detail": "Avg slippage: 0.0280%"
+      "detail": "Avg slippage: 0.0283%"
     },
     {
       "name": "Max drawdown known",
       "passed": true,
-      "detail": "Max DD: 0.02%"
+      "detail": "Max DD: 0.03%"
     },
     {
       "name": "Portfolio positive or acceptable",
       "passed": true,
-      "detail": "P&L: -1.02 (-0.01%)"
+      "detail": "P&L: -1.51 (-0.02%)"
     },
     {
       "name": "At least 1 buy executed",
       "passed": true,
-      "detail": "24 buys"
+      "detail": "25 buys"
     }
   ],
   "go_live_ready": true,
