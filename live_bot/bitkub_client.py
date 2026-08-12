@@ -231,9 +231,8 @@ class BitkubClient:
         '''Alias for get_ohlcv - compatible with engine.py interface.'''
         return self.get_ohlcv(days=days)
 
-    def get_usdt_balance(self) -> float:
-        '''Not applicable for Bitkub (THB only).'''
-        return 0.0
+    # NOTE: No get_usdt_balance() — engine._get_cash_balance() would
+    # call it first and get 0.0, blocking all buys. Removed intentionally.
 
     @property
     def currency(self) -> str:

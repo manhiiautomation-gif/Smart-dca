@@ -1,8 +1,9 @@
 name: Phoenix v5.1 DCA - Bitkub
 
 on:
-  # No schedule — use dca-bot.yml for daily runs
-  # This workflow is for manual Bitkub-only execution
+  schedule:
+    # Daily at 02:07 UTC (09:07 THB) — 7 min after dca-bot.yml to avoid race
+    - cron: '7 2 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -10,9 +11,17 @@ on:
         type: boolean
         default: true
       budget:
-        description: 'Daily budget in THB'
+        description: 'Per-run budget in THB'
         type: number
         default: 100
+      force:
+        description: 'Force run (bypass daily limit)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: bitkub-dca
+  cancel-in-progress: false
 
 jobs:
   dca:
@@ -32,6 +41,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r live_bot/requirements.txt
 
+      - name: Set dry-run flag
+        id: dr
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "false" ]; then
+            echo "val=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "val=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run Phoenix v5.1
         env:
           EXCHANGE: bitkub
@@ -42,28 +60,41 @@ jobs:
           BOT_ENABLED: ${{ secrets.BOT_ENABLED || 'true' }}
           DAILY_BUDGET_THB: ${{ github.event.inputs.budget || '100' }}
           MAX_BUY_THB: ${{ secrets.MAX_BUY_THB || '1000' }}
-          DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
+          MAX_DCA_BUYS_PER_DAY: ${{ secrets.MAX_DCA_BUYS_PER_DAY || '1' }}
+          RESERVE_FLOOR: ${{ secrets.RESERVE_FLOOR || '' }}
+          MAX_RESERVE_INJECTION: ${{ secrets.MAX_RESERVE_INJECTION || '' }}
+          RESERVE_BOOST_MULTIPLIER: ${{ secrets.RESERVE_BOOST_MULTIPLIER || '1.8' }}
+          RESERVE_BOOST_PRICE_RATIO: ${{ secrets.RESERVE_BOOST_PRICE_RATIO || '1.05' }}
+          LOW_BALANCE_DAYS: ${{ secrets.LOW_BALANCE_DAYS || '7' }}
+          DRY_RUN: ${{ steps.dr.outputs.val }}
         run: |
           FLAGS="--exchange bitkub --state-file live_bot/state.json"
-          if [ "${{ github.event.inputs.dry_run }}" != "false" ]; then
+          if [ "${{ steps.dr.outputs.val }}" = "true" ]; then
             FLAGS="$FLAGS --dry-run"
           fi
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            FLAGS="$FLAGS --force"
+          fi
+          echo "Running: python live_bot/main.py $FLAGS"
           python live_bot/main.py $FLAGS
 
       - name: Generate dashboard
         run: python scripts/generate_dashboard.py
 
-      - name: Commit updated files
+      - name: Commit and push (with retry)
         run: |
           git config user.name "Phoenix Bot"
           git config user.email "phoenix-bot@users.noreply.github.com"
-          git add live_bot/state.json trade_log.json dashboard/dist/index.html
+          git add live_bot/state.json trade_log.json kill_switch.json dashboard/dist/index.html
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "bot: bitkub update $(date +%Y-%m-%d)"
             for i in 1 2 3; do
-              git pull --rebase && git push && break || sleep 10
+              git commit -m "bot: bitkub update $(date -u +%Y-%m-%d\ %H:%M\ UTC)" && \
+              git pull --rebase && \
+              git push && \
+              break || \
+              sleep 10
             done
           fi
 
