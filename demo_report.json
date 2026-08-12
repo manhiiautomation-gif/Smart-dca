@@ -1,32 +1,32 @@
 {
-  "generated_at": "2026-08-12T00:43:40.789049",
+  "generated_at": "2026-08-12T03:13:04.084798",
   "scenario": "default",
   "summary": {
-    "total_runs": 16,
-    "buy_signals": 16,
+    "total_runs": 17,
+    "buy_signals": 17,
     "sell_signals": 0,
-    "actual_buys": 16,
+    "actual_buys": 17,
     "actual_sells": 0,
     "signal_exec_ratio_buy": 100.0,
     "signal_exec_ratio_sell": 100
   },
   "performance": {
     "initial_cash": 10000.0,
-    "current_portfolio": 9999.55,
-    "net_pnl": -0.45,
+    "current_portfolio": 9999.53,
+    "net_pnl": -0.47,
     "roi_pct": -0.0,
-    "total_invested": 143.72,
-    "total_fees": 0.22,
-    "total_slippage": 0.0407,
-    "avg_slippage_pct": 0.0283,
+    "total_invested": 152.7,
+    "total_fees": 0.23,
+    "total_slippage": 0.0437,
+    "avg_slippage_pct": 0.0286,
     "peak_value": 10000.01,
     "max_drawdown_pct": 0.01,
-    "sharpe_like": -2.77,
+    "sharpe_like": -2.81,
     "avg_daily_return_pct": -0.0003
   },
   "skipped_trades": {
     "buys": {
-      "below_min (8.98 < 10.0)": 16
+      "below_min (8.98 < 10.0)": 17
     },
     "sells": {}
   },
@@ -34,7 +34,7 @@
     {
       "name": "Minimum runs",
       "passed": true,
-      "detail": "16/14 runs"
+      "detail": "17/14 runs"
     },
     {
       "name": "Buy signals executed",
@@ -49,12 +49,12 @@
     {
       "name": "Fees reasonable",
       "passed": true,
-      "detail": "Total fees: 0.22 (0.00% of capital)"
+      "detail": "Total fees: 0.23 (0.00% of capital)"
     },
     {
       "name": "Slippage acceptable",
       "passed": true,
-      "detail": "Avg slippage: 0.0283%"
+      "detail": "Avg slippage: 0.0286%"
     },
     {
       "name": "Max drawdown known",
@@ -64,12 +64,12 @@
     {
       "name": "Portfolio positive or acceptable",
       "passed": true,
-      "detail": "P&L: -0.45 (-0.00%)"
+      "detail": "P&L: -0.47 (-0.00%)"
     },
     {
       "name": "At least 1 buy executed",
       "passed": true,
-      "detail": "16 buys"
+      "detail": "17 buys"
     }
   ],
   "go_live_ready": true,
