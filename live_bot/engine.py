@@ -445,6 +445,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     bot_state['last_portfolio_value'] = round(portfolio, 2)
     bot_state['last_price'] = round(price, 2)
     bot_state['last_exchange_currency'] = currency
+    bot_state['last_exchange_name'] = exchange.__class__.__name__.replace('Client', '').upper()
     bot_state['last_dry_run'] = dry_run
 
     # ── 12. Low balance warning ──

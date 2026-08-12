@@ -43,5 +43,6 @@
   "last_dry_run": true,
   "dry_run_cash": 7348.95,
   "dry_run_btc": 0.04122173,
-  "price_history": []
+  "price_history": [],
+  "last_exchange_name": "BITKUB"
 }

@@ -15,10 +15,10 @@ on:
         description: 'Exchange for update action'
         required: false
         type: choice
-        default: 'binance'
+        default: 'bitkub'
         options:
-          - binance
           - bitkub
+          - binance
       reason:
         description: 'Kill reason (for kill action)'
         required: false
@@ -53,7 +53,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           KILL_REASON: ${{ github.event.inputs.reason }}
-          UPDATE_EXCHANGE: ${{ github.event.inputs.exchange || 'binance' }}
+          UPDATE_EXCHANGE: ${{ github.event.inputs.exchange || 'bitkub' }}
         run: |
           ACTION="${{ github.event.inputs.action }}"
 

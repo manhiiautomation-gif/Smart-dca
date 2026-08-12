@@ -1,9 +1,12 @@
 name: Phoenix v5.1 DCA Bot
 
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  SCHEDULE DISABLED — using dca-bitkub.yml for live trading      ║
+# ║  This workflow is now manual-only (for Binance testing).        ║
+# ╚══════════════════════════════════════════════════════════════╝
 on:
-  schedule:
-    # Run daily at 08:00 Bangkok time (01:00 UTC)
-    - cron: '0 1 * * *'
+  # schedule:
+  #   - cron: '0 1 * * *'
   workflow_dispatch:
     inputs:
       exchange:

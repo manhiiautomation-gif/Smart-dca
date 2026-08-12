@@ -82,6 +82,7 @@ def generate_dashboard(state_path='live_bot/state.json',
     ks_status = get_full_status(kill_switch_path)
     indicators = state.get('last_indicators', {})
     currency = state.get('last_exchange_currency', 'USDT')
+    exchange_name = state.get('last_exchange_name', '')
 
     # Computed values from state (for portfolio snapshot)
     portfolio = state.get('last_portfolio_value', 0)
@@ -389,6 +390,7 @@ def generate_dashboard(state_path='live_bot/state.json',
         portfolio=portfolio, invested=invested, roi=roi,
         peak=peak, max_dd=max_dd, current_price=current_price,
         btc_bal=btc_bal, cash_bal=cash_bal, currency=currency,
+        exchange_name=exchange_name,
         last_run=last_run, run_count=run_count, dry_run=dry_run,
         total_fees=total_fees,
         buy_count=buy_count,
@@ -446,6 +448,7 @@ def build_html(**kw) -> str:
     btc_bal = kw['btc_bal']
     cash_bal = kw['cash_bal']
     currency = kw['currency']
+    exchange_name = kw.get('exchange_name', '')
     last_run = kw['last_run']
     run_count = kw['run_count']
     dry_run = kw['dry_run']
@@ -878,7 +881,7 @@ def build_html(**kw) -> str:
                 </div>
                 <div class="ind-item">
                     <span class="label">Exchange</span>
-                    <span class="val">{currency.upper()}</span>
+                    <span class="val">{exchange_name or currency.upper()}</span>
                 </div>
                 <div class="ind-item">
                     <span class="label">Last Run</span>
