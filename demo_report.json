@@ -1,32 +1,32 @@
 {
-  "generated_at": "2026-08-12T08:53:38.428085",
+  "generated_at": "2026-08-12T10:44:17.229743",
   "scenario": "default",
   "summary": {
-    "total_runs": 20,
-    "buy_signals": 20,
+    "total_runs": 21,
+    "buy_signals": 21,
     "sell_signals": 0,
-    "actual_buys": 20,
+    "actual_buys": 21,
     "actual_sells": 0,
     "signal_exec_ratio_buy": 100.0,
     "signal_exec_ratio_sell": 100
   },
   "performance": {
     "initial_cash": 10000.0,
-    "current_portfolio": 9999.64,
-    "net_pnl": -0.36,
-    "roi_pct": -0.0,
-    "total_invested": 179.65,
-    "total_fees": 0.27,
-    "total_slippage": 0.0519,
-    "avg_slippage_pct": 0.0289,
-    "peak_value": 10000.01,
+    "current_portfolio": 10000.69,
+    "net_pnl": 0.69,
+    "roi_pct": 0.01,
+    "total_invested": 188.63,
+    "total_fees": 0.28,
+    "total_slippage": 0.0531,
+    "avg_slippage_pct": 0.0282,
+    "peak_value": 10000.69,
     "max_drawdown_pct": 0.01,
-    "sharpe_like": -1.63,
-    "avg_daily_return_pct": -0.0002
+    "sharpe_like": 2.13,
+    "avg_daily_return_pct": 0.0004
   },
   "skipped_trades": {
     "buys": {
-      "below_min (8.98 < 10.0)": 20
+      "below_min (8.98 < 10.0)": 21
     },
     "sells": {}
   },
@@ -34,7 +34,7 @@
     {
       "name": "Minimum runs",
       "passed": true,
-      "detail": "20/14 runs"
+      "detail": "21/14 runs"
     },
     {
       "name": "Buy signals executed",
@@ -49,12 +49,12 @@
     {
       "name": "Fees reasonable",
       "passed": true,
-      "detail": "Total fees: 0.27 (0.00% of capital)"
+      "detail": "Total fees: 0.28 (0.00% of capital)"
     },
     {
       "name": "Slippage acceptable",
       "passed": true,
-      "detail": "Avg slippage: 0.0289%"
+      "detail": "Avg slippage: 0.0282%"
     },
     {
       "name": "Max drawdown known",
@@ -64,12 +64,12 @@
     {
       "name": "Portfolio positive or acceptable",
       "passed": true,
-      "detail": "P&L: -0.36 (-0.00%)"
+      "detail": "P&L: +0.69 (+0.01%)"
     },
     {
       "name": "At least 1 buy executed",
       "passed": true,
-      "detail": "20 buys"
+      "detail": "21 buys"
     }
   ],
   "go_live_ready": true,
