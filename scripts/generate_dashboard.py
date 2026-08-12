@@ -81,8 +81,10 @@ def generate_dashboard(state_path='live_bot/state.json',
     trade_log = load_trade_log(trade_log_path)
     ks_status = get_full_status(kill_switch_path)
     indicators = state.get('last_indicators', {})
-    currency = state.get('last_exchange_currency', 'USDT')
     exchange_name = state.get('last_exchange_name', '')
+    # Derive currency from exchange name (more reliable than stale state)
+    _EXCHANGE_CURRENCY = {'BITKUB': 'THB', 'BINANCE': 'USDT'}
+    currency = _EXCHANGE_CURRENCY.get(exchange_name, state.get('last_exchange_currency', 'USDT'))
 
     # Computed values from state (for portfolio snapshot)
     portfolio = state.get('last_portfolio_value', 0)
