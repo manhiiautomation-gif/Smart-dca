@@ -797,6 +797,23 @@ def build_html(**kw) -> str:
             </div>
         </div>
     </div>
+    <!-- Token Input Modal -->
+    <div class="confirm-overlay" id="tokenOverlay" style="z-index:10001;">
+        <div class="confirm-box" style="max-width:520px;">
+            <h3 style="margin-bottom:8px;">GitHub PAT Token</h3>
+            <p style="margin-bottom:12px;font-size:0.82rem;color:var(--text-dim);line-height:1.6;">
+                ปุ่ม Update / Kill / Resume ต้องใช้ GitHub Personal Access Token (PAT)<br>
+                <b style="color:var(--text);">สร้างที่:</b> <a href="https://github.com/settings/tokens" target="_blank" style="color:var(--blue);">github.com/settings/tokens</a><br>
+                <b style="color:var(--text);">Permission:</b> <code style="background:var(--bg);padding:2px 6px;border-radius:4px;font-size:0.78rem;">actions:write</code><br>
+                <span style="color:var(--yellow);">Token เก็บใน browser เท่านั้น ไม่ส่งออกไปที่อื่น</span>
+            </p>
+            <input type="password" id="tokenInput" placeholder="ghp_xxxxxxxxxxxx" autocomplete="off" style="font-family:monospace;font-size:0.85rem;">
+            <div class="confirm-actions">
+                <button class="ctrl-btn" onclick="closeTokenModal()">ยกเลิก</button>
+                <button class="ctrl-btn resume" id="tokenSubmitBtn" onclick="submitToken()">บันทึก Token</button>
+            </div>
+        </div>
+    </div>
     <!-- Header -->
     <div class="header">
         <div class="header-left">
@@ -824,6 +841,7 @@ def build_html(**kw) -> str:
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                 Logs
             </a>
+            <span id="tokenStatus" style="margin-left:auto;font-size:0.7rem;color:var(--text-dim);cursor:pointer;" onclick="openTokenModal()" title="คลิกเพื่อตั้ง/เปลี่ยน Token"></span>
         </div>
     </div>
 
@@ -1059,28 +1077,114 @@ def build_html(**kw) -> str:
         // GitHub Actions direct dispatch (replaces Netlify serverless function)
         var REPO = 'manhiiautomation-gif/Smart-dca';
         var API_BASE = 'https://api.github.com/repos/' + REPO + '/actions/workflows';
-        // Workflow IDs
         var WORKFLOWS = {{
             update: 'dashboard-trigger.yml',
             kill: 'dashboard-trigger.yml',
             resume: 'dashboard-trigger.yml'
         }};
 
+        // ── Token management (custom modal, no prompt()) ──
+        var _pendingTokenCallback = null;
+
         function getGitHubToken() {{
-            // Token must be provided via URL param or prompt
-            // GitHub Fine-grained PAT with actions:write permission
             var params = new URLSearchParams(window.location.search);
             var token = params.get('token');
             if (!token) {{
                 try {{ token = localStorage.getItem('gh_pat'); }} catch(e) {{}}
             }}
-            return token;
+            return token || null;
         }}
 
         function setGitHubToken(token) {{
             try {{ localStorage.setItem('gh_pat', token); }} catch(e) {{}}
+            updateTokenStatus();
         }}
 
+        function removeGitHubToken() {{
+            try {{ localStorage.removeItem('gh_pat'); }} catch(e) {{}}
+            updateTokenStatus();
+        }}
+
+        function updateTokenStatus() {{
+            var el = document.getElementById('tokenStatus');
+            if (!el) return;
+            var token = getGitHubToken();
+            if (token) {{
+                var masked = token.slice(0, 6) + '...' + token.slice(-4);
+                el.innerHTML = '<span style="color:var(--green);">&#9679;</span> Token: ' + masked;
+                el.title = 'คลิกเพื่อเปลี่ยน Token';
+            }} else {{
+                el.innerHTML = '<span style="color:var(--red);">&#9679;</span> ไม่มี Token';
+                el.title = 'คลิกเพื่อตั้งค่า Token';
+            }}
+        }}
+
+        window.openTokenModal = function(pendingCallback) {{
+            _pendingTokenCallback = pendingCallback || null;
+            var overlay = document.getElementById('tokenOverlay');
+            var input = document.getElementById('tokenInput');
+            var existing = getGitHubToken();
+            input.value = existing || '';
+            overlay.classList.add('active');
+            setTimeout(function() {{ input.focus(); }}, 100);
+        }};
+
+        window.closeTokenModal = function() {{
+            document.getElementById('tokenOverlay').classList.remove('active');
+            if (_pendingTokenCallback) {{
+                _pendingTokenCallback(null);
+                _pendingTokenCallback = null;
+            }}
+        }};
+
+        window.submitToken = function() {{
+            var input = document.getElementById('tokenInput');
+            var val = input.value.trim();
+            if (!val) {{
+                showToast('กรุณาใส่ Token', 'error');
+                return;
+            }}
+            setGitHubToken(val);
+            closeTokenModal();
+            showToast('Token บันทึกแล้ว', 'success');
+            if (_pendingTokenCallback) {{
+                var cb = _pendingTokenCallback;
+                _pendingTokenCallback = null;
+                cb(val);
+            }}
+        }};
+
+        // Allow Enter key in token input
+        var tokenInputEl = document.getElementById('tokenInput');
+        if (tokenInputEl) {{
+            tokenInputEl.addEventListener('keydown', function(e) {{
+                if (e.key === 'Enter') submitToken();
+                if (e.key === 'Escape') closeTokenModal();
+            }});
+        }}
+        var tokenOverlayEl = document.getElementById('tokenOverlay');
+        if (tokenOverlayEl) {{
+            tokenOverlayEl.addEventListener('click', function(e) {{
+                if (e.target === this) closeTokenModal();
+            }});
+        }}
+
+        function requireToken(callback) {{
+            var token = getGitHubToken();
+            if (token) {{
+                callback(token);
+                return;
+            }}
+            openTokenModal(function(submittedToken) {{
+                if (submittedToken) {{
+                    callback(submittedToken);
+                }} else {{
+                    showToast('ต้องมี Token ก่อนกดปุ่ม', 'error');
+                }}
+            }});
+        }}
+
+        // ── Toast & Loading ──
         function showToast(msg, type) {{
             var c = document.getElementById('toasts');
             var t = document.createElement('div');
@@ -1107,30 +1211,15 @@ def build_html(**kw) -> str:
             }});
         }}
 
-        function requireToken(callback) {{
-            var token = getGitHubToken();
-            if (token) {{
-                callback(token);
-                return;
-            }}
-            // Prompt for token once
-            var input = prompt('GitHub PAT token needed (actions:write permission):\n\nCreate at: github.com/settings/tokens\nThe token is stored in your browser only.');
-            if (input && input.trim()) {{
-                setGitHubToken(input.trim());
-                callback(input.trim());
-            }} else {{
-                showToast('Token required for dashboard actions', 'error');
-            }}
-        }}
-
+        // ── Actions ──
         window.doUpdate = function() {{
             var btn = document.getElementById('btnUpdate');
-            setLoading(btn, true);
             requireToken(function(token) {{
+                setLoading(btn, true);
                 dispatchWorkflow('dashboard-trigger.yml', {{ action: 'update' }}, token)
                 .then(function(r) {{
                     if (r.status === 204) {{
-                        showToast('Update dispatched! Check Actions tab.', 'success');
+                        showToast('ส่งคำสั่ง Update แล้ว! รอ ~2 นาที แล้วรีเฟรชหน้า', 'success');
                     }} else {{
                         return r.json().then(function(d) {{
                             throw new Error(d.message || 'HTTP ' + r.status);
@@ -1163,9 +1252,9 @@ def build_html(**kw) -> str:
                 okBtn.textContent = 'Kill';
                 okBtn.className = 'ctrl-btn kill';
                 confirmCallback = function() {{
-                    var btn = document.getElementById('btnKill');
-                    setLoading(btn, true);
                     requireToken(function(token) {{
+                        var btn = document.getElementById('btnKill');
+                        setLoading(btn, true);
                         dispatchWorkflow('dashboard-trigger.yml', {{ action: 'kill', reason: input.value || 'Manual kill from dashboard' }}, token)
                         .then(function(r) {{
                             if (r.status === 204) showToast('Kill switch activated!', 'success');
@@ -1182,9 +1271,9 @@ def build_html(**kw) -> str:
                 okBtn.textContent = 'Resume';
                 okBtn.className = 'ctrl-btn resume';
                 confirmCallback = function() {{
-                    var btn = document.getElementById('btnKill');
-                    setLoading(btn, true);
                     requireToken(function(token) {{
+                        var btn = document.getElementById('btnKill');
+                        setLoading(btn, true);
                         dispatchWorkflow('dashboard-trigger.yml', {{ action: 'resume' }}, token)
                         .then(function(r) {{
                             if (r.status === 204) showToast('Bot resumed!', 'success');
@@ -1222,6 +1311,8 @@ def build_html(**kw) -> str:
         if (helpO) helpO.addEventListener('click', function(e) {{
             if (e.target === this) toggleHelp();
         }});
+        // Init token status on page load
+        updateTokenStatus();
     }})();
     </script>
 
