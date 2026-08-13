@@ -522,6 +522,7 @@ def _snapshot_indicators(bot_state: dict, price: float, currency: str,
         }
         bot_state['last_price'] = round(price, 2)
         bot_state['last_exchange_currency'] = currency
+        bot_state['last_exchange_name'] = exchange.__class__.__name__.replace('Client', '').upper()
         bot_state['last_dry_run'] = dry_run
     except Exception as e:
         print(f'[BOT] Indicator snapshot failed: {e}')
