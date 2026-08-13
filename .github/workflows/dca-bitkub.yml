@@ -2,8 +2,8 @@ name: Phoenix v5.1 DCA - Bitkub
 
 on:
   schedule:
-    # Daily at 02:07 UTC (09:07 THB) — 7 min after dca-bot.yml to avoid race
-    - cron: '7 2 * * *'
+    # Daily at 17:10 UTC (00:10 THB) — after Binance daily close (00:00 UTC)
+    - cron: '10 17 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
