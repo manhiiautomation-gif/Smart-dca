@@ -4,6 +4,10 @@ Supports: get price, get OHLCV, get balance, market buy, market sell.
 All trading in THB (THB_BTC pair).
 
 Bitkub API v3 docs: https://github.com/bitkub/bitkub-official-api-docs
+
+IMPORTANT: Bitkub often returns HTTP 200 with error in body:
+    {"error": 42, "message": "insufficient balance"}
+All API methods now check for this via _check_response().
 '''
 
 import time
@@ -41,17 +45,32 @@ class BitkubClient:
             'Content-Type': 'application/json',
         }
 
+    def _check_response(self, resp, path: str = ''):
+        '''Check Bitkub API response for application-level errors.
+
+        Bitkub often returns HTTP 200 with error in body:
+            {"error": 42, "message": "insufficient balance"}
+        This method raises RuntimeError for such responses.
+        Returns the parsed JSON body on success.
+        '''
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, dict) and 'error' in data:
+            err_code = data['error']
+            err_msg = data.get('message', 'Unknown error')
+            raise RuntimeError(f'Bitkub API error {err_code}: {err_msg} (path: {path})')
+        return data
+
     def get_price(self) -> float:
         """Current BTC price in THB."""
         resp = requests.get(
             f'{self.BASE_URL}/api/v3/market/ticker',
             params={'sym': self.SYMBOL}, timeout=10
         )
-        resp.raise_for_status()
-        body = resp.json()
+        body = self._check_response(resp, 'market/ticker')
         if isinstance(body, list) and body:
             return float(body[0]['last'])
-        raise RuntimeError(f"Bitkub API error: {body}")
+        raise RuntimeError(f"Bitkub API error: unexpected ticker response: {body}")
 
     def get_ohlcv(self, days: int = 365) -> list:
         """Get daily OHLCV for indicators.
@@ -154,11 +173,11 @@ class BitkubClient:
         resp = requests.post(
             f'{self.BASE_URL}{path}', headers=headers, data=body, timeout=10
         )
-        resp.raise_for_status()
-        data = resp.json()['result']
+        data = self._check_response(resp, path)
+        result_data = data.get('result', data)
         return {
-            'BTC': float(data.get('btc', {}).get('available', 0)),
-            'THB': float(data.get('thb', {}).get('available', 0)),
+            'BTC': float(result_data.get('btc', {}).get('available', 0)),
+            'THB': float(result_data.get('thb', {}).get('available', 0)),
         }
 
     def get_balances(self) -> dict:
@@ -174,13 +193,16 @@ class BitkubClient:
                 resp = requests.post(
                     f'{self.BASE_URL}{path}', headers=headers, data=body, timeout=10
                 )
-                resp.raise_for_status()
-                data = resp.json().get('result', resp.json())
-                if isinstance(data, dict):
+                data = self._check_response(resp, path)
+                result_data = data.get('result', data)
+                if isinstance(result_data, dict):
                     return {
-                        'BTC': float(data.get('btc', {}).get('available', 0)),
-                        'THB': float(data.get('thb', {}).get('available', 0)),
+                        'BTC': float(result_data.get('btc', {}).get('available', 0)),
+                        'THB': float(result_data.get('thb', {}).get('available', 0)),
                     }
+            except RuntimeError:
+                # Application-level error (e.g. invalid signature, rate limit)
+                raise
             except Exception:
                 continue
         # All variants failed - return zeros (bot will use 0 balance)
@@ -191,40 +213,79 @@ class BitkubClient:
         '''Market buy BTC with THB.
 
         Bitkub uses amount in THB for the 'amt' field on bids.
+
+        Returns standardized dict compatible with engine.py:
+            executed_qty:       BTC received
+            cummulative_quote_qty: THB spent (total cost)
+            fee:               actual fee in THB
         '''
         path = '/api/v3/market/place-bid'
-        body = f'{{"sym":"{self.SYMBOL}","amt":{thb_amount:.2f},"rat":0,"typ":"market"}}'
+        body = '{{"sym":"{}","amt":{:.2f},"rat":0,"typ":"market"}}'.format(
+            self.SYMBOL, thb_amount)
         headers = self._auth_headers(path, body=body)
         resp = requests.post(
             f'{self.BASE_URL}{path}', headers=headers, data=body, timeout=15
         )
-        resp.raise_for_status()
-        data = resp.json()['result']
+        data = self._check_response(resp, path)
+        result = data['result']
+
+        # Extract BTC received — Bitkub uses 'recv' field
+        btc_received = float(result.get('recv', 0))
+        if btc_received <= 0:
+            # Fallback: calculate from cost and average rate
+            rate = float(result.get('rat', 0))
+            cost = float(result.get('cost', 0))
+            if rate > 0 and cost > 0:
+                btc_received = cost / rate
+            else:
+                # Last resort: use requested amount / approximate price
+                print(f'[BITKUB] WARNING: Cannot determine BTC received from buy response, '
+                      f'using cost/last_price fallback')
+                btc_received = cost / self.get_price() if cost > 0 else 0
+
+        thb_cost = float(result.get('cost', thb_amount))
+        actual_fee = float(result.get('fee', 0))
+
         return {
-            'id': data.get('id'),
-            'amount': float(data.get('amt', 0)),
-            'cost': float(data.get('cost', 0)),
-            'fee': float(data.get('fee', 0)),
+            'executed_qty': btc_received,
+            'cummulative_quote_qty': thb_cost,
+            'fee': actual_fee,
+            'id': result.get('id'),
         }
 
     def market_sell(self, btc_amount: float) -> dict:
         '''Market sell BTC for THB.
 
         Bitkub uses amount in BTC for the 'amt' field on asks.
+
+        Returns standardized dict compatible with engine.py:
+            executed_qty:       BTC sold
+            cummulative_quote_qty: THB received (after fee)
+            fee:               actual fee in THB
         '''
         path = '/api/v3/market/place-ask'
-        body = f'{{"sym":"{self.SYMBOL}","amt":{btc_amount:.8f},"rat":0,"typ":"market"}}'
+        body = '{{"sym":"{}","amt":{:.8f},"rat":0,"typ":"market"}}'.format(
+            self.SYMBOL, btc_amount)
         headers = self._auth_headers(path, body=body)
         resp = requests.post(
             f'{self.BASE_URL}{path}', headers=headers, data=body, timeout=15
         )
-        resp.raise_for_status()
-        data = resp.json()['result']
+        data = self._check_response(resp, path)
+        result = data['result']
+
+        btc_sold = float(result.get('amt', 0))
+        # 'recv' for sell = THB received after fee
+        thb_received = float(result.get('recv', 0))
+        if thb_received <= 0:
+            # Fallback: use 'cost' field
+            thb_received = float(result.get('cost', 0))
+        actual_fee = float(result.get('fee', 0))
+
         return {
-            'id': data.get('id'),
-            'amount': float(data.get('amt', 0)),
-            'cost': float(data.get('cost', 0)),
-            'fee': float(data.get('fee', 0)),
+            'executed_qty': btc_sold,
+            'cummulative_quote_qty': thb_received,
+            'fee': actual_fee,
+            'id': result.get('id'),
         }
 
     def get_klines(self, days: int = 365) -> list:

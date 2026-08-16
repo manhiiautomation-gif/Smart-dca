@@ -22,6 +22,7 @@ Environment variables (or GitHub Secrets):
 import argparse
 import sys
 import os
+import time
 
 # Add project root to path for MVRV history import
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -230,10 +231,33 @@ def main():
         print('[BOT]   LIVE MODE — REAL TRADES WILL BE EXECUTED')
         print('[BOT] ═══════════════════════════════════════════════════')
 
+    # ── C2: Concurrency lock — prevent duplicate runs ──
+    lock_path = os.path.join(PROJECT_ROOT, 'live_bot', '.bot_lock')
+    lock_acquired = False
+
+    def _acquire_lock():
+        nonlocal lock_acquired
+        if os.path.exists(lock_path):
+            lock_age = time.time() - os.path.getmtime(lock_path)
+            if lock_age < 1800:  # 30 minutes
+                print(f'[BOT] LOCK: Another run in progress (lock age {lock_age:.0f}s). Aborting.')
+                sys.exit(0)
+            else:
+                print(f'[BOT] LOCK: Stale lock ({lock_age:.0f}s old). Removing.')
+                os.unlink(lock_path)
+        with open(lock_path, 'w') as f:
+            f.write(f'pid={os.getpid()}, time={time.time()}')
+        lock_acquired = True
+
+    def _release_lock():
+        if lock_acquired and os.path.exists(lock_path):
+            os.unlink(lock_path)
+
     try:
+        _acquire_lock()
+
         if args.loop > 0:
             # ── Loop mode: dry-run testing at N-minute intervals ──
-            import time
             if not dry_run:
                 print('ERROR: --loop is only allowed in dry-run mode.')
                 sys.exit(1)
@@ -262,20 +286,28 @@ def main():
                 kill_switch_path=kill_switch_path,
                 force=args.force,
             )
+
+        # ── C2: Save state in finally-equivalent position ──
+        state_mod.save_state(bot_state, state_path)
+        print(f'[BOT] State saved to {state_path}')
+        print('[BOT] All done.')
+
     except KeyboardInterrupt:
-        print('\n[BOT] Loop stopped by user.')
+        print('\n[BOT] Stopped by user.')
     except Exception as e:
         print(f'[BOT] FATAL ERROR: {e}')
         import traceback
         traceback.print_exc()
         notifier.send_telegram(f'Phoenix v5.1 FATAL ERROR: {e}')
+        # C2: Always save state even on error — prevents double-buy
+        try:
+            state_mod.save_state(bot_state, state_path)
+            print(f'[BOT] State saved (error recovery) to {state_path}')
+        except Exception as save_err:
+            print(f'[BOT] FAILED to save state after error: {save_err}')
         sys.exit(1)
-
-    # ── Save state ──
-    state_mod.save_state(bot_state, state_path)
-    print(f'[BOT] State saved to {state_path}')
-
-    print('[BOT] All done.')
+    finally:
+        _release_lock()
 
 
 if __name__ == '__main__':

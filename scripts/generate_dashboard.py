@@ -168,10 +168,10 @@ def generate_dashboard(state_path='live_bot/state.json',
                 pass
 
     # Kill switch status
-    # Use L2 (kill_switch.json) as primary source for dashboard generation.
-    # L1 (BOT_ENABLED env var) is only meaningful at runtime, not at static gen time.
-    bot_alive = ks_status['l2_enabled']
-    l1_ok = True  # Cannot reliably check L1 at dashboard gen time
+    # H3: L1 (BOT_ENABLED env var) IS available at dashboard gen time
+    # because generate_dashboard.py runs inside the same GitHub Actions job.
+    l1_ok = os.environ.get('BOT_ENABLED', 'true').lower() == 'true'
+    bot_alive = l1_ok and ks_status['l2_enabled']
     l2_ok = ks_status['l2_enabled']
     ks_reason = ks_status.get('l2_reason', '')
     ks_time = ks_status.get('l2_activated_at', '')

@@ -21,7 +21,7 @@ on:
 
 concurrency:
   group: bitkub-dca
-  cancel-in-progress: false
+  cancel-in-progress: true  # H4: Cancel old run if new one starts (prevents parallel trading)
 
 jobs:
   dca:

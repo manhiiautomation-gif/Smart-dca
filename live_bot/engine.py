@@ -10,7 +10,17 @@ Modes:
 
 import math
 import numpy as np
-from datetime import date, timedelta
+from datetime import date, datetime, timezone, timedelta
+
+# H1: Thai timezone for idempotency check
+# GitHub Actions runners use UTC, but cron runs at 17:10 UTC = 00:10 THB
+# Using UTC date would cause guard to fail after 07:00 UTC (14:00 THB next day)
+_THAI_TZ = timezone(timedelta(hours=7))
+
+
+def _thai_today() -> date:
+    """Return today's date in Thai timezone (UTC+7)."""
+    return datetime.now(_THAI_TZ).date()
 
 from . import config
 from . import indicators as ind
@@ -90,11 +100,13 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         11. Send notification
     '''
     currency = exchange.currency
-    today = date.today()
+    today = _thai_today()
 
     # ── 0. Idempotency guard: skip if already ran today (unless --force) ──
+    # H1: Uses Thai timezone so daily guard aligns with THB calendar day
+    # (cron at 17:10 UTC = 00:10 THB, guard resets at 07:00 UTC = 00:00 THB)
     if not force and bot_state.get('last_run_date') == today.isoformat():
-        print(f'[BOT] Already ran today ({today}). Skipping to prevent duplicate trades.')
+        print(f'[BOT] Already ran today ({today} THB). Skipping to prevent duplicate trades.')
         print(f'[BOT] Use --force to override (e.g. for testing).')
         return bot_state
 
@@ -371,7 +383,8 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     # ── 10. Update state ──
     bot_state = state_mod.update_state_after_run(
         bot_state, decision, price, price, currency,
-        buy_fee=buy_fee, sell_fee=sell_fee
+        buy_fee=buy_fee, sell_fee=sell_fee,
+        btc_balance=btc_balance, cash_balance=cash_balance,
     )
 
     # Record trades in trade log
@@ -495,7 +508,7 @@ def _snapshot_indicators(bot_state: dict, price: float, currency: str,
         ema30 = ind.ema(closes, 30)
         sopr = price / ema30 if ema30 > 0 else 1.0
 
-        today = date.today()
+        today = _thai_today()
         mvrv_val = strategy.get_mvrv_for_date(today)
         mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val) if not math.isnan(mvrv_val) else 0
         mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val) if not math.isnan(mvrv_val) else 0
@@ -545,11 +558,11 @@ def run_demo(exchange, demo_state: dict, project_root: str,
     from . import demo_portfolio as dp
 
     currency = exchange.currency
-    today = date.today()
+    today = _thai_today()
 
     # ── 0. Idempotency guard ──
     if not force and demo_state.get('last_run_date') == today.isoformat():
-        print(f'[DEMO] Already ran today ({today}). Skipping.')
+        print(f'[DEMO] Already ran today ({today} THB). Skipping.')
         print(f'[DEMO] Use --force to override.')
         return demo_state
 

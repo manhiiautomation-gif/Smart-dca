@@ -15,7 +15,7 @@ def send_telegram(message: str, token: str = '', chat_id: str = '') -> bool:
         resp = requests.post(url, json={
             'chat_id': chat_id,
             'text': message,
-            'parse_mode': 'Markdown',
+            'parse_mode': 'HTML',
         }, timeout=10)
         return resp.status_code == 200
     except Exception:
@@ -29,7 +29,7 @@ def format_report(decision: dict, price: float, mvrv: float,
     prefix = '[DRY RUN] ' if is_dry_run else ''
     portfolio = btc_balance * price + cash
     lines = [
-        f'{prefix}*Phoenix v5.1 Daily Report*',
+        f'{prefix}<b>Phoenix v5.1 Daily Report</b>',
         f'Price: {price:,.2f} {exchange_currency} | MVRV: {mvrv:.3f}',
         f'Score: {decision["sell_score"]} | Path: {decision["path_taken"]}',
         f'Cooldown: {decision["new_cooldown"]}d | Bear: {decision["in_bear"]}',

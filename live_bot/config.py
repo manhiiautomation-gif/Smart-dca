@@ -150,8 +150,10 @@ MIN_BUY_THB = 100.0   # Bitkub minimum order
 # ═══════════════════════════════════════════════════════════════
 #  FEE ASSUMPTIONS
 # ═══════════════════════════════════════════════════════════════
-BUY_FEE_PCT = 0.0015   # 0.15%
-SELL_FEE_PCT = 0.0015  # 0.15%
+# Bitkub basic tier = 0.25% (actual fee from API response is preferred)
+# These are fallback values only when API response doesn't include fee
+BUY_FEE_PCT = 0.0025   # 0.25% — Bitkub basic tier
+SELL_FEE_PCT = 0.0025  # 0.25% — Bitkub basic tier
 
 # ═══════════════════════════════════════════════════════════════
 #  PATHS

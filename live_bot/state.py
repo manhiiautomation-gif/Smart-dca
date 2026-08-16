@@ -6,7 +6,15 @@ between GitHub Actions invocations.
 
 import json
 import os
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
+
+# H1: Thai timezone — must match engine.py
+_THAI_TZ = timezone(timedelta(hours=7))
+
+
+def _thai_today() -> date:
+    """Return today's date in Thai timezone (UTC+7)."""
+    return datetime.now(_THAI_TZ).date()
 
 
 DEFAULT_STATE = {
@@ -73,11 +81,19 @@ def save_state(state: dict, path: str):
 def update_state_after_run(state: dict, decision: dict,
                           buy_price: float, sell_price: float,
                           exchange_currency: str,
-                          buy_fee: float = 0.0, sell_fee: float = 0.0) -> dict:
-    """Update state after a trading decision has been executed."""
+                          buy_fee: float = 0.0, sell_fee: float = 0.0,
+                          btc_balance: float = 0.0,
+                          cash_balance: float = 0.0) -> dict:
+    """Update state after a trading decision has been executed.
+
+    H5: When selling, adjusted_invested is reduced proportionally.
+    If you sell X THB worth of BTC from a portfolio worth P THB,
+    your cost basis is reduced by the same fraction (X/P).
+    This ensures ROI calculations remain accurate after partial sells.
+    """
     from datetime import datetime as _dt
-    today = date.today().isoformat()
-    now_str = _dt.now().strftime('%Y-%m-%d %H:%M')
+    today = _thai_today().isoformat()
+    now_str = _dt.now(_THAI_TZ).strftime('%Y-%m-%d %H:%M')
     state['last_run_date'] = today
     state['run_count'] += 1
     state['cooldown'] = decision['new_cooldown']
@@ -95,6 +111,14 @@ def update_state_after_run(state: dict, decision: dict,
         state['sell_count'] += 1
         state['total_sell_proceeds'] += decision['sell_amount']
         state['last_sell_date'] = now_str
+
+        # H5: Reduce adjusted_invested proportionally when selling
+        # Sell fraction = sell_amount / portfolio_value_before_sell
+        portfolio_before = btc_balance * sell_price + cash_balance
+        if portfolio_before > 0 and state['adjusted_invested'] > 0:
+            sell_fraction = decision['sell_amount'] / portfolio_before
+            state['adjusted_invested'] *= (1 - sell_fraction)
+            state['adjusted_invested'] = max(round(state['adjusted_invested'], 2), 0)
 
     return state
 
@@ -114,7 +138,7 @@ def append_trade_log(log_path: str, trade_type: str, amount: float,
     from datetime import datetime as _dt
     log = load_trade_log(log_path)
     record = {
-        'date': _dt.now().strftime('%Y-%m-%d %H:%M'),
+        'date': _dt.now(_THAI_TZ).strftime('%Y-%m-%d %H:%M'),
         'type': trade_type,  # 'buy' or 'sell'
         'amount': round(amount, 2),
         'btc': round(btc_amount, 8),
