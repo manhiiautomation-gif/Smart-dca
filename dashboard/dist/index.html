@@ -12,7 +12,7 @@
             --card: #161b22;
             --border: #30363d;
             --text: #e6edf3;
-            --text-dim: #8b949e;
+            --text-dim: #9da5ae;
             --green: #3fb950;
             --green-bg: rgba(63,185,80,0.1);
             --red: #f85149;
@@ -82,6 +82,22 @@
         .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
         @media (max-width: 640px) {
             .grid-2, .grid-3 { grid-template-columns: 1fr; }
+            body { padding: 10px; }
+            .card { padding: 12px; border-radius: 10px; }
+            .grid { gap: 10px; margin-bottom: 10px; }
+            .header { padding: 10px 0; margin-bottom: 10px; }
+            h1 { font-size: 1.25rem; }
+            .metric-value { font-size: 1.2rem; }
+            .metric-value.hero { font-size: 1.5rem; }
+            .ind-grid { gap: 4px; }
+            .ind-item { padding: 5px 8px; }
+            .ind-item .label { font-size: 0.72rem; }
+            .ind-item .val { font-size: 0.78rem; }
+            .ctrl-panel { gap: 6px; }
+            .ctrl-btn { padding: 6px 12px; font-size: 0.75rem; }
+            table { font-size: 0.78rem; }
+            th, td { padding: 5px 6px; }
+            .chart-container { height: 220px; }
         }
         .card {
             background: var(--card);
@@ -197,6 +213,52 @@
         .confirm-box p { color: var(--text-dim); font-size: 0.85rem; margin-bottom: 16px; }
         .confirm-box input { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 0.85rem; margin-bottom: 12px; }
         .confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+        /* U3: DRY RUN Banner */
+        .dry-run-banner {
+            background: linear-gradient(135deg, rgba(210,153,34,0.15), rgba(210,153,34,0.05));
+            border: 1px solid var(--yellow);
+            border-radius: 10px;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.85rem;
+            color: var(--yellow);
+            font-weight: 600;
+        }
+        .dry-run-banner .banner-icon { font-size: 1.3rem; flex-shrink: 0; }
+        .dry-run-banner .banner-text { color: var(--text); font-weight: 400; font-size: 0.8rem; }
+
+        /* U8: Hero metric */
+        .metric-value.hero { font-size: 1.8rem; }
+        .num-mono { font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace; }
+
+        /* U9: Freshness badge */
+        .freshness { font-size: 0.72rem; color: var(--text-dim); margin-left: 8px; font-weight: 400; }
+
+        /* U10: Collapsible */
+        .collapsible-header { cursor: pointer; user-select: none; display: flex; justify-content: space-between; align-items: center; }
+        .collapsible-header .chevron { transition: transform 0.2s; font-size: 0.7rem; }
+        .collapsible-header.open .chevron { transform: rotate(180deg); }
+        .collapsible-body { max-height: 0; overflow: hidden; transition: max-height 0.3s ease; }
+        .collapsible-body.open { max-height: 800px; }
+
+        /* U2: Onboarding hero */
+        .onboarding-hero {
+            text-align: center;
+            padding: 40px 20px;
+            border: 1px dashed var(--border);
+            border-radius: 12px;
+            margin-bottom: 16px;
+        }
+        .onboarding-hero .onboard-icon { font-size: 2.5rem; margin-bottom: 12px; opacity: 0.7; }
+        .onboarding-hero .onboard-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 6px; }
+        .onboarding-hero .onboard-desc { font-size: 0.85rem; color: var(--text-dim); max-width: 360px; margin: 0 auto; line-height: 1.6; }
+
+        /* Sopr source tag */
+        .tag.sopr-src { font-size: 0.65rem; vertical-align: middle; margin-left: 4px; opacity: 0.7; }
     </style>
 </head>
 <body>
@@ -229,11 +291,22 @@
             </div>
         </div>
     </div>
+    <!-- U3: DRY RUN Banner -->
+    
+    <div class="dry-run-banner">
+        <span class="banner-icon">&#9888;</span>
+        <div>
+            <div>โหมดทดสอบ (TEST MODE) — ไม่มีการซื้อขายจริง</div>
+            <div class="banner-text">ระบบจำลองผลลัพธ์เท่านั้น เงินและ BTC ไม่เคลื่อนไหวจริง</div>
+        </div>
+    </div>
+
     <!-- Header -->
     <div class="header">
         <div class="header-left">
             <h1>Phoenix v5.1</h1>
-            <span class="tag yellow">DRY RUN</span>
+            <!-- U9: Freshness badge -->
+            <span class="freshness" id="freshness"></span>
         </div>
         <div class="header-right">
             <div class="status-badge alive">
@@ -262,6 +335,16 @@
         </div>
     </div>
 
+    <!-- U2: Onboarding Hero (shown only when empty state) -->
+    <div class="onboarding-hero">
+        <div class="onboard-icon">&#128200;</div>
+        <div class="onboard-title">ยินดีต้อนรับสู่ Phoenix DCA Bot</div>
+        <div class="onboard-desc">
+            ระบบพร้อมทำงานแล้ว — การซื้อครั้งแรกจะเกิดขึ้นอัตโนมัติเมื่อถึงเวลา DCA<br>
+            <small>รันถัดไป: <b>00:10 น.</b> (18 Aug)</small><br><span style="color:var(--yellow);">&#9888; ขณะนี้อยู่ในโหมดทดสอบ</span>
+        </div>
+    </div>
+
     <!-- Row 1: Portfolio + Kill Switch -->
     <div class="grid grid-2">
         <!-- Portfolio Summary -->
@@ -269,12 +352,12 @@
             <div class="card-title">Portfolio Summary</div>
             <div class="metric">
                 <div class="metric-label">Portfolio Value</div>
-                <div class="metric-value neutral">0.00 THB</div>
+                <div class="metric-value hero neutral num-mono">0.00 <small style="font-size:0.7em;opacity:0.7;">THB</small></div>
             </div>
             
             <div class="metric">
                 <div class="metric-label">BTC Holdings</div>
-                <div class="metric-value blue">0.00000000 BTC</div>
+                <div class="metric-value blue num-mono">0 BTC</div>
                 <div class="metric-sub">0.00 THB</div>
             </div>
             <div class="metric">
@@ -286,7 +369,7 @@
             
             <div class="grid grid-2" style="margin-top:12px; gap:8px;">
                 <div class="metric">
-                    <div class="metric-label">ROI</div>
+                    <div class="metric-label">ROI (ตลอดกาล)</div>
                     <div class="metric-value neutral">+0.0%</div>
                 </div>
                 <div class="metric">
@@ -299,7 +382,7 @@
                 </div>
                 <div class="metric">
                     <div class="metric-label">Max Drawdown</div>
-                    <div class="metric-value red">0.0%</div>
+                    <div class="metric-value dim">0.0%</div>
                 </div>
             </div>
         </div>
@@ -309,11 +392,11 @@
             <div class="card-title">System Status</div>
             <div class="ind-grid">
                 <div class="ind-item">
-                    <span class="label">L1 Kill (env)</span>
+                    <span class="label">สวิตช์หยุดฉุกเฉิน L1</span>
                     <span class="val"><span class="tag green">ON</span></span>
                 </div>
                 <div class="ind-item">
-                    <span class="label">L2 Kill (file)</span>
+                    <span class="label">สวิตช์หยุดฉุกเฉิน L2</span>
                     <span class="val"><span class="tag green">ON</span></span>
                 </div>
                 <div class="ind-item">
@@ -321,16 +404,21 @@
                     <span class="val">BITKUB</span>
                 </div>
                 <div class="ind-item">
-                    <span class="label">Last Run</span>
+                    <span class="label">รันล่าสุด</span>
                     <span class="val"></span>
                 </div>
                 <div class="ind-item">
-                    <span class="label">Run Count</span>
+                    <span class="label">จำนวนรัน (ตลอดกาล)</span>
                     <span class="val">0</span>
                 </div>
                 <div class="ind-item">
-                    <span class="label">BTC Price</span>
-                    <span class="val">0.00 THB</span>
+                    <span class="label">ราคา BTC ตอนนี้</span>
+                    <span class="val num-mono">0.00 THB</span>
+                </div>
+                <!-- U11: Next Run -->
+                <div class="ind-item">
+                    <span class="label">รันถัดไป</span>
+                    <span class="val blue">00:10 น.</span>
                 </div>
             </div>
             
@@ -356,7 +444,7 @@
                     <span class="val">0.0%</span>
                 </div>
                 <div class="ind-item">
-                    <span class="label">MVRV Z</span>
+                    <span class="label">MVRV Z-Score</span>
                     <span class="val">0.00</span>
                 </div>
                 <div class="ind-item">
@@ -372,8 +460,8 @@
                     <span class="val">0.000</span>
                 </div>
                 <div class="ind-item">
-                    <span class="label">STH-SOPR</span>
-                    <span class="val">0.000 <small class="tag sopr-src">proxy</small></span>
+                    <span class="label">SOPR</span>
+                    <span class="val">0.000 <small class="tag neutral sopr-src">โปรดักซี่</small></span>
                 </div>
                 <div class="ind-item">
                     <span class="label">SMA 200</span>
@@ -423,12 +511,12 @@
                         <span class="val red">0</span>
                     </div>
                     <div class="ind-item">
-                        <span class="label">BTC Bought</span>
-                        <span class="val">0.00000000</span>
+                        <span class="label">BTC ซื้อรวม</span>
+                        <span class="val num-mono">0 BTC</span>
                     </div>
                     <div class="ind-item">
-                        <span class="label">BTC Sold</span>
-                        <span class="val">0.00000000</span>
+                        <span class="label">BTC ขายรวม</span>
+                        <span class="val num-mono">0 BTC</span>
                     </div>
                     <div class="ind-item">
                         <span class="label">Sell Proceeds</span>
@@ -478,17 +566,21 @@
     </div>
 
     
-    <!-- Config Settings -->
+    <!-- U10: Config Section (collapsible) -->
     <div class="card" style="margin-bottom:16px;border-left:3px solid var(--purple);">
-        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
-            Configuration (Active)
-            <button class="ctrl-btn" onclick="toggleHelp()" style="padding:4px 12px;font-size:0.7rem;">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                วิธีตั้งค่า
-            </button>
+        <div class="collapsible-header" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open');">
+            <div class="card-title" style="margin-bottom:0;">Configuration (Active)</div>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <button class="ctrl-btn" onclick="event.stopPropagation();toggleHelp()" style="padding:4px 12px;font-size:0.7rem;">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    วิธีตั้งค่า
+                </button>
+                <span class="chevron">&#9660;</span>
+            </div>
         </div>
-        <div class="ind-grid">
-            <div class="ind-item"><span class="label">Exchange</span><span class="val">BINANCE</span></div>
+        <div class="collapsible-body">
+            <div class="ind-grid" style="margin-top:12px;">
+                <div class="ind-item"><span class="label">Exchange</span><span class="val">BINANCE</span></div>
 <div class="ind-item"><span class="label">Currency</span><span class="val">USDT</span></div>
 <div class="ind-item"><span class="label">USD/THB Rate</span><span class="val">33.426</span></div>
 <div class="ind-item"><span class="label">Daily DCA Budget</span><span class="val">100 THB = 2.99 USDT</span></div>
@@ -500,9 +592,10 @@
 <div class="ind-item"><span class="label">Boost Multiplier</span><span class="val">1.8x</span></div>
 <div class="ind-item"><span class="label">Boost Price Ratio</span><span class="val">1.05x realized</span></div>
 <div class="ind-item"><span class="label">Low Balance Alert</span><span class="val">< 7 days remaining</span></div>
-<div class="ind-item"><span class="label">Buy Fee</span><span class="val">0.15%</span></div>
-<div class="ind-item"><span class="label">Sell Fee</span><span class="val">0.15%</span></div>
+<div class="ind-item"><span class="label">Buy Fee</span><span class="val">0.25%</span></div>
+<div class="ind-item"><span class="label">Sell Fee</span><span class="val">0.25%</span></div>
 
+            </div>
         </div>
     </div>
 
@@ -588,7 +681,7 @@
 
     <!-- Footer -->
     <div class="footer">
-        Phoenix v5.1 DCA Bot | Generated: 2026-08-13 17:27:54 | Auto-refresh: 5 min | <a href="https://github.com/manhiiautomation-gif/Smart-dca" target="_blank" style="color:var(--blue);text-decoration:none;">GitHub</a>
+        Phoenix v5.1 DCA Bot | Generated: 2026-08-17 16:44:58 | Auto-refresh: 5 min | <a href="https://github.com/manhiiautomation-gif/Smart-dca" target="_blank" style="color:var(--blue);text-decoration:none;">GitHub</a>
     </div>
 
     <script>
@@ -832,6 +925,21 @@
         });
         // Init token status on page load
         updateTokenStatus();
+
+        // U9: Freshness badge — shows relative time since generation
+        (function() {
+            var genTime = new Date('2026-08-17 16:44:58');
+            var el = document.getElementById('freshness');
+            if (!el || isNaN(genTime)) return;
+            function update() {
+                var diff = Math.floor((Date.now() - genTime) / 60000);
+                if (diff < 1) el.textContent = 'อัปเดตเมื่อสักครู่';
+                else if (diff < 60) el.textContent = 'อัปเดต ' + diff + ' นาทีก่อน';
+                else { var h = Math.floor(diff/60); var m = diff % 60; el.textContent = 'อัปเดต ' + h + ' ชม. ' + m + ' นาทีก่อน'; }
+            }
+            update();
+            setInterval(update, 30000);
+        })();
     })();
     </script>
 
@@ -845,7 +953,10 @@
 
             if (dates.length === 0) {
                 document.getElementById('chart').innerHTML =
-                    '<div style="text-align:center;color:var(--text-dim);padding:40px;">ยังไม่มีข้อมูลเพียงพอสำหรับกราฟ</div>';
+                    '<div style="text-align:center;color:var(--text-dim);padding:60px 20px;">' +
+                    '<div style="font-size:2rem;opacity:0.4;margin-bottom:8px;">&#128200;</div>' +
+                    '<div style="font-size:0.9rem;">กราฟจะปรากฏหลังการซื้อขายครั้งแรก</div>' +
+                    '<div style="font-size:0.78rem;margin-top:4px;">การซื้อ DCA อัตโนมัติจะเริ่มต้นเมื่อถึงเวลาที่กำหนด</div></div>';
                 return;
             }
 

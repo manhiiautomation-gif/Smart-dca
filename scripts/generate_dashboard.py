@@ -37,6 +37,17 @@ def fmt_pct(n):
     return f'{n * 100:.1f}%'
 
 
+def fmt_btc(n, decimals=8):
+    """Format BTC with smart decimal places (U6)."""
+    if n is None or n == 0:
+        return '0 BTC'
+    if abs(n) >= 1:
+        return f'{n:.4f} BTC'
+    if abs(n) >= 0.001:
+        return f'{n:.6f} BTC'
+    return f'{n:.8f} BTC'
+
+
 def color_for_value(val, thresholds):
     """Return color class based on thresholds.
     thresholds: [(threshold, color_class), ...] ascending order.
@@ -194,6 +205,28 @@ def generate_dashboard(state_path='live_bot/state.json',
     cooldown = indicators.get('cooldown', 0)
     ath = indicators.get('ath', 0)
 
+    # U2: Empty state detection
+    is_empty = (buy_count == 0 and sell_count == 0 and invested == 0)
+
+    # U11: Next expected run time (cron: '10 17 * * *' UTC = 00:10 THB)
+    from datetime import timezone, timedelta
+    tz_thai = timezone(timedelta(hours=7))
+    now_thai = datetime.now(tz_thai)
+    # Next 00:10 THB
+    next_run_date = now_thai.replace(hour=0, minute=10, second=0, microsecond=0)
+    if now_thai.hour >= 0 and now_thai.minute >= 10 and now_thai.hour < 24:
+        next_run_date += timedelta(days=1)
+    next_run_str = next_run_date.strftime('%H:%M')
+    next_run_day = next_run_date.strftime('%d %b')
+
+    # U5: Max drawdown conditional color
+    if max_dd == 0:
+        max_dd_class = 'dim'
+    elif max_dd < 0.05:
+        max_dd_class = 'yellow'
+    else:
+        max_dd_class = 'red'
+
     # Next expected action
     next_action = ''
     next_action_class = 'neutral'
@@ -344,17 +377,22 @@ def generate_dashboard(state_path='live_bot/state.json',
         cfg_grid_rows += f'<div class="ind-item"><span class="label">{label}</span><span class="val">{val}</span></div>\n'
 
     config_html = f'''
-    <!-- Config Settings -->
+    <!-- U10: Config Section (collapsible) -->
     <div class="card" style="margin-bottom:16px;border-left:3px solid var(--purple);">
-        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
-            Configuration (Active)
-            <button class="ctrl-btn" onclick="toggleHelp()" style="padding:4px 12px;font-size:0.7rem;">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                วิธีตั้งค่า
-            </button>
+        <div class="collapsible-header" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open');">
+            <div class="card-title" style="margin-bottom:0;">Configuration (Active)</div>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <button class="ctrl-btn" onclick="event.stopPropagation();toggleHelp()" style="padding:4px 12px;font-size:0.7rem;">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    วิธีตั้งค่า
+                </button>
+                <span class="chevron">&#9660;</span>
+            </div>
         </div>
-        <div class="ind-grid">
-            {cfg_grid_rows}
+        <div class="collapsible-body">
+            <div class="ind-grid" style="margin-top:12px;">
+                {cfg_grid_rows}
+            </div>
         </div>
     </div>
 
@@ -422,6 +460,10 @@ def generate_dashboard(state_path='live_bot/state.json',
         change_label=change_label,
         next_action=next_action,
         next_action_class=next_action_class,
+        is_empty=is_empty,
+        next_run_str=next_run_str,
+        next_run_day=next_run_day,
+        max_dd_class=max_dd_class,
     )
 
     # Write output
@@ -492,6 +534,10 @@ def build_html(**kw) -> str:
     change_label = kw.get('change_label', '24h Change')
     next_action = kw.get('next_action', '')
     next_action_class = kw.get('next_action_class', 'neutral')
+    is_empty = kw.get('is_empty', False)
+    next_run_str = kw.get('next_run_str', '00:10')
+    next_run_day = kw.get('next_run_day', '')
+    max_dd_class = kw.get('max_dd_class', 'dim')
     upnl_class = 'green' if unrealized_pnl > 0 else ('red' if unrealized_pnl < 0 else 'neutral')
     chg_class = 'green' if (change_pct or 0) > 0 else ('red' if (change_pct or 0) < 0 else 'neutral')
 
@@ -513,8 +559,15 @@ def build_html(**kw) -> str:
     # ROI color
     roi_class = 'green' if roi > 0 else ('red' if roi < 0 else 'neutral')
 
-    # Dry run badge
-    dry_html = '<span class="tag yellow">DRY RUN</span>' if dry_run else ''
+    # U3: DRY RUN banner (large, prominent)
+    dry_banner_html = '''
+    <div class="dry-run-banner">
+        <span class="banner-icon">&#9888;</span>
+        <div>
+            <div>โหมดทดสอบ (TEST MODE) — ไม่มีการซื้อขายจริง</div>
+            <div class="banner-text">ระบบจำลองผลลัพธ์เท่านั้น เงินและ BTC ไม่เคลื่อนไหวจริง</div>
+        </div>
+    </div>''' if dry_run else ''
 
     # MVRV zone
     if mvrv is not None:
@@ -568,7 +621,7 @@ def build_html(**kw) -> str:
             <td>{t['date']}</td>
             <td class="{tclass}">{ttype}</td>
             <td>{fmt_num(t['amount'])} {currency}</td>
-            <td>{t['btc']:.8f}</td>
+            <td class="num-mono">{fmt_btc(t['btc'])}</td>
             <td>{fmt_num(t['price'])}</td>
             <td>{fmt_num(t.get('fee', 0))}</td>
         </tr>'''
@@ -597,7 +650,7 @@ def build_html(**kw) -> str:
             --card: #161b22;
             --border: #30363d;
             --text: #e6edf3;
-            --text-dim: #8b949e;
+            --text-dim: #9da5ae;
             --green: #3fb950;
             --green-bg: rgba(63,185,80,0.1);
             --red: #f85149;
@@ -667,6 +720,22 @@ def build_html(**kw) -> str:
         .grid-3 {{ grid-template-columns: 1fr 1fr 1fr; }}
         @media (max-width: 640px) {{
             .grid-2, .grid-3 {{ grid-template-columns: 1fr; }}
+            body {{ padding: 10px; }}
+            .card {{ padding: 12px; border-radius: 10px; }}
+            .grid {{ gap: 10px; margin-bottom: 10px; }}
+            .header {{ padding: 10px 0; margin-bottom: 10px; }}
+            h1 {{ font-size: 1.25rem; }}
+            .metric-value {{ font-size: 1.2rem; }}
+            .metric-value.hero {{ font-size: 1.5rem; }}
+            .ind-grid {{ gap: 4px; }}
+            .ind-item {{ padding: 5px 8px; }}
+            .ind-item .label {{ font-size: 0.72rem; }}
+            .ind-item .val {{ font-size: 0.78rem; }}
+            .ctrl-panel {{ gap: 6px; }}
+            .ctrl-btn {{ padding: 6px 12px; font-size: 0.75rem; }}
+            table {{ font-size: 0.78rem; }}
+            th, td {{ padding: 5px 6px; }}
+            .chart-container {{ height: 220px; }}
         }}
         .card {{
             background: var(--card);
@@ -782,6 +851,52 @@ def build_html(**kw) -> str:
         .confirm-box p {{ color: var(--text-dim); font-size: 0.85rem; margin-bottom: 16px; }}
         .confirm-box input {{ width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 0.85rem; margin-bottom: 12px; }}
         .confirm-actions {{ display: flex; gap: 8px; justify-content: flex-end; }}
+
+        /* U3: DRY RUN Banner */
+        .dry-run-banner {{
+            background: linear-gradient(135deg, rgba(210,153,34,0.15), rgba(210,153,34,0.05));
+            border: 1px solid var(--yellow);
+            border-radius: 10px;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.85rem;
+            color: var(--yellow);
+            font-weight: 600;
+        }}
+        .dry-run-banner .banner-icon {{ font-size: 1.3rem; flex-shrink: 0; }}
+        .dry-run-banner .banner-text {{ color: var(--text); font-weight: 400; font-size: 0.8rem; }}
+
+        /* U8: Hero metric */
+        .metric-value.hero {{ font-size: 1.8rem; }}
+        .num-mono {{ font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace; }}
+
+        /* U9: Freshness badge */
+        .freshness {{ font-size: 0.72rem; color: var(--text-dim); margin-left: 8px; font-weight: 400; }}
+
+        /* U10: Collapsible */
+        .collapsible-header {{ cursor: pointer; user-select: none; display: flex; justify-content: space-between; align-items: center; }}
+        .collapsible-header .chevron {{ transition: transform 0.2s; font-size: 0.7rem; }}
+        .collapsible-header.open .chevron {{ transform: rotate(180deg); }}
+        .collapsible-body {{ max-height: 0; overflow: hidden; transition: max-height 0.3s ease; }}
+        .collapsible-body.open {{ max-height: 800px; }}
+
+        /* U2: Onboarding hero */
+        .onboarding-hero {{
+            text-align: center;
+            padding: 40px 20px;
+            border: 1px dashed var(--border);
+            border-radius: 12px;
+            margin-bottom: 16px;
+        }}
+        .onboarding-hero .onboard-icon {{ font-size: 2.5rem; margin-bottom: 12px; opacity: 0.7; }}
+        .onboarding-hero .onboard-title {{ font-size: 1.1rem; font-weight: 600; margin-bottom: 6px; }}
+        .onboarding-hero .onboard-desc {{ font-size: 0.85rem; color: var(--text-dim); max-width: 360px; margin: 0 auto; line-height: 1.6; }}
+
+        /* Sopr source tag */
+        .tag.sopr-src {{ font-size: 0.65rem; vertical-align: middle; margin-left: 4px; opacity: 0.7; }}
     </style>
 </head>
 <body>
@@ -814,11 +929,15 @@ def build_html(**kw) -> str:
             </div>
         </div>
     </div>
+    <!-- U3: DRY RUN Banner -->
+    {dry_banner_html}
+
     <!-- Header -->
     <div class="header">
         <div class="header-left">
             <h1>Phoenix v5.1</h1>
-            {dry_html}
+            <!-- U9: Freshness badge -->
+            <span class="freshness" id="freshness"></span>
         </div>
         <div class="header-right">
             {status_html}
@@ -845,6 +964,16 @@ def build_html(**kw) -> str:
         </div>
     </div>
 
+    <!-- U2: Onboarding Hero (shown only when empty state) -->
+    {('''<div class="onboarding-hero">
+        <div class="onboard-icon">&#128200;</div>
+        <div class="onboard-title">ยินดีต้อนรับสู่ Phoenix DCA Bot</div>
+        <div class="onboard-desc">
+            ระบบพร้อมทำงานแล้ว — การซื้อครั้งแรกจะเกิดขึ้นอัตโนมัติเมื่อถึงเวลา DCA<br>
+            <small>รันถัดไป: <b>''' + next_run_str + ' น.</b> (' + next_run_day + ')</small>' + ('<br><span style="color:var(--yellow);">&#9888; ขณะนี้อยู่ในโหมดทดสอบ</span>' if dry_run else '') + '''
+        </div>
+    </div>''') if is_empty else ''}
+
     <!-- Row 1: Portfolio + Kill Switch -->
     <div class="grid grid-2">
         <!-- Portfolio Summary -->
@@ -852,12 +981,12 @@ def build_html(**kw) -> str:
             <div class="card-title">Portfolio Summary</div>
             <div class="metric">
                 <div class="metric-label">Portfolio Value</div>
-                <div class="metric-value {roi_class}">{fmt_num(portfolio)} {currency}</div>
+                <div class="metric-value hero {roi_class} num-mono">{fmt_num(portfolio)} <small style="font-size:0.7em;opacity:0.7;">{currency}</small></div>
             </div>
             {('<div class="metric" style="margin-top:-4px;"><div class="metric-label">' + change_label + '</div><div class="metric-value ' + chg_class + '" style="font-size:0.95rem;">' + fmt_num(change_abs, 2) + ' ' + currency + ' (' + f'{change_pct:+.2f}' + '%)</div></div>') if change_pct is not None else ''}
             <div class="metric">
                 <div class="metric-label">BTC Holdings</div>
-                <div class="metric-value blue">{btc_bal:.8f} BTC</div>
+                <div class="metric-value blue num-mono">{fmt_btc(btc_bal)}</div>
                 <div class="metric-sub">{fmt_num(btc_bal * current_price)} {currency}</div>
             </div>
             <div class="metric">
@@ -869,7 +998,7 @@ def build_html(**kw) -> str:
             {('<div class="metric" style="margin-top:-4px;"><div class="metric-label">Avg Buy Size</div><div class="metric-value dim" style="font-size:0.95rem;">' + fmt_num(avg_buy_size) + ' ' + currency + '/trade</div></div>') if avg_buy_size > 0 else ''}
             <div class="grid grid-2" style="margin-top:12px; gap:8px;">
                 <div class="metric">
-                    <div class="metric-label">ROI</div>
+                    <div class="metric-label">ROI (ตลอดกาล)</div>
                     <div class="metric-value {roi_class}">{roi:+.1f}%</div>
                 </div>
                 <div class="metric">
@@ -882,7 +1011,7 @@ def build_html(**kw) -> str:
                 </div>
                 <div class="metric">
                     <div class="metric-label">Max Drawdown</div>
-                    <div class="metric-value red">{fmt_pct(max_dd)}</div>
+                    <div class="metric-value {max_dd_class}">{fmt_pct(max_dd)}</div>
                 </div>
             </div>
         </div>
@@ -892,11 +1021,11 @@ def build_html(**kw) -> str:
             <div class="card-title">System Status</div>
             <div class="ind-grid">
                 <div class="ind-item">
-                    <span class="label">L1 Kill (env)</span>
+                    <span class="label">สวิตช์หยุดฉุกเฉิน L1</span>
                     <span class="val">{l1_html}</span>
                 </div>
                 <div class="ind-item">
-                    <span class="label">L2 Kill (file)</span>
+                    <span class="label">สวิตช์หยุดฉุกเฉิน L2</span>
                     <span class="val">{l2_html}</span>
                 </div>
                 <div class="ind-item">
@@ -904,16 +1033,21 @@ def build_html(**kw) -> str:
                     <span class="val">{exchange_name or currency.upper()}</span>
                 </div>
                 <div class="ind-item">
-                    <span class="label">Last Run</span>
+                    <span class="label">รันล่าสุด</span>
                     <span class="val">{last_run}</span>
                 </div>
                 <div class="ind-item">
-                    <span class="label">Run Count</span>
+                    <span class="label">จำนวนรัน (ตลอดกาล)</span>
                     <span class="val">{run_count}</span>
                 </div>
                 <div class="ind-item">
-                    <span class="label">BTC Price</span>
-                    <span class="val">{fmt_num(current_price)} {currency}</span>
+                    <span class="label">ราคา BTC ตอนนี้</span>
+                    <span class="val num-mono">{fmt_num(current_price)} {currency}</span>
+                </div>
+                <!-- U11: Next Run -->
+                <div class="ind-item">
+                    <span class="label">รันถัดไป</span>
+                    <span class="val blue">{next_run_str} น.</span>
                 </div>
             </div>
             {('<div class="kill-detail" style="margin-top:12px; color:var(--red);">'
@@ -943,7 +1077,7 @@ def build_html(**kw) -> str:
                     <span class="val">{fmt_pct(mvrv_pct)}</span>
                 </div>
                 <div class="ind-item">
-                    <span class="label">MVRV Z</span>
+                    <span class="label">MVRV Z-Score</span>
                     <span class="val">{fmt_num(mvrv_z, 2)}</span>
                 </div>
                 <div class="ind-item">
@@ -959,8 +1093,8 @@ def build_html(**kw) -> str:
                     <span class="val">{fmt_num(nupl, 3)}</span>
                 </div>
                 <div class="ind-item">
-                    <span class="label">STH-SOPR</span>
-                    <span class="val">{fmt_num(sopr, 3)} <small class="tag sopr-src">{sopr_source}</small></span>
+                    <span class="label">SOPR</span>
+                    <span class="val">{fmt_num(sopr, 3)} <small class="tag neutral sopr-src">{('โปรดักซี่' if sopr_source == 'proxy' else sopr_source)}</small></span>
                 </div>
                 <div class="ind-item">
                     <span class="label">SMA 200</span>
@@ -1010,12 +1144,12 @@ def build_html(**kw) -> str:
                         <span class="val red">{sell_count}</span>
                     </div>
                     <div class="ind-item">
-                        <span class="label">BTC Bought</span>
-                        <span class="val">{total_btc_bought:.8f}</span>
+                        <span class="label">BTC ซื้อรวม</span>
+                        <span class="val num-mono">{fmt_btc(total_btc_bought)}</span>
                     </div>
                     <div class="ind-item">
-                        <span class="label">BTC Sold</span>
-                        <span class="val">{total_btc_sold:.8f}</span>
+                        <span class="label">BTC ขายรวม</span>
+                        <span class="val num-mono">{fmt_btc(total_btc_sold)}</span>
                     </div>
                     <div class="ind-item">
                         <span class="label">Sell Proceeds</span>
@@ -1313,6 +1447,21 @@ def build_html(**kw) -> str:
         }});
         // Init token status on page load
         updateTokenStatus();
+
+        // U9: Freshness badge — shows relative time since generation
+        (function() {{
+            var genTime = new Date('{now_str}');
+            var el = document.getElementById('freshness');
+            if (!el || isNaN(genTime)) return;
+            function update() {{
+                var diff = Math.floor((Date.now() - genTime) / 60000);
+                if (diff < 1) el.textContent = 'อัปเดตเมื่อสักครู่';
+                else if (diff < 60) el.textContent = 'อัปเดต ' + diff + ' นาทีก่อน';
+                else {{ var h = Math.floor(diff/60); var m = diff % 60; el.textContent = 'อัปเดต ' + h + ' ชม. ' + m + ' นาทีก่อน'; }}
+            }}
+            update();
+            setInterval(update, 30000);
+        }})();
     }})();
     </script>
 
@@ -1326,7 +1475,10 @@ def build_html(**kw) -> str:
 
             if (dates.length === 0) {{
                 document.getElementById('chart').innerHTML =
-                    '<div style="text-align:center;color:var(--text-dim);padding:40px;">ยังไม่มีข้อมูลเพียงพอสำหรับกราฟ</div>';
+                    '<div style="text-align:center;color:var(--text-dim);padding:60px 20px;">' +
+                    '<div style="font-size:2rem;opacity:0.4;margin-bottom:8px;">&#128200;</div>' +
+                    '<div style="font-size:0.9rem;">กราฟจะปรากฏหลังการซื้อขายครั้งแรก</div>' +
+                    '<div style="font-size:0.78rem;margin-top:4px;">การซื้อ DCA อัตโนมัติจะเริ่มต้นเมื่อถึงเวลาที่กำหนด</div></div>';
                 return;
             }}
 
