@@ -287,11 +287,6 @@ def main():
                 force=args.force,
             )
 
-        # ── C2: Save state in finally-equivalent position ──
-        state_mod.save_state(bot_state, state_path)
-        print(f'[BOT] State saved to {state_path}')
-        print('[BOT] All done.')
-
     except KeyboardInterrupt:
         print('\n[BOT] Stopped by user.')
     except Exception as e:
@@ -299,14 +294,13 @@ def main():
         import traceback
         traceback.print_exc()
         notifier.send_telegram(f'Phoenix v5.1 FATAL ERROR: {e}')
-        # C2: Always save state even on error — prevents double-buy
+    finally:
+        # C2: Always save state — prevents double-buy on crash/interrupt
         try:
             state_mod.save_state(bot_state, state_path)
-            print(f'[BOT] State saved (error recovery) to {state_path}')
+            print(f'[BOT] State saved to {state_path}')
         except Exception as save_err:
-            print(f'[BOT] FAILED to save state after error: {save_err}')
-        sys.exit(1)
-    finally:
+            print(f'[BOT] FAILED to save state: {save_err}')
         _release_lock()
 
 

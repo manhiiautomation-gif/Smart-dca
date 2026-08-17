@@ -329,8 +329,12 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         print(f'[BOT] LIVE BUY: {decision["buy_amount"]:.2f} {currency} of BTC...')
         try:
             result = exchange.market_buy(decision['buy_amount'])
-            buy_btc_got = float(result.get('executed_qty', result.get('amount', 0)))
             buy_cost_actual = float(result.get('cummulative_quote_qty', result.get('cost', decision['buy_amount'])))
+            buy_btc_got = float(result.get('executed_qty', result.get('amount', 0)))
+            # C3: Fallback — if API returns 0, compute BTC from cost/price
+            if buy_btc_got <= 0 and buy_cost_actual > 0 and price > 0:
+                print(f'[BOT] C3 fallback: executed_qty=0, computing BTC = {buy_cost_actual:.2f} / {price:,.2f}')
+                buy_btc_got = buy_cost_actual / price
             buy_fee = float(result.get('fee', buy_cost_actual * config.BUY_FEE_PCT))
             bot_state['total_btc_bought'] += buy_btc_got
             print(f'[BOT] Bought {buy_btc_got:.8f} BTC for {buy_cost_actual:.2f} {currency} (fee: {buy_fee:.2f})')

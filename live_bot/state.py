@@ -2,8 +2,12 @@
 
 State is committed to the repo after each run so it persists
 between GitHub Actions invocations.
+
+H4: File locking via fcntl.flock to prevent concurrent read/write
+between simultaneous GitHub Actions runs or local processes.
 '''
 
+import fcntl
 import json
 import os
 from datetime import date, datetime, timezone, timedelta
@@ -52,30 +56,50 @@ DEFAULT_STATE = {
 }
 
 
+def _lock_path(path: str) -> str:
+    """Derive lock file path from state file path (H4)."""
+    return path + '.lock'
+
+
 def load_state(path: str) -> dict:
-    """Load state from JSON file, merging with defaults for new keys."""
+    """Load state from JSON file with shared lock, merging with defaults."""
+    lock = _lock_path(path)
     if os.path.exists(path):
-        with open(path, 'r') as f:
-            saved = json.load(f)
+        with open(lock, 'w') as lf:
+            fcntl.flock(lf, fcntl.LOCK_SH)  # shared lock — allow concurrent reads
+            try:
+                with open(path, 'r') as f:
+                    saved = json.load(f)
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
         merged = {**DEFAULT_STATE, **saved}
         return merged
     return dict(DEFAULT_STATE)
 
 
 def save_state(state: dict, path: str):
-    """Save state to JSON file atomically (write to temp then rename)."""
+    """Save state to JSON file atomically with exclusive lock (H4).
+
+    Uses fcntl.flock(LOCK_EX) to prevent concurrent writes.
+    Write is atomic (temp + rename) so readers always see valid JSON.
+    """
     import tempfile
+    lock = _lock_path(path)
     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
     dir_name = os.path.dirname(path) or '.'
-    try:
-        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
-        with os.fdopen(fd, 'w') as f:
-            json.dump(state, f, indent=2, default=str)
-        os.replace(tmp_path, path)
-    except Exception:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-        raise
+    with open(lock, 'w') as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)  # exclusive lock
+        try:
+            fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
+            with os.fdopen(fd, 'w') as f:
+                json.dump(state, f, indent=2, default=str)
+            os.replace(tmp_path, path)
+        except Exception:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            raise
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
 
 
 def update_state_after_run(state: dict, decision: dict,
@@ -124,10 +148,16 @@ def update_state_after_run(state: dict, decision: dict,
 
 
 def load_trade_log(path: str = 'trade_log.json') -> list:
-    """Load trade log from JSON file."""
+    """Load trade log from JSON file with shared lock (H4)."""
+    lock = path + '.lock'
     if os.path.exists(path):
-        with open(path, 'r') as f:
-            return json.load(f)
+        with open(lock, 'w') as lf:
+            fcntl.flock(lf, fcntl.LOCK_SH)
+            try:
+                with open(path, 'r') as f:
+                    return json.load(f)
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
     return []
 
 
@@ -151,17 +181,22 @@ def append_trade_log(log_path: str, trade_type: str, amount: float,
     # Keep last 500 trades max to prevent file bloat
     if len(log) > 500:
         log = log[-500:]
-    # Atomic save
+    # Atomic save with exclusive lock (H4)
     import tempfile
     dir_name = os.path.dirname(log_path) or '.'
     os.makedirs(dir_name, exist_ok=True)
-    try:
-        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
-        with os.fdopen(fd, 'w') as f:
-            json.dump(log, f, indent=2, default=str)
-        os.replace(tmp_path, log_path)
-    except Exception:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-        raise
+    lock = log_path + '.lock'
+    with open(lock, 'w') as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
+            with os.fdopen(fd, 'w') as f:
+                json.dump(log, f, indent=2, default=str)
+            os.replace(tmp_path, log_path)
+        except Exception:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            raise
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
     return record
