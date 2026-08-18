@@ -252,6 +252,106 @@ def generate_dashboard(state_path='live_bot/state.json',
         next_action = 'HOLD — ไม่มีสัญญาณชัดเจน รอรอบถัดไป'
         next_action_class = 'blue'
 
+    # ── DCA Decision Info ──
+    last_decision = state.get('last_decision', {})
+    ld_buy = last_decision.get('buy_amount', 0)
+    ld_sell = last_decision.get('sell_amount', 0)
+    ld_mult = last_decision.get('multiplier', 0)
+    ld_budget = last_decision.get('base_budget', 0)
+    ld_reserve = last_decision.get('reserve_injection', 0)
+
+    # Estimate next round multiplier from current indicators
+    est_mult = 0.0
+    est_label = ''
+    if mvrv is not None:
+        if mvrv < 1.0:
+            if sopr is not None and sopr < 0.95:
+                est_mult = 4.5
+                est_label = 'MVRV<1 + SOPR<0.95'
+            else:
+                est_mult = 3.0
+                est_label = 'MVRV<1'
+        elif mvrv < 1.5:
+            if nupl is not None and nupl < 0.25:
+                est_mult = 3.0
+                est_label = 'MVRV 1-1.5 + NUPL<0.25'
+            else:
+                est_mult = 2.0
+                est_label = 'MVRV 1-1.5'
+        elif mvrv < 2.0:
+            est_mult = 1.0
+            est_label = 'MVRV 1.5-2'
+        elif mvrv < 2.5:
+            est_mult = 0.3
+            est_label = 'MVRV 2-2.5'
+        else:
+            est_mult = 0.0
+            est_label = 'MVRV>2.5'
+    est_buy = ld_budget * est_mult if ld_budget > 0 else 0
+
+    # Build DCA info card HTML
+    def _dca_card_html():
+        # Today's DCA
+        if ld_buy > 0:
+            mult_color = 'green' if ld_mult >= 2 else ('blue' if ld_mult >= 1 else 'yellow')
+            today_html = (
+                '<div style="margin-bottom:16px;">'
+                '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">DCA รอบล่าสุด</div>'
+                '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'
+                f'<div style="text-align:center;padding:8px;border-radius:8px;background:rgba({"63,185,80" if ld_mult >= 2 else "88,166,255" if ld_mult >= 1 else "210,153,34"},0.1);border:1px solid var(--border);">'
+                f'<div style="font-size:1.4rem;font-weight:700;color:var(--{mult_color});">{ld_mult}x</div>'
+                f'<div style="font-size:10px;color:var(--text-dim);">Multiplier</div></div>'
+                f'<div style="text-align:center;padding:8px;border-radius:8px;background:var(--card);border:1px solid var(--border);">'
+                f'<div style="font-size:1.1rem;font-weight:600;">{fmt_num(ld_buy)} <span style="font-size:0.75rem;color:var(--text-dim);">{currency}</span></div>'
+                f'<div style="font-size:10px;color:var(--text-dim);">ซื้อรวม</div></div>'
+                f'<div style="text-align:center;padding:8px;border-radius:8px;background:var(--card);border:1px solid var(--border);">'
+                f'<div style="font-size:1.1rem;font-weight:600;">{fmt_num(ld_budget)} <span style="font-size:0.75rem;color:var(--text-dim);">{currency}</span></div>'
+                f'<div style="font-size:10px;color:var(--text-dim);">Base Budget</div></div>'
+                '</div>'
+                + (f'<div style="margin-top:4px;font-size:10px;color:var(--text-dim);">+ Reserve injection: {fmt_num(ld_reserve)} {currency}</div>' if ld_reserve > 0 else '')
+                + (f'<div style="margin-top:2px;font-size:10px;color:var(--red);">ขาย: {fmt_num(ld_sell)} {currency}</div>' if ld_sell > 0 else '')
+                + '</div>'
+            )
+        else:
+            today_html = (
+                '<div style="margin-bottom:16px;">'
+                '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">DCA รอบล่าสุด</div>'
+                '<div style="text-align:center;padding:12px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--text-dim);font-size:0.85rem;">'
+                'ยังไม่มีการซื้อขาย (ยังไม่ถึงเวลารัน หรือ multipler = 0)'
+                '</div></div>'
+            )
+
+        # Next round estimate
+        if est_mult > 0 and ld_budget > 0:
+            est_color = 'green' if est_mult >= 2 else ('blue' if est_mult >= 1 else 'yellow')
+            next_html = (
+                '<div style="margin-bottom:16px;">'
+                '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">ประเมินรอบถัดไป <span style="font-size:9px;opacity:0.6;">(จาก indicators ปัจจุบัน)</span></div>'
+                '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'
+                f'<div style="text-align:center;padding:8px;border-radius:8px;background:rgba({"63,185,80" if est_mult >= 2 else "88,166,255" if est_mult >= 1 else "210,153,34"},0.1);border:1px solid var(--border);">'
+                f'<div style="font-size:1.4rem;font-weight:700;color:var(--{est_color});">{est_mult}x</div>'
+                f'<div style="font-size:10px;color:var(--text-dim);">Multiplier</div></div>'
+                f'<div style="text-align:center;padding:8px;border-radius:8px;background:var(--card);border:1px solid var(--border);">'
+                f'<div style="font-size:1.1rem;font-weight:600;">{fmt_num(est_buy)} <span style="font-size:0.75rem;color:var(--text-dim);">{currency}</span></div>'
+                f'<div style="font-size:10px;color:var(--text-dim);">ประมาณการซื้อ</div></div>'
+                f'<div style="text-align:center;padding:8px;border-radius:8px;background:var(--card);border:1px solid var(--border);">'
+                f'<div style="font-size:0.75rem;color:var(--text-dim);padding-top:4px;">{est_label}</div>'
+                f'<div style="font-size:10px;color:var(--text-dim);">เงื่อนไข</div></div>'
+                '</div></div>'
+            )
+        else:
+            next_html = (
+                '<div style="margin-bottom:16px;">'
+                '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">ประเมินรอบถัดไป</div>'
+                '<div style="text-align:center;padding:12px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--text-dim);font-size:0.85rem;">'
+                f'MVRV สูง ({fmt_num(mvrv, 2)}) - ไม่ซื้อรอบนี้ (0x)'
+                '</div></div>'
+            )
+
+        return today_html + next_html
+
+    dca_card_html = _dca_card_html()
+
     # Build HTML
     # Load demo portfolio data if exists
     demo_html = ''
@@ -463,6 +563,7 @@ def generate_dashboard(state_path='live_bot/state.json',
         change_label=change_label,
         next_action=next_action,
         next_action_class=next_action_class,
+        dca_card_html=dca_card_html,
         is_empty=is_empty,
         next_run_str=next_run_str,
         next_run_day=next_run_day,
@@ -537,6 +638,7 @@ def build_html(**kw) -> str:
     change_label = kw.get('change_label', '24h Change')
     next_action = kw.get('next_action', '')
     next_action_class = kw.get('next_action_class', 'neutral')
+    dca_card_html = kw.get('dca_card_html', '')
     is_empty = kw.get('is_empty', False)
     next_run_str = kw.get('next_run_str', '00:10')
     next_run_day = kw.get('next_run_day', '')
@@ -1059,6 +1161,12 @@ def build_html(**kw) -> str:
               + f'By: {ks_by}'
               + '</div>') if not bot_alive else ''}
         </div>
+    </div>
+
+    <!-- Row 1.5: DCA Buy Info -->
+    <div class="card" style="margin-bottom:16px;">
+        <div class="card-title">DCA Status</div>
+        {dca_card_html}
     </div>
 
     <!-- Row 2: Indicators -->

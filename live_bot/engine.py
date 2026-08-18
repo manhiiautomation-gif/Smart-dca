@@ -208,7 +208,8 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
 
     # ── 4b. Fetch on-chain metrics from BGeometrics ──
     # STH-SOPR, LTH Realized Price, Realized Price
-    # Falls back to proxy/NaN if unavailable.
+    # Falls back to proxy if unavailable (NaN).
+    ema30 = ind.ema(closes, 30)
     try:
         from . import bg_metrics
         sopr = bg_metrics.get_sth_sopr(today)
@@ -216,14 +217,16 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         bg_rp = bg_metrics.get_realized_price(today)
         if not math.isnan(bg_rp):
             realized_price = bg_rp
-        sopr_source = 'BG' if not math.isnan(sopr) else 'proxy'
+        # Fallback to proxy when BG returns NaN (e.g. cache gap, no token)
+        if math.isnan(sopr):
+            sopr = price / ema30 if ema30 > 0 else 1.0
+        sopr_source = 'BG' if not math.isnan(bg_metrics.get_sth_sopr(today)) else 'proxy'
         lth_source = 'BG' if not math.isnan(lth_rp) else 'N/A'
         print(f'[BOT] STH-SOPR={sopr:.4f} ({sopr_source}) '
               f'LTH-RP={lth_rp:,.2f} ({lth_source})')
     except ImportError:
         # bg_metrics not available — use fallbacks
         print('[BOT] bg_metrics not found, using proxy')
-        ema30 = ind.ema(closes, 30)
         sopr = price / ema30 if ema30 > 0 else 1.0
         lth_rp = float('nan')
         sopr_source = 'proxy'
@@ -444,7 +447,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         'rsi': round(rsi_val, 1),
         'macd_h': round(macd_h, 4),
         'nupl': round(nupl, 3),
-        'sopr': round(sopr, 3),
+        'sopr': round(sopr, 3) if not math.isnan(sopr) else None,
         'sopr_source': sopr_source,
         'sma_200': round(sma_200, 2) if not math.isnan(sma_200) else None,
         'sma_365': round(sma_365, 2) if not math.isnan(sma_365) else None,
@@ -456,6 +459,20 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         'path_taken': decision.get('path_taken', 'none'),
         'in_bear': decision.get('in_bear', False),
         'cooldown': decision.get('new_cooldown', 0),
+    }
+    # Store decision details for dashboard (multiplier, amounts)
+    buy_amt = decision.get('buy_amount', 0)
+    base_budget_val = base_budget
+    if base_budget_val > 0 and buy_amt > 0:
+        calc_multiplier = round(buy_amt / base_budget_val, 1)
+    else:
+        calc_multiplier = 0.0
+    bot_state['last_decision'] = {
+        'buy_amount': round(buy_amt, 2),
+        'sell_amount': round(decision.get('sell_amount', 0), 2),
+        'multiplier': calc_multiplier,
+        'base_budget': round(base_budget_val, 2),
+        'reserve_injection': round(decision.get('reserve_injection', 0), 2),
     }
     bot_state['last_btc_balance'] = round(current_btc, 8)
     bot_state['last_cash_balance'] = round(current_cash, 2)
@@ -626,6 +643,7 @@ def run_demo(exchange, demo_state: dict, project_root: str,
     realized_price = price / mvrv_val if mvrv_val > 0 else float('nan')
 
     # ── 4b. BGeometrics metrics ──
+    ema30 = ind.ema(closes, 30)
     try:
         from . import bg_metrics
         sopr = bg_metrics.get_sth_sopr(today)
@@ -633,10 +651,11 @@ def run_demo(exchange, demo_state: dict, project_root: str,
         bg_rp = bg_metrics.get_realized_price(today)
         if not math.isnan(bg_rp):
             realized_price = bg_rp
-        sopr_source = 'BG' if not math.isnan(sopr) else 'proxy'
+        if math.isnan(sopr):
+            sopr = price / ema30 if ema30 > 0 else 1.0
+        sopr_source = 'BG' if not math.isnan(bg_metrics.get_sth_sopr(today)) else 'proxy'
         lth_source = 'BG' if not math.isnan(lth_rp) else 'N/A'
     except ImportError:
-        ema30 = ind.ema(closes, 30)
         sopr = price / ema30 if ema30 > 0 else 1.0
         lth_rp = float('nan')
         sopr_source = 'proxy'
@@ -695,7 +714,7 @@ def run_demo(exchange, demo_state: dict, project_root: str,
         'rsi': round(rsi_val, 1),
         'macd_h': round(macd_h, 4),
         'nupl': round(nupl, 3),
-        'sopr': round(sopr, 3),
+        'sopr': round(sopr, 3) if not math.isnan(sopr) else None,
         'sopr_source': sopr_source,
         'sma_200': round(sma_200, 2) if not math.isnan(sma_200) else None,
         'sma_365': round(sma_365, 2) if not math.isnan(sma_365) else None,
@@ -707,6 +726,19 @@ def run_demo(exchange, demo_state: dict, project_root: str,
         'path_taken': decision.get('path_taken', 'none'),
         'in_bear': decision.get('in_bear', False),
         'cooldown': decision.get('new_cooldown', 0),
+    }
+    # Store decision details for dashboard
+    buy_amt = decision.get('buy_amount', 0)
+    if base_budget > 0 and buy_amt > 0:
+        calc_mult = round(buy_amt / base_budget, 1)
+    else:
+        calc_mult = 0.0
+    demo_state['last_decision'] = {
+        'buy_amount': round(buy_amt, 2),
+        'sell_amount': round(decision.get('sell_amount', 0), 2),
+        'multiplier': calc_mult,
+        'base_budget': round(base_budget, 2),
+        'reserve_injection': round(decision.get('reserve_injection', 0), 2),
     }
     dp.snapshot_indicators(demo_state, indicators_snapshot)
 
