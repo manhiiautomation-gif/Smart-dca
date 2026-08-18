@@ -7,7 +7,14 @@ on:
         type: boolean
         default: false
   workflow_dispatch:
-    # Also allow being called after bot/demo runs
+    inputs:
+      skip_build:
+        type: boolean
+        default: true
+        description: 'Skip dashboard regeneration (use committed HTML)'
+  push:
+    branches: [main]
+    paths: ['dashboard/dist/**']
 
 jobs:
   deploy:
@@ -26,7 +33,7 @@ jobs:
           ref: main
 
       - name: Generate dashboard (if needed)
-        if: ${{ !inputs.skip_build }}
+        if: ${{ inputs.skip_build != true }}
         run: python scripts/generate_dashboard.py
 
       - name: Setup Pages

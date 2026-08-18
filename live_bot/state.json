@@ -23,7 +23,7 @@
     "rsi": 44.2,
     "macd_h": -5915.0033,
     "nupl": 0.183,
-    "sopr": NaN,
+    "sopr": null,
     "sopr_source": "proxy",
     "sma_200": 2389873.55,
     "sma_365": 2887317.1,

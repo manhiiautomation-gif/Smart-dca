@@ -77,22 +77,36 @@ def load_state(path: str) -> dict:
     return dict(DEFAULT_STATE)
 
 
+def _sanitize_for_json(obj):
+    """Recursively replace NaN/Infinity with None (becomes JSON null)."""
+    import math
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_json(v) for v in obj]
+    return obj
+
+
 def save_state(state: dict, path: str):
     """Save state to JSON file atomically with exclusive lock (H4).
 
     Uses fcntl.flock(LOCK_EX) to prevent concurrent writes.
     Write is atomic (temp + rename) so readers always see valid JSON.
+    NaN/Infinity values are replaced with None to produce valid JSON.
     """
     import tempfile
     lock = _lock_path(path)
     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
     dir_name = os.path.dirname(path) or '.'
+    clean_state = _sanitize_for_json(state)
     with open(lock, 'w') as lf:
         fcntl.flock(lf, fcntl.LOCK_EX)  # exclusive lock
         try:
             fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
             with os.fdopen(fd, 'w') as f:
-                json.dump(state, f, indent=2, default=str)
+                json.dump(clean_state, f, indent=2, default=str)
             os.replace(tmp_path, path)
         except Exception:
             if os.path.exists(tmp_path):
