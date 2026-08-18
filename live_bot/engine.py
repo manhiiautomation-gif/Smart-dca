@@ -13,8 +13,7 @@ import numpy as np
 from datetime import date, datetime, timezone, timedelta
 
 # H1: Thai timezone for idempotency check
-# GitHub Actions runners use UTC, but cron runs at 17:10 UTC = 00:10 THB
-# Using UTC date would cause guard to fail after 07:00 UTC (14:00 THB next day)
+# GitHub Actions cron: 13:00/13:10 UTC = 20:00/20:10 THB
 _THAI_TZ = timezone(timedelta(hours=7))
 
 
@@ -104,7 +103,11 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
 
     # ── 0. Idempotency guard: skip if already ran today (unless --force) ──
     # H1: Uses Thai timezone so daily guard aligns with THB calendar day
-    # (cron at 17:10 UTC = 00:10 THB, guard resets at 07:00 UTC = 00:00 THB)
+    # (cron at 13:00/13:10 UTC = 20:00/20:10 THB)
+    # Backup run at +10 min is a safety net — if 1st run succeeds,
+    # last_run_date is set and 2nd run skips via this guard.
+    # If 1st run fails (exception/timeout), last_run_date is NOT updated,
+    # so 2nd run proceeds normally.
     if not force and bot_state.get('last_run_date') == today.isoformat():
         print(f'[BOT] Already ran today ({today} THB). Skipping to prevent duplicate trades.')
         print(f'[BOT] Use --force to override (e.g. for testing).')
