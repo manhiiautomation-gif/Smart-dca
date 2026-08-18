@@ -54,3 +54,4 @@ Smart-dca/
 # demo_trades*.json
 # demo_report*.json
 .bot_lock
+*.lock
