@@ -300,10 +300,13 @@ def generate_dashboard(state_path='live_bot/state.json',
 
             demo_html = f'''
     <!-- Demo Portfolio -->
-    <div class="card" style="margin-bottom:16px;border-left:3px solid var(--blue);">
+    <div class="card" id="demoCard" style="margin-bottom:16px;border-left:3px solid var(--blue);">
         <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
             Demo Portfolio Simulation
-            <span class="tag {ready_class}">{ready_text}</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span class="tag {ready_class}">{ready_text}</span>
+                <button onclick="document.getElementById('demoCard').style.display='none';localStorage.setItem('hideDemo','1')" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:1.1rem;padding:2px 6px;line-height:1;" title="ซ่อนส่วนนี้">✕</button>
+            </div>
         </div>
         <div class="ind-grid">
             <div class="ind-item">
@@ -1447,6 +1450,12 @@ def build_html(**kw) -> str:
         }});
         // Init token status on page load
         updateTokenStatus();
+
+        // Restore demo card hidden state from localStorage
+        if (localStorage.getItem('hideDemo') === '1') {{
+            var dc = document.getElementById('demoCard');
+            if (dc) dc.style.display = 'none';
+        }}
 
         // U9: Freshness badge — shows relative time since generation
         (function() {{
