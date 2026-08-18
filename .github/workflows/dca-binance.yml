@@ -53,7 +53,7 @@ jobs:
         run: |
           git config user.name "Phoenix Bot"
           git config user.email "phoenix-bot@users.noreply.github.com"
-          git add live_bot/state.json trade_log.json dashboard/dist/index.html
+          git add live_bot/state.json live_bot/_mvrv_history.py trade_log.json dashboard/dist/index.html
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
