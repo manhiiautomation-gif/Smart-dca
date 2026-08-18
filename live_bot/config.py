@@ -9,7 +9,13 @@ Currency Resolution:
 '''
 
 import os
+import json
 import requests
+
+
+_RATE_CACHE_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), 'usd_thb_rate.json'
+)
 
 
 def _env_float(key: str, default: str) -> float:
@@ -34,6 +40,28 @@ EXCHANGE = os.environ.get('EXCHANGE', 'binance').lower()  # 'binance' or 'bitkub
 # ═══════════════════════════════════════════════════════════════
 _FALLBACK_RATE = 33.426
 _usd_thb_cache = {'rate': None, 'date': None}
+
+
+def _load_rate_cache() -> dict:
+    """Load cached rate from disk. Returns {rate, date, source} or empty dict."""
+    try:
+        if os.path.exists(_RATE_CACHE_FILE):
+            with open(_RATE_CACHE_FILE, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _save_rate_cache(rate: float, source: str):
+    """Persist rate to disk so it survives across process restarts."""
+    from datetime import date as _date
+    try:
+        data = {'rate': rate, 'date': _date.today().isoformat(), 'source': source}
+        with open(_RATE_CACHE_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        print(f'[CONFIG] WARNING: Could not save rate cache: {e}')
 
 
 def _fetch_usdt_thb_from_bitkub() -> float:
@@ -63,36 +91,43 @@ def get_usd_thb_rate() -> float:
     """Get USD/THB rate.
 
     Priority:
-    1. USD_THB_RATE env var (if explicitly set and non-default)
-    2. Live fetch from Bitkub USDT_THB ticker (refreshed daily)
+    1. Bitkub USDT_THB live ticker (always first, refreshed daily)
+    2. Disk cache from previous successful fetch
     3. Fallback constant 33.426
+
+    Rate is persisted to usd_thb_rate.json after each successful fetch.
     """
     global _usd_thb_cache
     from datetime import date as _date
     today_str = _date.today().isoformat()
 
-    # Check env var first (user override)
-    env_val = os.environ.get('USD_THB_RATE', '')
-    if env_val and env_val.strip():
-        try:
-            return float(env_val)
-        except ValueError:
-            pass
-
-    # Return cached rate if fetched today
+    # Return in-memory cache if fetched today
     if (_usd_thb_cache['rate'] is not None
             and _usd_thb_cache['date'] == today_str):
         return _usd_thb_cache['rate']
 
-    # Fetch live rate
+    # Always try Bitkub live first
     rate = _fetch_usdt_thb_from_bitkub()
+    source = 'bitkub' if rate != _FALLBACK_RATE else 'fallback'
+
+    # If Bitkub failed, try disk cache from previous day
+    if rate == _FALLBACK_RATE:
+        disk = _load_rate_cache()
+        if disk.get('rate') and disk.get('rate') > 0:
+            rate = disk['rate']
+            source = 'disk_cache'
+            print(f'[CONFIG] USD/THB using disk cache: {rate} ({disk.get("date")})')
+
+    # Persist to disk and in-memory cache
     _usd_thb_cache['rate'] = rate
     _usd_thb_cache['date'] = today_str
-    print(f'[CONFIG] USD/THB rate: {rate} (source: {"Bitkub" if rate != _FALLBACK_RATE else "fallback"})')
+    if source == 'bitkub':
+        _save_rate_cache(rate, source)
+    print(f'[CONFIG] USD/THB rate: {rate} (source: {source})')
     return rate
 
 
-# Module-level initial value (lazy — refreshed on first call to get_usd_thb_rate())
+# Module-level initial value (lazy — use get_usd_thb_rate() at runtime)
 USD_THB_RATE = _env_float('USD_THB_RATE', str(_FALLBACK_RATE))
 
 # Currency derived from exchange — do NOT override manually
