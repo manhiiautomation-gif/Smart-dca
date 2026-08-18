@@ -2,11 +2,14 @@ name: Phoenix v5.1 DCA - Bitkub
 
 on:
   schedule:
-    # Daily at 13:00 UTC (20:00 THB) — US market open, peak momentum
-    # Backup +10 min at 13:10 UTC (20:10 THB) — retries if first run failed
-    # Idempotency guard in engine prevents duplicate trades on success
+    # Main:     13:00 UTC (20:00 THB) — US market open, peak momentum
+    # Backup 1: 13:10 UTC (20:10 THB) — retry if main failed
+    # Backup 2: 13:30 UTC (20:30 THB) — last resort if both failed
+    # Idempotency guard prevents duplicate trades on success.
+    # If ALL 3 fail, Telegram alert is sent.
     - cron: '0 13 * * *'
     - cron: '10 13 * * *'
+    - cron: '30 13 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -24,7 +27,7 @@ on:
 
 concurrency:
   group: bitkub-dca
-  cancel-in-progress: true  # H4: Cancel old run if new one starts (prevents parallel trading)
+  cancel-in-progress: false  # Backup cron must wait, not cancel main run
 
 jobs:
   dca:
@@ -53,7 +56,7 @@ jobs:
             echo "val=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Run Phoenix v5.1
+      - name: Run Phoenix v5.1 (with retry)
         env:
           EXCHANGE: bitkub
           BITKUB_API_KEY: ${{ secrets.BITKUB_API_KEY }}
@@ -78,8 +81,32 @@ jobs:
           if [ "${{ github.event.inputs.force }}" = "true" ]; then
             FLAGS="$FLAGS --force"
           fi
-          echo "Running: python live_bot/main.py $FLAGS"
-          python live_bot/main.py $FLAGS
+          # Retry up to 3 times with 60s backoff
+          for attempt in 1 2 3; do
+            echo "=== Attempt $attempt/3 ==="
+            if python live_bot/main.py $FLAGS; then
+              echo "SUCCESS on attempt $attempt"
+              exit 0
+            fi
+            echo "Attempt $attempt failed, waiting 60s..."
+            sleep 60
+          done
+          echo "ALL 3 ATTEMPTS FAILED"
+          exit 1
+
+      - name: Alert on failure
+        if: failure()
+        run: |
+          python3 -c "
+          import requests, os
+          token = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+          chat_id = os.environ.get('TELEGRAM_CHAT_ID', '')
+          if not token or not chat_id:
+              exit(0)
+          msg = '⚠️ Phoenix DCA FAILED — all 3 retries + backup slots exhausted.\nRun manually or investigate GitHub Actions.'
+          requests.post(f'https://api.telegram.org/bot{token}/sendMessage',
+              json={'chat_id': chat_id, 'text': msg, 'parse_mode': 'HTML'}, timeout=10)
+          "
 
       - name: Generate dashboard
         run: python scripts/generate_dashboard.py
