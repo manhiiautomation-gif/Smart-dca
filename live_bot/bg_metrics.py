@@ -239,30 +239,26 @@ def get_all_metrics_today(
             and _daily_snapshot_date == today_utc):
         print(f'[BG] Using today\'s snapshot (fetched at {_daily_snapshot_date})')
         result = {}
-        for metric_name in ['sth_sopr', 'lth_realized_price', 'realized_price']:
+        for metric_name in ['sth_sopr', 'lth_realized_price', 'realized_price', 'mvrv']:
             val = _lookup_from_snapshot(metric_name, target_date)
             result[metric_name] = val
-        # Update source based on whether we actually found values
-        if not math.isnan(result.get('sth_sopr', float('nan'))):
-            result['sopr_source'] = 'cache'
-        else:
-            result['sopr_source'] = _daily_snapshot.get('sopr_source', 'N/A')
+        # Update source tags based on whether we actually found values
+        result['sopr_source'] = 'cache' if not math.isnan(result.get('sth_sopr', float('nan'))) else _daily_snapshot.get('sopr_source', 'N/A')
+        result['mvrv_source'] = 'cache' if not math.isnan(result.get('mvrv', float('nan'))) else _daily_snapshot.get('mvrv_source', 'N/A')
         return result
 
     tkn = token or _TOKEN
-    metrics_to_fetch = ['sth_sopr', 'lth_realized_price', 'realized_price']
+    metrics_to_fetch = ['sth_sopr', 'lth_realized_price', 'realized_price', 'mvrv']
 
     if not tkn:
         print('[BG] No BGEOMETRICS_TOKEN — reading from cache only')
         cache = _load_cache()
         snapshot = {}
-        for metric_name in ['sth_sopr', 'lth_realized_price', 'realized_price']:
+        for metric_name in ['sth_sopr', 'lth_realized_price', 'realized_price', 'mvrv']:
             series = cache.get('metrics', {}).get(metric_name, {})
             snapshot[metric_name] = _lookup(series, target_date) if series else float('nan')
-        if not math.isnan(snapshot.get('sth_sopr', float('nan'))):
-            snapshot['sopr_source'] = 'cache'
-        else:
-            snapshot['sopr_source'] = 'no-token'
+        snapshot['sopr_source'] = 'cache' if not math.isnan(snapshot.get('sth_sopr', float('nan'))) else 'no-token'
+        snapshot['mvrv_source'] = 'cache' if not math.isnan(snapshot.get('mvrv', float('nan'))) else 'no-token'
         _daily_snapshot = snapshot
         _daily_snapshot_date = today_utc
         return dict(snapshot)
@@ -306,6 +302,7 @@ def get_all_metrics_today(
         series = series_cache.get(metric_name, {})
         snapshot[metric_name] = _lookup(series, target_date) if series else float('nan')
     snapshot['sopr_source'] = 'BG' if not math.isnan(snapshot.get('sth_sopr', float('nan'))) else 'cache-stale'
+    snapshot['mvrv_source'] = 'BG' if not math.isnan(snapshot.get('mvrv', float('nan'))) else 'cache-stale'
 
     # Store in memory for the rest of the day
     _daily_snapshot = snapshot

@@ -167,57 +167,81 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     print(f'[BOT] SMA200={sma_200:,.2f} RSI={rsi_val:.1f} MACD_H={macd_h:.4f}')
     print(f'[BOT] MACD_bear={macd_bear} MACD_declining={macd_declining} RSI_div={rsi_div}')
 
-    # ── 4. Get MVRV from embedded history, with web fallback ──
-    mvrv_val = strategy.get_mvrv_for_date(today)
+    # ── 4. Get MVRV — try BG cache first, then embedded, then web ──
+    # Priority: BG cache → embedded history → CoinMetrics → ahasignals
+    # NUPL is always derived: 1 - 1/mvrv (no separate fetch needed)
+    mvrv_val = float('nan')
+    mvrv_source = 'N/A'
+
+    # Try BG cache first (fetched via get_all_metrics_today in section 4b)
+    # We do a lightweight cache-only check here to decide MVRV early,
+    # then section 4b does the full batch fetch (including MVRV if needed)
+    try:
+        from . import bg_metrics
+        bg_early = bg_metrics.get_all_metrics_today(target_date=today)
+        bg_mvrv = bg_early.get('mvrv', float('nan'))
+        if not math.isnan(bg_mvrv):
+            mvrv_val = bg_mvrv
+            mvrv_source = bg_early.get('mvrv_source', 'BG')
+            print(f'[BOT] MVRV from BG cache: {mvrv_val:.4f} ({mvrv_source})')
+    except ImportError:
+        pass
+
+    # Fallback: embedded history + web
     if math.isnan(mvrv_val):
-        # Embedded data is stale — try web fetch (ahasignals/BGeometrics)
-        print(f'[BOT] No embedded MVRV for {today}, trying web fallback...')
-        from . import mvrv_fetcher
-        web_mvrv, web_date, web_source = mvrv_fetcher.fetch_mvrv_from_web()
-        if web_mvrv is not None:
-            print(f'[BOT] Web MVRV: {web_mvrv:.4f} ({web_date}, {web_source})')
-            # Append to embedded history for future runs
-            if web_date and web_date > strategy._MVRV_HISTORY_MAX:
-                mvrv_fetcher.append_mvrv_to_history(web_mvrv, web_date)
-            mvrv_val = web_mvrv
+        mvrv_val = strategy.get_mvrv_for_date(today)
+        if not math.isnan(mvrv_val):
+            mvrv_source = 'embedded'
+            # Check if embedded data is stale, try web update in background
+            from datetime import timedelta as td
+            if today - strategy._MVRV_HISTORY_MAX > td(days=1):
+                print(f'[BOT] MVRV embedded stale (ends {strategy._MVRV_HISTORY_MAX}), '
+                      f'updating in background...')
+                try:
+                    from . import mvrv_fetcher
+                    ok, msg = mvrv_fetcher.try_update_mvrv()
+                    print(f'[BOT] MVRV update: {msg}')
+                except Exception as e:
+                    print(f'[BOT] MVRV background update failed: {e}')
         else:
-            print(f'[BOT] WARNING: Web fetch also failed: {web_source}')
-            notifier.send_telegram(
-                f'Phoenix v5.1 WARNING: No MVRV data for {today}. '
-                'Embedded + web fallback both failed. Skipping trade.'
-            )
-            return bot_state
-    else:
-        # Embedded data exists — check if it's stale (>1 day old)
-        # and try to update history in background
-        from datetime import timedelta as td
-        if today - strategy._MVRV_HISTORY_MAX > td(days=1):
-            print(f'[BOT] MVRV history stale (ends {strategy._MVRV_HISTORY_MAX}), '
-                  f'attempting background update...')
-            try:
-                from . import mvrv_fetcher
-                ok, msg = mvrv_fetcher.try_update_mvrv()
-                print(f'[BOT] MVRV update: {msg}')
-            except Exception as e:
-                print(f'[BOT] MVRV background update failed: {e}')
+            # Embedded also missing — try web fetch
+            print(f'[BOT] No embedded MVRV for {today}, trying web fallback...')
+            from . import mvrv_fetcher
+            web_mvrv, web_date, web_source = mvrv_fetcher.fetch_mvrv_from_web()
+            if web_mvrv is not None:
+                print(f'[BOT] Web MVRV: {web_mvrv:.4f} ({web_date}, {web_source})')
+                if web_date and web_date > strategy._MVRV_HISTORY_MAX:
+                    mvrv_fetcher.append_mvrv_to_history(web_mvrv, web_date)
+                mvrv_val = web_mvrv
+                mvrv_source = web_source
+            else:
+                print(f'[BOT] WARNING: All MVRV sources failed: {web_source}')
+                notifier.send_telegram(
+                    f'Phoenix v5.1 WARNING: No MVRV data for {today}. '
+                    'All sources failed. Skipping trade.'
+                )
+                return bot_state
 
     mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val)
     mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val)
     nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 else 0
     realized_price = price / mvrv_val if mvrv_val > 0 else float('nan')
 
-    # ── 4b. Fetch on-chain metrics from BGeometrics (BATCH) ──
+    # ── 4b. Fetch remaining on-chain metrics from BGeometrics (BATCH) ──
     # Uses get_all_metrics_today() which:
-    #   - Fetches ALL 3 metrics in one pass (1 cache load/save cycle)
+    #   - Fetches ALL 4 metrics in one pass (1 cache load/save cycle)
     #   - Daily guard: if already fetched today, returns snapshot (0 API calls)
-    #   - Typical: 3 API calls on first run/day, 0 on subsequent runs
+    #   - Typical: 4 API calls on first run/day, 0 on subsequent runs
+    #
+    # MVRV already obtained above from BG (section 4), but batch ensures
+    # all other metrics (SOPR, RP, LTH-RP) are also fetched.
     #
     # Fallback chain for EACH indicator when API/cache fails:
+    #   MVRV:            BG cache → embedded history → CoinMetrics → ahasignals
+    #   NUPL:            1 - 1/mvrv (always computable if MVRV available)
     #   SOPR:            BG cache → MVRV proxy (mvrv^0.85) → price/ema30
     #   Realized Price:  BG cache → price/mvrv
     #   LTH Realized P:  BG cache → realized_price * 1.15 (LTH holders cost basis)
-    #   NUPL:            1 - 1/mvrv (always computable if MVRV available)
-    #   MVRV:            embedded history → CoinMetrics → ahasignals
     ema30 = ind.ema(closes, 30)
 
     def _sopr_proxy(mvrv_val, price, ema30_val):
@@ -254,6 +278,19 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         # BATCH fetch — one call for all metrics, daily guard active
         bg = bg_metrics.get_all_metrics_today(target_date=today)
 
+        # --- MVRV (if BG has fresher value, override) ---
+        if not math.isnan(bg.get('mvrv', float('nan'))):
+            bg_mvrv_val = bg['mvrv']
+            bg_mvrv_src = bg.get('mvrv_source', 'BG')
+            # Only override if section 4 used a lower-priority source
+            if mvrv_source != 'BG' and bg_mvrv_src == 'BG':
+                mvrv_val = bg_mvrv_val
+                mvrv_source = 'BG'
+                # Recompute derived values with BG MVRV
+                nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 else 0
+                realized_price = price / mvrv_val if mvrv_val > 0 else realized_price
+                print(f'[BOT] MVRV upgraded from BG: {mvrv_val:.4f}')
+
         # --- SOPR ---
         if not math.isnan(bg.get('sth_sopr', float('nan'))):
             sopr = bg['sth_sopr']
@@ -286,7 +323,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         sopr_source = 'proxy-mvrv'
         lth_source = 'proxy-rp*1.15'
 
-    print(f'[BOT] MVRV={mvrv_val:.3f} Pct={mvrv_pct:.3f} Z={mvrv_z:.2f} NUPL={nupl:.3f}')
+    print(f'[BOT] MVRV={mvrv_val:.3f} ({mvrv_source}) Pct={mvrv_pct:.3f} Z={mvrv_z:.2f} NUPL={nupl:.3f}')
 
     # ── 5. Get exchange balances ──
     # ╔═══════════════════════════════════════════════════════════════╗
@@ -497,6 +534,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     bot_state['last_indicators'] = {
         'price': round(price, 2),
         'mvrv': round(mvrv_val, 3),
+        'mvrv_source': mvrv_source,
         'mvrv_pct': round(mvrv_pct, 3),
         'mvrv_z': round(mvrv_z, 2),
         'rsi': round(rsi_val, 1),
@@ -683,18 +721,36 @@ def run_demo(exchange, demo_state: dict, project_root: str,
 
     print(f'[DEMO] SMA200={sma_200:,.2f} RSI={rsi_val:.1f} MACD_H={macd_h:.4f}')
 
-    # ── 4. Get MVRV ──
-    mvrv_val = strategy.get_mvrv_for_date(today)
+    # ── 4. Get MVRV — try BG cache first, then embedded, then web ──
+    mvrv_val = float('nan')
+    mvrv_source = 'N/A'
+
+    try:
+        from . import bg_metrics
+        bg_early = bg_metrics.get_all_metrics_today(target_date=today)
+        bg_mvrv = bg_early.get('mvrv', float('nan'))
+        if not math.isnan(bg_mvrv):
+            mvrv_val = bg_mvrv
+            mvrv_source = bg_early.get('mvrv_source', 'BG')
+            print(f'[DEMO] MVRV from BG: {mvrv_val:.4f} ({mvrv_source})')
+    except ImportError:
+        pass
+
     if math.isnan(mvrv_val):
-        print(f'[DEMO] No embedded MVRV for {today}, trying web fallback...')
-        from . import mvrv_fetcher
-        web_mvrv, web_date, web_source = mvrv_fetcher.fetch_mvrv_from_web()
-        if web_mvrv is not None:
-            mvrv_val = web_mvrv
-            print(f'[DEMO] Web MVRV: {web_mvrv:.4f}')
+        mvrv_val = strategy.get_mvrv_for_date(today)
+        if not math.isnan(mvrv_val):
+            mvrv_source = 'embedded'
         else:
-            print(f'[DEMO] WARNING: No MVRV data. Skipping.')
-            return demo_state
+            print(f'[DEMO] No embedded MVRV for {today}, trying web fallback...')
+            from . import mvrv_fetcher
+            web_mvrv, web_date, web_source = mvrv_fetcher.fetch_mvrv_from_web()
+            if web_mvrv is not None:
+                mvrv_val = web_mvrv
+                mvrv_source = web_source
+                print(f'[DEMO] Web MVRV: {web_mvrv:.4f}')
+            else:
+                print(f'[DEMO] WARNING: No MVRV data. Skipping.')
+                return demo_state
 
     mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val)
     mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val)
@@ -727,6 +783,16 @@ def run_demo(exchange, demo_state: dict, project_root: str,
         from . import bg_metrics
         bg = bg_metrics.get_all_metrics_today(target_date=today)
 
+        # MVRV upgrade from BG if applicable
+        if not math.isnan(bg.get('mvrv', float('nan'))):
+            bg_mvrv_val = bg['mvrv']
+            bg_mvrv_src = bg.get('mvrv_source', 'BG')
+            if mvrv_source != 'BG' and bg_mvrv_src == 'BG':
+                mvrv_val = bg_mvrv_val
+                mvrv_source = 'BG'
+                nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 else 0
+                realized_price = price / mvrv_val if mvrv_val > 0 else realized_price
+
         if not math.isnan(bg.get('sth_sopr', float('nan'))):
             sopr = bg['sth_sopr']
             sopr_source = 'BG'
@@ -753,7 +819,7 @@ def run_demo(exchange, demo_state: dict, project_root: str,
     print(f'[DEMO] STH-SOPR={sopr:.4f} ({sopr_source}) '
           f'LTH-RP={lth_rp:,.2f} ({lth_source}) '
           f'RP={realized_price:,.2f} ({rp_source})')
-    print(f'[DEMO] MVRV={mvrv_val:.3f} Pct={mvrv_pct:.3f} Z={mvrv_z:.2f}')
+    print(f'[DEMO] MVRV={mvrv_val:.3f} ({mvrv_source}) Pct={mvrv_pct:.3f} Z={mvrv_z:.2f} NUPL={nupl:.3f}')
 
     # ── 5. Convert budget ──
     base_budget = config.get_daily_budget()
