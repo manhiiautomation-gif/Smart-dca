@@ -26,3 +26,27 @@ Stage Summary:
 - U11 (Next Run): เพิ่ม "รันถัดไป: 00:10 น." ใน System Status + Onboarding
 - U12 (Contrast): ปรับ --text-dim จาก #8b949e → #9da5ae
 - ผลลัพธ์: dashboard/dist/index.html (51,206 bytes)
+
+---
+Task ID: 1
+Agent: main
+Task: Optimize BGeometrics API usage - batch fetch, daily guard, fallback for all indicators
+
+Work Log:
+- Analyzed current API usage: 3 separate get_*() calls per bot run, each loading cache independently
+- Added get_all_metrics_today() to bg_metrics.py with in-memory daily snapshot guard
+- First run/day: max 3 API calls (1 per metric, shared cache); subsequent runs: 0 API calls
+- Fixed daily guard to correctly update sopr_source when reusing snapshot
+- Fixed no-token mode to still read from disk cache
+- Updated engine.py live section: replaced 3 separate calls with 1 batch call
+- Updated engine.py demo section: same batch pattern
+- Added LTH Realized Price fallback: realized_price * 1.15
+- Added rp_source, lth_source to state for dashboard visibility
+- Verified with import test and batch test
+- Committed and pushed to main
+
+Stage Summary:
+- bg_metrics.py: new get_all_metrics_today() + invalidate_daily_snapshot()
+- engine.py: both live and demo sections use batch fetch + full fallback chain
+- API usage reduced from 3 calls/run to 3 calls/day (first run) then 0 calls/day
+- All 5 on-chain indicators now have fallback calculation chains
