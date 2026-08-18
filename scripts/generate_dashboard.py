@@ -1205,7 +1205,7 @@ def build_html(**kw) -> str:
                 </div>
                 <div class="ind-item">
                     <span class="label">SOPR</span>
-                    <span class="val">{fmt_num(sopr, 3)} <small class="tag neutral sopr-src">{('โปรดักซี่' if sopr_source == 'proxy' else sopr_source)}</small></span>
+                    <span class="val">{fmt_num(sopr, 3)} <small class="tag neutral sopr-src">{('MVRV-proxy' if 'proxy' in (sopr_source or '') else sopr_source or 'N/A')}</small></span>
                 </div>
                 <div class="ind-item">
                     <span class="label">SMA 200</span>

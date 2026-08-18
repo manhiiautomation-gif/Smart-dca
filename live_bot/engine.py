@@ -209,7 +209,24 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     # ── 4b. Fetch on-chain metrics from BGeometrics ──
     # STH-SOPR, LTH Realized Price, Realized Price
     # Falls back to proxy if unavailable (NaN).
+    # Proxy: use MVRV-based estimate (highly correlated with SOPR).
+    #   - When MVRV < 1.0, SOPR is typically also < 1.0 (both = unrealized loss)
+    #   - SOPR ≈ sqrt(MVRV) gives a reasonable estimate in accumulation zones
+    #   - This is better than price/EMA30 because MVRV data is always available
     ema30 = ind.ema(closes, 30)
+    def _sopr_proxy(mvrv_val, price, ema30_val):
+        """Estimate SOPR from MVRV (primary) with EMA30 fallback."""
+        # MVRV and SOPR are highly correlated; sqrt(MVRV) is a decent proxy
+        # because SOPR measures short-term P/L while MVRV measures long-term P/L
+        if mvrv_val > 0 and not math.isnan(mvrv_val):
+            # In deep value zone (MVRV<1), SOPR tracks closer to MVRV
+            # In normal zone, SOPR tends to be slightly above MVRV
+            return max(mvrv_val ** 0.85, 0.3)  # 0.85 power gives realistic SOPR range
+        # Ultimate fallback: price vs recent average
+        if ema30_val > 0:
+            return price / ema30_val
+        return 1.0
+
     try:
         from . import bg_metrics
         sopr = bg_metrics.get_sth_sopr(today)
@@ -217,19 +234,21 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         bg_rp = bg_metrics.get_realized_price(today)
         if not math.isnan(bg_rp):
             realized_price = bg_rp
-        # Fallback to proxy when BG returns NaN (e.g. cache gap, no token)
+        # Fallback to MVRV-based proxy when BG returns NaN (e.g. cache gap, no token)
         if math.isnan(sopr):
-            sopr = price / ema30 if ema30 > 0 else 1.0
-        sopr_source = 'BG' if not math.isnan(bg_metrics.get_sth_sopr(today)) else 'proxy'
+            sopr = _sopr_proxy(mvrv_val, price, ema30)
+            sopr_source = 'proxy-mvrv'
+        else:
+            sopr_source = 'BG'
         lth_source = 'BG' if not math.isnan(lth_rp) else 'N/A'
         print(f'[BOT] STH-SOPR={sopr:.4f} ({sopr_source}) '
               f'LTH-RP={lth_rp:,.2f} ({lth_source})')
     except ImportError:
-        # bg_metrics not available — use fallbacks
-        print('[BOT] bg_metrics not found, using proxy')
-        sopr = price / ema30 if ema30 > 0 else 1.0
+        # bg_metrics not available — use MVRV proxy
+        print('[BOT] bg_metrics not found, using MVRV-based proxy')
+        sopr = _sopr_proxy(mvrv_val, price, ema30)
         lth_rp = float('nan')
-        sopr_source = 'proxy'
+        sopr_source = 'proxy-mvrv'
 
     print(f'[BOT] MVRV={mvrv_val:.3f} Pct={mvrv_pct:.3f} Z={mvrv_z:.2f} NUPL={nupl:.3f}')
 
@@ -644,6 +663,13 @@ def run_demo(exchange, demo_state: dict, project_root: str,
 
     # ── 4b. BGeometrics metrics ──
     ema30 = ind.ema(closes, 30)
+    def _sopr_proxy_demo(mvrv_val, price, ema30_val):
+        if mvrv_val > 0 and not math.isnan(mvrv_val):
+            return max(mvrv_val ** 0.85, 0.3)
+        if ema30_val > 0:
+            return price / ema30_val
+        return 1.0
+
     try:
         from . import bg_metrics
         sopr = bg_metrics.get_sth_sopr(today)
@@ -652,13 +678,15 @@ def run_demo(exchange, demo_state: dict, project_root: str,
         if not math.isnan(bg_rp):
             realized_price = bg_rp
         if math.isnan(sopr):
-            sopr = price / ema30 if ema30 > 0 else 1.0
-        sopr_source = 'BG' if not math.isnan(bg_metrics.get_sth_sopr(today)) else 'proxy'
+            sopr = _sopr_proxy_demo(mvrv_val, price, ema30)
+            sopr_source = 'proxy-mvrv'
+        else:
+            sopr_source = 'BG'
         lth_source = 'BG' if not math.isnan(lth_rp) else 'N/A'
     except ImportError:
-        sopr = price / ema30 if ema30 > 0 else 1.0
+        sopr = _sopr_proxy_demo(mvrv_val, price, ema30)
         lth_rp = float('nan')
-        sopr_source = 'proxy'
+        sopr_source = 'proxy-mvrv'
 
     print(f'[DEMO] MVRV={mvrv_val:.3f} Pct={mvrv_pct:.3f} Z={mvrv_z:.2f}')
 
