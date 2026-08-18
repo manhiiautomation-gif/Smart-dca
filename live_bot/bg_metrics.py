@@ -14,10 +14,20 @@ Cache strategy:
   - Live mode: fetches only if cache newest date < yesterday
   - Backtest: uses full cache as-is, fetches only missing tail
   - Rate limit: max 10 req/hr on free tier, tracked via timestamps
+  - DAILY GUARD: get_all_metrics_today() fetches once per UTC day,
+    then reuses in-memory snapshot for subsequent calls (0 API calls)
+  - TYPICAL USAGE: 3 API calls/day (1 per metric) on first run,
+    0 API calls on subsequent runs the same day
 
 Usage:
+    # RECOMMENDED: batch fetch (once per day, minimal API calls)
+    from live_bot.bg_metrics import get_all_metrics_today
+    m = get_all_metrics_today()  # {sth_sopr, lth_realized_price, realized_price, sopr_source}
+    sopr_val = m['sth_sopr']
+
+    # Legacy single lookups (still work but load cache independently)
     from live_bot.bg_metrics import get_sth_sopr, get_lth_realized_price, get_realized_price
-    val = get_sth_sopr(date.today())  # returns float or NaN
+    val = get_sth_sopr(date.today())
 
     # Backtest: pre-load full history
     from live_bot.bg_metrics import ensure_cache, get_cached_series
@@ -191,7 +201,142 @@ def _parse_series(raw: List[dict], json_key: str, metric_name: str = '') -> Dict
     return result
 
 
-# ── Public API: single-value lookups ────────────────────────────────────
+# ── Public API: batch fetch (1 API call per metric, once per day) ─────
+
+# In-memory daily snapshot: once populated, reused for the rest of the day
+_daily_snapshot: Optional[Dict[str, float]] = None
+_daily_snapshot_date: Optional[str] = None
+
+
+def get_all_metrics_today(
+    target_date=None,
+    token=None,
+    force_refetch: bool = False,
+) -> Dict[str, float]:
+    """Fetch ALL on-chain metrics for today in ONE batch.
+
+    Daily guard: if we already fetched today (same UTC date), returns
+    cached snapshot immediately — ZERO API calls.
+
+    Args:
+        target_date: date to look up (default: today)
+        token: BGeometrics token (default: from env)
+        force_refetch: ignore daily guard, re-fetch from API
+
+    Returns:
+        Dict with keys: sth_sopr, lth_realized_price, realized_price, sopr_source
+        Values are float (NaN if unavailable).
+    """
+    global _daily_snapshot, _daily_snapshot_date
+
+    if target_date is None:
+        target_date = date.today()
+    today_utc = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+
+    # Daily guard: reuse today's snapshot
+    if (not force_refetch
+            and _daily_snapshot is not None
+            and _daily_snapshot_date == today_utc):
+        print(f'[BG] Using today\'s snapshot (fetched at {_daily_snapshot_date})')
+        result = {}
+        for metric_name in ['sth_sopr', 'lth_realized_price', 'realized_price']:
+            val = _lookup_from_snapshot(metric_name, target_date)
+            result[metric_name] = val
+        # Update source based on whether we actually found values
+        if not math.isnan(result.get('sth_sopr', float('nan'))):
+            result['sopr_source'] = 'cache'
+        else:
+            result['sopr_source'] = _daily_snapshot.get('sopr_source', 'N/A')
+        return result
+
+    tkn = token or _TOKEN
+    metrics_to_fetch = ['sth_sopr', 'lth_realized_price', 'realized_price']
+
+    if not tkn:
+        print('[BG] No BGEOMETRICS_TOKEN — reading from cache only')
+        cache = _load_cache()
+        snapshot = {}
+        for metric_name in ['sth_sopr', 'lth_realized_price', 'realized_price']:
+            series = cache.get('metrics', {}).get(metric_name, {})
+            snapshot[metric_name] = _lookup(series, target_date) if series else float('nan')
+        if not math.isnan(snapshot.get('sth_sopr', float('nan'))):
+            snapshot['sopr_source'] = 'cache'
+        else:
+            snapshot['sopr_source'] = 'no-token'
+        _daily_snapshot = snapshot
+        _daily_snapshot_date = today_utc
+        return dict(snapshot)
+
+    # Load cache ONCE for all metrics
+    cache = _load_cache()
+    api_calls_made = 0
+    series_cache = {}  # metric_name -> {date_str: float}
+
+    for metric_name in metrics_to_fetch:
+        metric_data = cache.get('metrics', {}).get(metric_name, {})
+
+        if not _needs_incremental_fetch(metric_data):
+            newest = max(metric_data.keys()) if metric_data else 'N/A'
+            print(f'[BG] {metric_name}: cache fresh ({len(metric_data)}d, newest={newest})')
+            series_cache[metric_name] = metric_data
+            continue
+
+        # Fetch from API
+        endpoint, json_key = _METRIC_DEFS[metric_name]
+        newest_cached = max(metric_data.keys()) if metric_data else 'empty'
+        print(f'[BG] {metric_name}: cache ends {newest_cached}, fetching...')
+        raw = _fetch_endpoint(endpoint, tkn)
+        if raw is None:
+            print(f'[BG] {metric_name}: fetch failed, using stale cache')
+            series_cache[metric_name] = metric_data
+            continue
+
+        api_calls_made += 1
+        new_series = _parse_series(raw, json_key, metric_name=metric_name)
+        if new_series:
+            merged = _merge_and_trim(metric_data, new_series, metric_name, cache)
+            series_cache[metric_name] = merged
+            cache = _load_cache()  # re-read after save
+        else:
+            series_cache[metric_name] = metric_data
+
+    # Build snapshot with values for target_date
+    snapshot = {}
+    for metric_name in metrics_to_fetch:
+        series = series_cache.get(metric_name, {})
+        snapshot[metric_name] = _lookup(series, target_date) if series else float('nan')
+    snapshot['sopr_source'] = 'BG' if not math.isnan(snapshot.get('sth_sopr', float('nan'))) else 'cache-stale'
+
+    # Store in memory for the rest of the day
+    _daily_snapshot = snapshot
+    _daily_snapshot_date = today_utc
+
+    print(f'[BG] Batch complete: {api_calls_made} API calls, '
+          f'snapshot cached for {today_utc}')
+    return dict(snapshot)
+
+
+def _lookup_from_snapshot(metric_name: str, target_date) -> float:
+    """Look up a metric value from the full cache for a specific date.
+
+    Used by get_all_metrics_today() when reusing a daily snapshot
+    to get the value for a possibly different target_date.
+    """
+    cache = _load_cache()
+    series = cache.get('metrics', {}).get(metric_name, {})
+    if series:
+        return _lookup(series, target_date)
+    return float('nan')
+
+
+def invalidate_daily_snapshot():
+    """Force next call to get_all_metrics_today() to re-fetch from API."""
+    global _daily_snapshot, _daily_snapshot_date
+    _daily_snapshot = None
+    _daily_snapshot_date = None
+
+
+# ── Public API: single-value lookups (legacy, still work) ──────────────
 
 def get_sth_sopr(target_date, cache=None, token=None) -> float:
     """Get STH-SOPR for a specific date. Returns NaN if unavailable."""

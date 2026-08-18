@@ -206,49 +206,85 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 else 0
     realized_price = price / mvrv_val if mvrv_val > 0 else float('nan')
 
-    # ── 4b. Fetch on-chain metrics from BGeometrics ──
-    # STH-SOPR, LTH Realized Price, Realized Price
-    # Falls back to proxy if unavailable (NaN).
-    # Proxy: use MVRV-based estimate (highly correlated with SOPR).
-    #   - When MVRV < 1.0, SOPR is typically also < 1.0 (both = unrealized loss)
-    #   - SOPR ≈ sqrt(MVRV) gives a reasonable estimate in accumulation zones
-    #   - This is better than price/EMA30 because MVRV data is always available
+    # ── 4b. Fetch on-chain metrics from BGeometrics (BATCH) ──
+    # Uses get_all_metrics_today() which:
+    #   - Fetches ALL 3 metrics in one pass (1 cache load/save cycle)
+    #   - Daily guard: if already fetched today, returns snapshot (0 API calls)
+    #   - Typical: 3 API calls on first run/day, 0 on subsequent runs
+    #
+    # Fallback chain for EACH indicator when API/cache fails:
+    #   SOPR:            BG cache → MVRV proxy (mvrv^0.85) → price/ema30
+    #   Realized Price:  BG cache → price/mvrv
+    #   LTH Realized P:  BG cache → realized_price * 1.15 (LTH holders cost basis)
+    #   NUPL:            1 - 1/mvrv (always computable if MVRV available)
+    #   MVRV:            embedded history → CoinMetrics → ahasignals
     ema30 = ind.ema(closes, 30)
+
     def _sopr_proxy(mvrv_val, price, ema30_val):
         """Estimate SOPR from MVRV (primary) with EMA30 fallback."""
-        # MVRV and SOPR are highly correlated; sqrt(MVRV) is a decent proxy
-        # because SOPR measures short-term P/L while MVRV measures long-term P/L
         if mvrv_val > 0 and not math.isnan(mvrv_val):
-            # In deep value zone (MVRV<1), SOPR tracks closer to MVRV
-            # In normal zone, SOPR tends to be slightly above MVRV
-            return max(mvrv_val ** 0.85, 0.3)  # 0.85 power gives realistic SOPR range
-        # Ultimate fallback: price vs recent average
+            return max(mvrv_val ** 0.85, 0.3)
         if ema30_val > 0:
             return price / ema30_val
         return 1.0
 
+    def _lth_rp_proxy(realized_price_val, price, mvrv_val):
+        """Estimate LTH Realized Price from Realized Price.
+
+        LTH holders have higher cost basis than overall realized price.
+        Historically LTH-RP ≈ Realized Price * 1.10-1.20.
+        """
+        if not math.isnan(realized_price_val) and realized_price_val > 0:
+            return realized_price_val * 1.15
+        # Derive from MVRV if no realized price
+        if mvrv_val > 0 and not math.isnan(mvrv_val) and price > 0:
+            est_rp = price / mvrv_val
+            return est_rp * 1.15
+        return float('nan')
+
+    # Initialize with NaN
+    sopr = float('nan')
+    lth_rp = float('nan')
+    sopr_source = 'N/A'
+    lth_source = 'N/A'
+    rp_source = 'N/A'
+
     try:
         from . import bg_metrics
-        sopr = bg_metrics.get_sth_sopr(today)
-        lth_rp = bg_metrics.get_lth_realized_price(today)
-        bg_rp = bg_metrics.get_realized_price(today)
-        if not math.isnan(bg_rp):
-            realized_price = bg_rp
-        # Fallback to MVRV-based proxy when BG returns NaN (e.g. cache gap, no token)
-        if math.isnan(sopr):
+        # BATCH fetch — one call for all metrics, daily guard active
+        bg = bg_metrics.get_all_metrics_today(target_date=today)
+
+        # --- SOPR ---
+        if not math.isnan(bg.get('sth_sopr', float('nan'))):
+            sopr = bg['sth_sopr']
+            sopr_source = 'BG'
+        else:
             sopr = _sopr_proxy(mvrv_val, price, ema30)
             sopr_source = 'proxy-mvrv'
+
+        # --- Realized Price ---
+        if not math.isnan(bg.get('realized_price', float('nan'))):
+            realized_price = bg['realized_price']
+            rp_source = 'BG'
+        # else: keep the MVRV-derived realized_price from section 4 above
+
+        # --- LTH Realized Price ---
+        if not math.isnan(bg.get('lth_realized_price', float('nan'))):
+            lth_rp = bg['lth_realized_price']
+            lth_source = 'BG'
         else:
-            sopr_source = 'BG'
-        lth_source = 'BG' if not math.isnan(lth_rp) else 'N/A'
+            lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val)
+            lth_source = 'proxy-rp*1.15' if not math.isnan(lth_rp) else 'N/A'
+
         print(f'[BOT] STH-SOPR={sopr:.4f} ({sopr_source}) '
-              f'LTH-RP={lth_rp:,.2f} ({lth_source})')
+              f'LTH-RP={lth_rp:,.2f} ({lth_source}) '
+              f'RP={realized_price:,.2f} ({rp_source})')
     except ImportError:
-        # bg_metrics not available — use MVRV proxy
-        print('[BOT] bg_metrics not found, using MVRV-based proxy')
+        print('[BOT] bg_metrics not found, using all-proxy mode')
         sopr = _sopr_proxy(mvrv_val, price, ema30)
-        lth_rp = float('nan')
+        lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val)
         sopr_source = 'proxy-mvrv'
+        lth_source = 'proxy-rp*1.15'
 
     print(f'[BOT] MVRV={mvrv_val:.3f} Pct={mvrv_pct:.3f} Z={mvrv_z:.2f} NUPL={nupl:.3f}')
 
@@ -478,6 +514,10 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         'path_taken': decision.get('path_taken', 'none'),
         'in_bear': decision.get('in_bear', False),
         'cooldown': decision.get('new_cooldown', 0),
+        'realized_price': round(realized_price, 2) if not math.isnan(realized_price) else None,
+        'lth_realized_price': round(lth_rp, 2) if not math.isnan(lth_rp) else None,
+        'lth_source': lth_source,
+        'rp_source': rp_source,
     }
     # Store decision details for dashboard (multiplier, amounts)
     buy_amt = decision.get('buy_amount', 0)
@@ -661,7 +701,7 @@ def run_demo(exchange, demo_state: dict, project_root: str,
     nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 else 0
     realized_price = price / mvrv_val if mvrv_val > 0 else float('nan')
 
-    # ── 4b. BGeometrics metrics ──
+    # ── 4b. BGeometrics metrics (BATCH + fallbacks) ──
     ema30 = ind.ema(closes, 30)
     def _sopr_proxy_demo(mvrv_val, price, ema30_val):
         if mvrv_val > 0 and not math.isnan(mvrv_val):
@@ -670,24 +710,49 @@ def run_demo(exchange, demo_state: dict, project_root: str,
             return price / ema30_val
         return 1.0
 
+    def _lth_rp_proxy_demo(realized_price_val, price, mvrv_val):
+        if not math.isnan(realized_price_val) and realized_price_val > 0:
+            return realized_price_val * 1.15
+        if mvrv_val > 0 and not math.isnan(mvrv_val) and price > 0:
+            return (price / mvrv_val) * 1.15
+        return float('nan')
+
+    sopr = float('nan')
+    lth_rp = float('nan')
+    sopr_source = 'N/A'
+    lth_source = 'N/A'
+    rp_source = 'N/A'
+
     try:
         from . import bg_metrics
-        sopr = bg_metrics.get_sth_sopr(today)
-        lth_rp = bg_metrics.get_lth_realized_price(today)
-        bg_rp = bg_metrics.get_realized_price(today)
-        if not math.isnan(bg_rp):
-            realized_price = bg_rp
-        if math.isnan(sopr):
+        bg = bg_metrics.get_all_metrics_today(target_date=today)
+
+        if not math.isnan(bg.get('sth_sopr', float('nan'))):
+            sopr = bg['sth_sopr']
+            sopr_source = 'BG'
+        else:
             sopr = _sopr_proxy_demo(mvrv_val, price, ema30)
             sopr_source = 'proxy-mvrv'
+
+        if not math.isnan(bg.get('realized_price', float('nan'))):
+            realized_price = bg['realized_price']
+            rp_source = 'BG'
+
+        if not math.isnan(bg.get('lth_realized_price', float('nan'))):
+            lth_rp = bg['lth_realized_price']
+            lth_source = 'BG'
         else:
-            sopr_source = 'BG'
-        lth_source = 'BG' if not math.isnan(lth_rp) else 'N/A'
+            lth_rp = _lth_rp_proxy_demo(realized_price, price, mvrv_val)
+            lth_source = 'proxy-rp*1.15' if not math.isnan(lth_rp) else 'N/A'
     except ImportError:
         sopr = _sopr_proxy_demo(mvrv_val, price, ema30)
-        lth_rp = float('nan')
+        lth_rp = _lth_rp_proxy_demo(realized_price, price, mvrv_val)
         sopr_source = 'proxy-mvrv'
+        lth_source = 'proxy-rp*1.15'
 
+    print(f'[DEMO] STH-SOPR={sopr:.4f} ({sopr_source}) '
+          f'LTH-RP={lth_rp:,.2f} ({lth_source}) '
+          f'RP={realized_price:,.2f} ({rp_source})')
     print(f'[DEMO] MVRV={mvrv_val:.3f} Pct={mvrv_pct:.3f} Z={mvrv_z:.2f}')
 
     # ── 5. Convert budget ──
