@@ -239,17 +239,30 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     # Fallback chain for EACH indicator when API/cache fails:
     #   MVRV:            BG cache → embedded history → CoinMetrics → ahasignals
     #   NUPL:            1 - 1/mvrv (always computable if MVRV available)
-    #   SOPR:            BG cache → MVRV proxy (mvrv^0.85) → price/ema30
+    #   SOPR:            BG cache → price/SMA14 → price/SMA30
     #   Realized Price:  BG cache → price/mvrv
     #   LTH Realized P:  BG cache → realized_price * 1.15 (LTH holders cost basis)
-    ema30 = ind.ema(closes, 30)
+    #
+    # SOPR proxy rationale: SOPR = price / avg_cost_basis_of_STH
+    #   SMA14 approximates short-term holder average buy price.
+    #   price > SMA14 → recent buyers in profit → SOPR > 1
+    #   price < SMA14 → recent buyers in loss  → SOPR < 1
+    #   This is far more accurate than mvrv^0.85 which can't produce
+    #   SOPR < 1 when MVRV > 1 (common divergence scenario).
+    sma14 = ind.sma(closes, 14)
+    sma30 = ind.sma(closes, 30)
 
-    def _sopr_proxy(mvrv_val, price, ema30_val):
-        """Estimate SOPR from MVRV (primary) with EMA30 fallback."""
-        if mvrv_val > 0 and not math.isnan(mvrv_val):
-            return max(mvrv_val ** 0.85, 0.3)
-        if ema30_val > 0:
-            return price / ema30_val
+    def _sopr_proxy(price_val, sma14_val, sma30_val):
+        """Estimate SOPR from price vs short-term moving average.
+
+        SOPR measures short-term holder P/L ratio.
+        price / SMA(N) approximates this: if price > recent avg,
+        recent buyers are in profit (SOPR > 1) and vice versa.
+        """
+        if sma14_val > 0 and not math.isnan(sma14_val):
+            return price_val / sma14_val
+        if sma30_val > 0 and not math.isnan(sma30_val):
+            return price_val / sma30_val
         return 1.0
 
     def _lth_rp_proxy(realized_price_val, price, mvrv_val):
@@ -296,8 +309,8 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             sopr = bg['sth_sopr']
             sopr_source = 'BG'
         else:
-            sopr = _sopr_proxy(mvrv_val, price, ema30)
-            sopr_source = 'proxy-mvrv'
+            sopr = _sopr_proxy(price, sma14, sma30)
+            sopr_source = 'proxy-sma14'
 
         # --- Realized Price ---
         if not math.isnan(bg.get('realized_price', float('nan'))):
@@ -318,9 +331,9 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
               f'RP={realized_price:,.2f} ({rp_source})')
     except ImportError:
         print('[BOT] bg_metrics not found, using all-proxy mode')
-        sopr = _sopr_proxy(mvrv_val, price, ema30)
+        sopr = _sopr_proxy(price, sma14, sma30)
         lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val)
-        sopr_source = 'proxy-mvrv'
+        sopr_source = 'proxy-sma14'
         lth_source = 'proxy-rp*1.15'
 
     print(f'[BOT] MVRV={mvrv_val:.3f} ({mvrv_source}) Pct={mvrv_pct:.3f} Z={mvrv_z:.2f} NUPL={nupl:.3f}')
@@ -623,8 +636,8 @@ def _snapshot_indicators(bot_state: dict, price: float, currency: str,
         rsi_val = ind.rsi(closes, 14)
         _, _, macd_h = ind.macd(closes)
         ath = max(closes) if closes else 0
-        ema30 = ind.ema(closes, 30)
-        sopr = price / ema30 if ema30 > 0 else 1.0
+        sma14_quick = ind.sma(closes, 14)
+        sopr = price / sma14_quick if sma14_quick > 0 else 1.0
 
         today = _thai_today()
         mvrv_val = strategy.get_mvrv_for_date(today)
@@ -758,12 +771,13 @@ def run_demo(exchange, demo_state: dict, project_root: str,
     realized_price = price / mvrv_val if mvrv_val > 0 else float('nan')
 
     # ── 4b. BGeometrics metrics (BATCH + fallbacks) ──
-    ema30 = ind.ema(closes, 30)
-    def _sopr_proxy_demo(mvrv_val, price, ema30_val):
-        if mvrv_val > 0 and not math.isnan(mvrv_val):
-            return max(mvrv_val ** 0.85, 0.3)
-        if ema30_val > 0:
-            return price / ema30_val
+    sma14 = ind.sma(closes, 14)
+    sma30 = ind.sma(closes, 30)
+    def _sopr_proxy_demo(price_val, sma14_val, sma30_val):
+        if sma14_val > 0 and not math.isnan(sma14_val):
+            return price_val / sma14_val
+        if sma30_val > 0 and not math.isnan(sma30_val):
+            return price_val / sma30_val
         return 1.0
 
     def _lth_rp_proxy_demo(realized_price_val, price, mvrv_val):
@@ -797,8 +811,8 @@ def run_demo(exchange, demo_state: dict, project_root: str,
             sopr = bg['sth_sopr']
             sopr_source = 'BG'
         else:
-            sopr = _sopr_proxy_demo(mvrv_val, price, ema30)
-            sopr_source = 'proxy-mvrv'
+            sopr = _sopr_proxy_demo(price, sma14, sma30)
+            sopr_source = 'proxy-sma14'
 
         if not math.isnan(bg.get('realized_price', float('nan'))):
             realized_price = bg['realized_price']
@@ -811,9 +825,9 @@ def run_demo(exchange, demo_state: dict, project_root: str,
             lth_rp = _lth_rp_proxy_demo(realized_price, price, mvrv_val)
             lth_source = 'proxy-rp*1.15' if not math.isnan(lth_rp) else 'N/A'
     except ImportError:
-        sopr = _sopr_proxy_demo(mvrv_val, price, ema30)
+        sopr = _sopr_proxy_demo(price, sma14, sma30)
         lth_rp = _lth_rp_proxy_demo(realized_price, price, mvrv_val)
-        sopr_source = 'proxy-mvrv'
+        sopr_source = 'proxy-sma14'
         lth_source = 'proxy-rp*1.15'
 
     print(f'[DEMO] STH-SOPR={sopr:.4f} ({sopr_source}) '
