@@ -9,6 +9,7 @@ Currency Resolution:
 '''
 
 import os
+import requests
 
 
 def _env_float(key: str, default: str) -> float:
@@ -27,7 +28,72 @@ def _env_int(key: str, default: str) -> int:
 #  EXCHANGE & CURRENCY
 # ═══════════════════════════════════════════════════════════════
 EXCHANGE = os.environ.get('EXCHANGE', 'binance').lower()  # 'binance' or 'bitkub'
-USD_THB_RATE = _env_float('USD_THB_RATE', '33.426')
+
+# ═══════════════════════════════════════════════════════════════
+#  LIVE USD/THB RATE from Bitkub USDT_THB ticker
+# ═══════════════════════════════════════════════════════════════
+_FALLBACK_RATE = 33.426
+_usd_thb_cache = {'rate': None, 'date': None}
+
+
+def _fetch_usdt_thb_from_bitkub() -> float:
+    """Fetch live USDT/THB rate from Bitkub public ticker.
+
+    Returns the 'last' price of the USDT_THB pair.
+    Falls back to _FALLBACK_RATE on any error.
+    """
+    try:
+        resp = requests.get(
+            'https://api.bitkub.com/api/v3/market/ticker',
+            params={'sym': 'USDT_THB'},
+            timeout=10
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, list) and data:
+            rate = float(data[0].get('last', 0))
+            if rate > 0:
+                return rate
+    except Exception as e:
+        print(f'[CONFIG] WARNING: Failed to fetch USDT/THB from Bitkub: {e}')
+    return _FALLBACK_RATE
+
+
+def get_usd_thb_rate() -> float:
+    """Get USD/THB rate.
+
+    Priority:
+    1. USD_THB_RATE env var (if explicitly set and non-default)
+    2. Live fetch from Bitkub USDT_THB ticker (refreshed daily)
+    3. Fallback constant 33.426
+    """
+    global _usd_thb_cache
+    from datetime import date as _date
+    today_str = _date.today().isoformat()
+
+    # Check env var first (user override)
+    env_val = os.environ.get('USD_THB_RATE', '')
+    if env_val and env_val.strip():
+        try:
+            return float(env_val)
+        except ValueError:
+            pass
+
+    # Return cached rate if fetched today
+    if (_usd_thb_cache['rate'] is not None
+            and _usd_thb_cache['date'] == today_str):
+        return _usd_thb_cache['rate']
+
+    # Fetch live rate
+    rate = _fetch_usdt_thb_from_bitkub()
+    _usd_thb_cache['rate'] = rate
+    _usd_thb_cache['date'] = today_str
+    print(f'[CONFIG] USD/THB rate: {rate} (source: {"Bitkub" if rate != _FALLBACK_RATE else "fallback"})')
+    return rate
+
+
+# Module-level initial value (lazy — refreshed on first call to get_usd_thb_rate())
+USD_THB_RATE = _env_float('USD_THB_RATE', str(_FALLBACK_RATE))
 
 # Currency derived from exchange — do NOT override manually
 EXCHANGE_CURRENCY_MAP = {
@@ -69,9 +135,12 @@ LOW_BALANCE_DAYS = _env_int('LOW_BALANCE_DAYS', '7')
 #  HELPER: Convert THB amounts to exchange currency
 # ═══════════════════════════════════════════════════════════════
 def thb_to_local(thb_amount: float) -> float:
-    """Convert THB amount to exchange currency (USDT or THB)."""
+    """Convert THB amount to exchange currency (USDT or THB).
+
+    Uses live USD/THB rate from Bitkub when in USDT mode.
+    """
     if CURRENCY == 'USDT':
-        return thb_amount / USD_THB_RATE
+        return thb_amount / get_usd_thb_rate()
     return thb_amount
 
 

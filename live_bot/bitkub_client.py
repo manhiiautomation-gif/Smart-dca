@@ -116,7 +116,7 @@ class BitkubClient:
                 cur = cur.replace(month=cur.month + 1)
 
         base_url = 'https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1d'
-        rate = config.USD_THB_RATE
+        rate = config.get_usd_thb_rate()
         seen = {}
 
         for m in months:

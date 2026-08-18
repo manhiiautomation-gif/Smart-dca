@@ -125,7 +125,8 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             f'Phoenix v5.1 KILLED: {kill_reason}\n'
             f'No trades executed. Dashboard still updated.'
         )
-        bot_state['last_run_date'] = today.isoformat()
+        # Do NOT set last_run_date — a killed run must not consume
+        # the daily idempotency slot so a re-run can still trade.
         bot_state['run_count'] += 1
         return bot_state
 

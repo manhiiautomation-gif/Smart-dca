@@ -33,13 +33,15 @@ def save_kill_switch(ks: dict, path: str = 'kill_switch.json'):
     import tempfile
     dir_name = os.path.dirname(path) or '.'
     os.makedirs(dir_name, exist_ok=True)
+    tmp_path = None
     try:
         fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
         with os.fdopen(fd, 'w') as f:
             json.dump(ks, f, indent=2, default=str)
         os.replace(tmp_path, path)
+        tmp_path = None  # successfully replaced, no cleanup needed
     except Exception:
-        if os.path.exists(tmp_path):
+        if tmp_path is not None and os.path.exists(tmp_path):
             os.unlink(tmp_path)
         raise
 

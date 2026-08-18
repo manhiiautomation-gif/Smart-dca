@@ -181,7 +181,7 @@ def main():
     print(f'  Phoenix v5.1 Live Bot')
     print(f'  Exchange: {exchange_name.upper()}')
     print(f'  Budget: {config.DAILY_BUDGET_THB} THB/day')
-    print(f'  USD/THB: {config.USD_THB_RATE}')
+    print(f'  USD/THB: {config.get_usd_thb_rate()}')
     print(f'  Dry Run: {dry_run}')
     print(f'========================================')
 
