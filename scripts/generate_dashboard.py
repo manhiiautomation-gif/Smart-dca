@@ -965,14 +965,14 @@ def build_html(**kw) -> str:
     </div>
 
     <!-- U2: Onboarding Hero (shown only when empty state) -->
-    {('''<div class="onboarding-hero">
+    {("""<div class="onboarding-hero">
         <div class="onboard-icon">&#128200;</div>
         <div class="onboard-title">ยินดีต้อนรับสู่ Phoenix DCA Bot</div>
         <div class="onboard-desc">
-            ระบบพร้อมทำงานแล้ว — การซื้อครั้งแรกจะเกิดขึ้นอัตโนมัติเมื่อถึงเวลา DCA<br>
-            <small>รันถัดไป: <b>''' + next_run_str + ' น.</b> (' + next_run_day + ')</small>' + ('<br><span style="color:var(--yellow);">&#9888; ขณะนี้อยู่ในโหมดทดสอบ</span>' if dry_run else '') + '''
+            ระบบพร้อมทำงานแล้ว - การซื้อครั้งแรกจะเกิดขึ้นอัตโนมัติเมื่อถึงเวลา DCA<br>
+            <small>รันถัดไป: <b>""" + next_run_str + ' น.</b> (' + next_run_day + ')</small>' + ('<br><span style="color:var(--yellow);">&#9888; ขณะนี้อยู่ในโหมดทดสอบ</span>' if dry_run else '') + """
         </div>
-    </div>''') if is_empty else ''}
+    </div>""") if is_empty else ''}
 
     <!-- Row 1: Portfolio + Kill Switch -->
     <div class="grid grid-2">
