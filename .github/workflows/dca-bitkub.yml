@@ -50,11 +50,24 @@ jobs:
       - name: Set dry-run flag
         id: dr
         run: |
-          if [ "${{ github.event.inputs.dry_run }}" = "false" ]; then
+          # workflow_dispatch: use checkbox input
+          # schedule (cron): use DRY_RUN secret (set 'false' to go live)
+          INPUT="${{ github.event.inputs.dry_run }}"
+          if [ "$INPUT" = "false" ]; then
             echo "val=false" >> "$GITHUB_OUTPUT"
-          else
+          elif [ -n "$INPUT" ]; then
+            # Input is 'true' or other truthy value
             echo "val=true" >> "$GITHUB_OUTPUT"
+          else
+            # No input (cron trigger) — use secret, default false (LIVE)
+            SECRET="${{ secrets.DRY_RUN }}"
+            if [ "$SECRET" = "true" ]; then
+              echo "val=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "val=false" >> "$GITHUB_OUTPUT"
+            fi
           fi
+          echo "dry_run=${{ steps.dr.outputs.val }} (input=$INPUT)"
 
       - name: Run Phoenix v5.1 (with retry)
         env:
