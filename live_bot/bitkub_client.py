@@ -167,7 +167,7 @@ class BitkubClient:
 
     def get_balance(self) -> dict:
         '''Get wallet balances. Returns {'BTC': float, 'THB': float}.'''
-        path = '/api/v3/market/wallet'
+        path = '/api/v3/market/balances'
         body = '{}'
         headers = self._auth_headers(path, body=body)
         resp = requests.post(
@@ -176,8 +176,8 @@ class BitkubClient:
         data = self._check_response(resp, path)
         result_data = data.get('result', data)
         return {
-            'BTC': float(result_data.get('btc', {}).get('available', 0)),
-            'THB': float(result_data.get('thb', {}).get('available', 0)),
+            'BTC': float(result_data.get('BTC', {}).get('available', 0)),
+            'THB': float(result_data.get('THB', {}).get('available', 0)),
         }
 
     def get_balances(self) -> dict:
@@ -186,7 +186,7 @@ class BitkubClient:
         Tries multiple endpoint variants for compatibility.
         Returns {'BTC': float, 'THB': float}.
         '''
-        for path in ['/api/v3/market/wallet', '/api/v3/wallet']:
+        for path in ['/api/v3/market/balances', '/api/v3/market/wallet']:
             body = '{}'
             headers = self._auth_headers(path, body=body)
             try:
@@ -197,8 +197,8 @@ class BitkubClient:
                 result_data = data.get('result', data)
                 if isinstance(result_data, dict):
                     return {
-                        'BTC': float(result_data.get('btc', {}).get('available', 0)),
-                        'THB': float(result_data.get('thb', {}).get('available', 0)),
+                        'BTC': float(result_data.get('BTC', {}).get('available', 0)),
+                        'THB': float(result_data.get('THB', {}).get('available', 0)),
                     }
             except RuntimeError as e:
                 # Application-level error (e.g. invalid signature, rate limit)

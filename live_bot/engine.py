@@ -490,7 +490,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         btc_to_sell = decision['sell_amount'] / price
         if btc_to_sell >= btc_balance * 0.99:
             btc_to_sell = btc_balance * 0.99  # Never sell 100%
-        min_sell = 10.0 if currency == 'USDT' else 100.0
+        min_sell = 10.0 if currency == 'USDT' else 10.0
         if btc_to_sell * price < min_sell:
             print(f'[BOT] Sell amount {btc_to_sell * price:.2f} below minimum {min_sell}. Skipping.')
             decision['sell_amount'] = 0
