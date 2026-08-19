@@ -200,10 +200,12 @@ class BitkubClient:
                         'BTC': float(result_data.get('btc', {}).get('available', 0)),
                         'THB': float(result_data.get('thb', {}).get('available', 0)),
                     }
-            except RuntimeError:
+            except RuntimeError as e:
                 # Application-level error (e.g. invalid signature, rate limit)
+                print(f'[BITKUB] Balance API error ({path}): {e}')
                 raise
-            except Exception:
+            except Exception as e:
+                print(f'[BITKUB] Balance fetch failed ({path}): {type(e).__name__}: {e}')
                 continue
         # All variants failed - return zeros (bot will use 0 balance)
         print('[BITKUB] WARNING: Could not fetch wallet balance. Using 0.')
