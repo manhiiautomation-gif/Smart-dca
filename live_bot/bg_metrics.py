@@ -62,6 +62,10 @@ _METRIC_DEFS = {
     'mvrv_zscore':        ('mvrv-zscore',        'mvrvZscore'),
 }
 
+# Metrics that return only today's value (not full history series).
+# These need min_days=1 to avoid rejecting small but valid caches.
+_SINGLE_VALUE_METRICS = {'mvrv_zscore', 'lth_realized_price', 'sth_realized_price', 'realized_price'}
+
 # For live mode: how far back from today we consider "needs fresh data"
 # If cache newest date >= (today - LIVE_FRESHNESS_DAYS), skip fetch
 _LIVE_FRESHNESS_DAYS = 2  # cache covers up to yesterday = fresh enough
@@ -272,7 +276,7 @@ def get_all_metrics_today(
     for metric_name in metrics_to_fetch:
         metric_data = cache.get('metrics', {}).get(metric_name, {})
 
-        if not _needs_incremental_fetch(metric_data):
+        if not _needs_incremental_fetch(metric_data, metric_name=metric_name):
             newest = max(metric_data.keys()) if metric_data else 'N/A'
             print(f'[BG] {metric_name}: cache fresh ({len(metric_data)}d, newest={newest})')
             series_cache[metric_name] = metric_data
@@ -294,7 +298,9 @@ def get_all_metrics_today(
             merged = _merge_and_trim(metric_data, new_series, metric_name, cache)
             series_cache[metric_name] = merged
             cache = _load_cache()  # re-read after save
+            print(f'[BG] {metric_name}: cached successfully ({len(new_series)} new records)')
         else:
+            print(f'[BG] {metric_name}: API returned no usable data (key={json_key})')
             series_cache[metric_name] = metric_data
 
     # Build snapshot with values for target_date
@@ -304,6 +310,7 @@ def get_all_metrics_today(
         snapshot[metric_name] = _lookup(series, target_date) if series else float('nan')
     snapshot['sopr_source'] = 'BG' if not math.isnan(snapshot.get('sth_sopr', float('nan'))) else 'cache-stale'
     snapshot['mvrv_source'] = 'BG' if not math.isnan(snapshot.get('mvrv', float('nan'))) else 'cache-stale'
+    snapshot['mvrv_z_source'] = 'BG' if not math.isnan(snapshot.get('mvrv_zscore', float('nan'))) else 'embedded-365d'
 
     # Store in memory for the rest of the day
     _daily_snapshot = snapshot
@@ -390,7 +397,7 @@ def _merge_and_trim(metric_data: Dict[str, float], new_series: Dict[str, float],
     return merged
 
 
-def _needs_incremental_fetch(metric_data: Dict[str, float], min_days: int = 30) -> bool:
+def _needs_incremental_fetch(metric_data: Dict[str, float], metric_name: str = '', min_days: int = 30) -> bool:
     """Check if there's a gap between cached data and today.
 
     Historical data is immutable, so we ONLY fetch if the cache doesn't
@@ -398,11 +405,15 @@ def _needs_incremental_fetch(metric_data: Dict[str, float], min_days: int = 30) 
 
     Args:
         metric_data: existing cached {date_str: float} dict
+        metric_name: metric name (used to detect single-value metrics)
         min_days: minimum days of data to consider cache "complete enough"
                    to skip re-fetch. If cache has fewer days, it's likely
                    a failed partial fetch (e.g. only 1 day due to key mismatch).
     """
-    if not metric_data or len(metric_data) < min_days:
+    # Single-value metrics (mvrv_zscore, etc.) only need 1 cached day
+    effective_min = 1 if metric_name in _SINGLE_VALUE_METRICS else min_days
+
+    if not metric_data or len(metric_data) < effective_min:
         return True  # No data or too little — must fetch
 
     newest = max(metric_data.keys())
@@ -431,7 +442,7 @@ def _get_metric_series(metric_name: str, cache=None, token=None) -> Optional[Dic
     metric_data = metrics.get(metric_name, {})
 
     # Check if we need to fetch (only for missing recent data)
-    if not _needs_incremental_fetch(metric_data):
+    if not _needs_incremental_fetch(metric_data, metric_name=metric_name):
         return metric_data
 
     # Need to fetch — but API returns ALL history, we just merge
@@ -525,7 +536,7 @@ def ensure_cache(token=None, metrics=None, force_refetch=False) -> dict:
             # Wipe and re-fetch
             print(f'[BG] {metric_name}: force re-fetching...')
             metric_data = {}
-        elif not _needs_incremental_fetch(metric_data):
+        elif not _needs_incremental_fetch(metric_data, metric_name=metric_name):
             # Cache has recent data — no fetch needed
             newest = max(metric_data.keys()) if metric_data else 'N/A'
             print(f'[BG] {metric_name}: using cache ({len(metric_data)} days, newest={newest})')

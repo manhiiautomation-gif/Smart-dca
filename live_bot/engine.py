@@ -667,6 +667,7 @@ def _snapshot_indicators(bot_state: dict, price: float, currency: str,
         mvrv_val = strategy.get_mvrv_for_date(today)
         mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val) if not math.isnan(mvrv_val) else 0
         mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val) if not math.isnan(mvrv_val) else 0
+        mvrv_z_source = 'embedded-365d'
         nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 and not math.isnan(mvrv_val) else 0
 
         bot_state['last_indicators'] = {
@@ -792,6 +793,7 @@ def run_demo(exchange, demo_state: dict, project_root: str,
 
     mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val)
     mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val)
+    mvrv_z_source = 'embedded-365d'
     nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 else 0
     realized_price = price / mvrv_val if mvrv_val > 0 else float('nan')
 
@@ -821,6 +823,12 @@ def run_demo(exchange, demo_state: dict, project_root: str,
     try:
         from . import bg_metrics
         bg = bg_metrics.get_all_metrics_today(target_date=today)
+
+        # MVRV Z-Score from BG (override embedded if available)
+        if not math.isnan(bg.get('mvrv_zscore', float('nan'))):
+            mvrv_z = bg['mvrv_zscore']
+            mvrv_z_source = bg.get('mvrv_z_source', 'BG')
+            print(f'[DEMO] MVRV Z-Score from BG: {mvrv_z:.3f}')
 
         # MVRV upgrade from BG if applicable
         if not math.isnan(bg.get('mvrv', float('nan'))):
