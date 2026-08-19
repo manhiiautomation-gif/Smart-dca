@@ -27,22 +27,27 @@ class BitkubClient:
         self.api_key = api_key.strip()
         self.api_secret = api_secret.strip()
 
-    def _sign(self, path: str, params: dict = None, body: str = '') -> str:
-        '''HMAC-SHA256 signature: api_key + timestamp + path + body.'''
+    def _sign(self, method: str, path: str, body: str = '') -> tuple:
+        '''HMAC-SHA256 signature per Bitkub docs.
+
+        Formula: HMAC-SHA256(timestamp + method + path + body, apiSecret)
+        Ref: https://api.bitkub.com/docs/authentication
+        '''
         ts = str(int(time.time() * 1000))
-        msg = self.api_key + ts + path + (body or '')
+        msg = ts + method.upper() + path + (body or '')
         sig = hmac.new(
             self.api_secret.encode(), msg.encode(), hashlib.sha256
         ).hexdigest()
         return ts, sig
 
-    def _auth_headers(self, path: str, body: str = '') -> dict:
-        ts, sig = self._sign(path, body=body)
+    def _auth_headers(self, method: str, path: str, body: str = '') -> dict:
+        ts, sig = self._sign(method, path, body=body)
         return {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
             'X-BTK-APIKEY': self.api_key,
             'X-BTK-TIMESTAMP': ts,
-            'X-BTK-SIGNATURE': sig,
-            'Content-Type': 'application/json',
+            'X-BTK-SIGN': sig,
         }
 
     def _check_response(self, resp, path: str = ''):
@@ -168,7 +173,7 @@ class BitkubClient:
     def _get_balances_v4(self) -> dict:
         '''Get balances via v4 GET endpoint (Bitkub recommended).'''
         path = '/api/v4/market/balances'
-        headers = self._auth_headers(path, body='')
+        headers = self._auth_headers('GET', path)
         resp = requests.get(
             f'{self.BASE_URL}{path}', headers=headers, timeout=10
         )
@@ -185,7 +190,7 @@ class BitkubClient:
         '''Get balances via v3 POST endpoint (fallback).'''
         path = '/api/v3/market/balances'
         body = '{}'
-        headers = self._auth_headers(path, body=body)
+        headers = self._auth_headers('POST', path, body=body)
         resp = requests.post(
             f'{self.BASE_URL}{path}', headers=headers, data=body, timeout=10
         )
@@ -230,7 +235,7 @@ class BitkubClient:
         path = '/api/v3/market/place-bid'
         body = '{{"sym":"{}","amt":{:.2f},"rat":0,"typ":"market"}}'.format(
             self.SYMBOL, thb_amount)
-        headers = self._auth_headers(path, body=body)
+        headers = self._auth_headers('POST', path, body=body)
         resp = requests.post(
             f'{self.BASE_URL}{path}', headers=headers, data=body, timeout=15
         )
@@ -274,7 +279,7 @@ class BitkubClient:
         path = '/api/v3/market/place-ask'
         body = '{{"sym":"{}","amt":{:.8f},"rat":0,"typ":"market"}}'.format(
             self.SYMBOL, btc_amount)
-        headers = self._auth_headers(path, body=body)
+        headers = self._auth_headers('POST', path, body=body)
         resp = requests.post(
             f'{self.BASE_URL}{path}', headers=headers, data=body, timeout=15
         )
