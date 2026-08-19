@@ -172,10 +172,13 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     print(f'[BOT] SMA200={sma_200:,.2f} RSI={rsi_val:.1f} MACD_H={macd_h:.4f}')
     print(f'[BOT] MACD_bear={macd_bear} MACD_declining={macd_declining} RSI_div={rsi_div}')
 
-    # ── 4. Get MVRV — try BG cache first, then embedded, then web ──
+    # ── 4. Get MVRV + Z-Score — try BG cache first, then embedded, then web ──
     # Priority: BG cache → embedded history → CoinMetrics → ahasignals
     # NUPL is always derived: 1 - 1/mvrv (no separate fetch needed)
+    # MVRV Z-Score: BG API (mvrv-zscore) → embedded 365d calculation
     mvrv_val = float('nan')
+    mvrv_z = float('nan')
+    mvrv_z_source = 'N/A'
     mvrv_source = 'N/A'
 
     # Try BG cache first (fetched via get_all_metrics_today in section 4b)
@@ -189,6 +192,12 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             mvrv_val = bg_mvrv
             mvrv_source = bg_early.get('mvrv_source', 'BG')
             print(f'[BOT] MVRV from BG cache: {mvrv_val:.4f} ({mvrv_source})')
+        # MVRV Z-Score from BG
+        bg_z = bg_early.get('mvrv_zscore', float('nan'))
+        if not math.isnan(bg_z):
+            mvrv_z = bg_z
+            mvrv_z_source = 'BG'
+            print(f'[BOT] MVRV Z-Score from BG: {mvrv_z:.3f}')
     except ImportError:
         pass
 
@@ -228,21 +237,24 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
                 return bot_state
 
     mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val)
-    mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val)
+    if math.isnan(mvrv_z):
+        mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val)
+        mvrv_z_source = 'embedded-365d'
     nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 else 0
     realized_price = price / mvrv_val if mvrv_val > 0 else float('nan')
 
     # ── 4b. Fetch remaining on-chain metrics from BGeometrics (BATCH) ──
     # Uses get_all_metrics_today() which:
-    #   - Fetches ALL 4 metrics in one pass (1 cache load/save cycle)
+    #   - Fetches ALL 5 metrics in one pass (1 cache load/save cycle)
     #   - Daily guard: if already fetched today, returns snapshot (0 API calls)
-    #   - Typical: 4 API calls on first run/day, 0 on subsequent runs
+    #   - Typical: 5 API calls on first run/day, 0 on subsequent runs
     #
     # MVRV already obtained above from BG (section 4), but batch ensures
     # all other metrics (SOPR, RP, LTH-RP) are also fetched.
     #
     # Fallback chain for EACH indicator when API/cache fails:
     #   MVRV:            BG cache → embedded history → CoinMetrics → ahasignals
+    #   MVRV Z-Score:    BG API (mvrv-zscore) → embedded 365d calculation
     #   NUPL:            1 - 1/mvrv (always computable if MVRV available)
     #   SOPR:            BG cache → price/SMA14 → price/SMA30
     #   Realized Price:  BG cache → price/mvrv
@@ -309,6 +321,12 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
                 realized_price = price / mvrv_val if mvrv_val > 0 else realized_price
                 print(f'[BOT] MVRV upgraded from BG: {mvrv_val:.4f}')
 
+        # --- MVRV Z-Score from BG ---
+        if not math.isnan(bg.get('mvrv_zscore', float('nan'))):
+            mvrv_z = bg['mvrv_zscore']
+            mvrv_z_source = 'BG'
+            print(f'[BOT] MVRV Z-Score from BG batch: {mvrv_z:.3f}')
+
         # --- SOPR ---
         if not math.isnan(bg.get('sth_sopr', float('nan'))):
             sopr = bg['sth_sopr']
@@ -341,7 +359,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         sopr_source = 'proxy-sma14'
         lth_source = 'proxy-rp*1.15'
 
-    print(f'[BOT] MVRV={mvrv_val:.3f} ({mvrv_source}) Pct={mvrv_pct:.3f} Z={mvrv_z:.2f} NUPL={nupl:.3f}')
+    print(f'[BOT] MVRV={mvrv_val:.3f} ({mvrv_source}) Pct={mvrv_pct:.3f} Z={mvrv_z:.2f} ({mvrv_z_source}) NUPL={nupl:.3f}')
 
     # ── 5. Get exchange balances ──
     # ╔═══════════════════════════════════════════════════════════════╗
@@ -555,6 +573,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         'mvrv_source': mvrv_source,
         'mvrv_pct': round(mvrv_pct, 3),
         'mvrv_z': round(mvrv_z, 2),
+        'mvrv_z_source': mvrv_z_source,
         'rsi': round(rsi_val, 1),
         'macd_h': round(macd_h, 4),
         'nupl': round(nupl, 3),
@@ -655,6 +674,7 @@ def _snapshot_indicators(bot_state: dict, price: float, currency: str,
             'mvrv': round(mvrv_val, 3) if not math.isnan(mvrv_val) else None,
             'mvrv_pct': round(mvrv_pct, 3),
             'mvrv_z': round(mvrv_z, 2),
+            'mvrv_z_source': mvrv_z_source,
             'rsi': round(rsi_val, 1),
             'macd_h': round(macd_h, 4),
             'nupl': round(nupl, 3),
@@ -889,6 +909,7 @@ def run_demo(exchange, demo_state: dict, project_root: str,
         'mvrv': round(mvrv_val, 3),
         'mvrv_pct': round(mvrv_pct, 3),
         'mvrv_z': round(mvrv_z, 2),
+        'mvrv_z_source': mvrv_z_source,
         'rsi': round(rsi_val, 1),
         'macd_h': round(macd_h, 4),
         'nupl': round(nupl, 3),

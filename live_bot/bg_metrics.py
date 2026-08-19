@@ -59,6 +59,7 @@ _METRIC_DEFS = {
     'sth_realized_price': ('sth-realized-price', 'sthRealizedPrice'),
     'realized_price':     ('realized-price',     'realizedPrice'),
     'mvrv':               ('mvrv',               'mvrv'),
+    'mvrv_zscore':        ('mvrv-zscore',        'mvrvZscore'),
 }
 
 # For live mode: how far back from today we consider "needs fresh data"
@@ -239,7 +240,7 @@ def get_all_metrics_today(
             and _daily_snapshot_date == today_utc):
         print(f'[BG] Using today\'s snapshot (fetched at {_daily_snapshot_date})')
         result = {}
-        for metric_name in ['sth_sopr', 'lth_realized_price', 'realized_price', 'mvrv']:
+        for metric_name in ['sth_sopr', 'lth_realized_price', 'realized_price', 'mvrv', 'mvrv_zscore']:
             val = _lookup_from_snapshot(metric_name, target_date)
             result[metric_name] = val
         # Update source tags based on whether we actually found values
@@ -248,13 +249,13 @@ def get_all_metrics_today(
         return result
 
     tkn = token or _TOKEN
-    metrics_to_fetch = ['sth_sopr', 'lth_realized_price', 'realized_price', 'mvrv']
+    metrics_to_fetch = ['sth_sopr', 'lth_realized_price', 'realized_price', 'mvrv', 'mvrv_zscore']
 
     if not tkn:
         print('[BG] No BGEOMETRICS_TOKEN — reading from cache only')
         cache = _load_cache()
         snapshot = {}
-        for metric_name in ['sth_sopr', 'lth_realized_price', 'realized_price', 'mvrv']:
+        for metric_name in ['sth_sopr', 'lth_realized_price', 'realized_price', 'mvrv', 'mvrv_zscore']:
             series = cache.get('metrics', {}).get(metric_name, {})
             snapshot[metric_name] = _lookup(series, target_date) if series else float('nan')
         snapshot['sopr_source'] = 'cache' if not math.isnan(snapshot.get('sth_sopr', float('nan'))) else 'no-token'
