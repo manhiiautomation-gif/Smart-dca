@@ -62,9 +62,10 @@ _METRIC_DEFS = {
     'mvrv_zscore':        ('mvrv-zscore',        'mvrvZscore'),
 }
 
-# Metrics that return only today's value (not full history series).
-# These need min_days=1 to avoid rejecting small but valid caches.
-_SINGLE_VALUE_METRICS = {'mvrv_zscore', 'lth_realized_price', 'sth_realized_price', 'realized_price'}
+# Metrics where the API typically returns only a few recent values
+# (not a full multi-year history like STH-SOPR).
+# These use min_days=1 so even a single cached day is considered valid.
+_SINGLE_VALUE_METRICS = {'lth_realized_price', 'sth_realized_price', 'realized_price'}
 
 # For live mode: how far back from today we consider "needs fresh data"
 # If cache newest date >= (today - LIVE_FRESHNESS_DAYS), skip fetch
@@ -525,7 +526,7 @@ def ensure_cache(token=None, metrics=None, force_refetch=False) -> dict:
         return _load_cache()
 
     if metrics is None:
-        metrics = ['sth_sopr', 'lth_realized_price', 'realized_price']
+        metrics = ['sth_sopr', 'lth_realized_price', 'realized_price', 'mvrv', 'mvrv_zscore']
 
     cache = _load_cache()
 
