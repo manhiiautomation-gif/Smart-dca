@@ -24,8 +24,8 @@ class BitkubClient:
     SYMBOL = 'BTC_THB'
 
     def __init__(self, api_key: str, api_secret: str):
-        self.api_key = api_key
-        self.api_secret = api_secret
+        self.api_key = api_key.strip()
+        self.api_secret = api_secret.strip()
 
     def _sign(self, path: str, params: dict = None, body: str = '') -> str:
         '''HMAC-SHA256 signature: api_key + timestamp + path + body.'''
@@ -165,8 +165,24 @@ class BitkubClient:
             result.append({'date': dt, 'close': float(c[4])})
         return result
 
-    def get_balance(self) -> dict:
-        '''Get wallet balances. Returns {'BTC': float, 'THB': float}.'''
+    def _get_balances_v4(self) -> dict:
+        '''Get balances via v4 GET endpoint (Bitkub recommended).'''
+        path = '/api/v4/market/balances'
+        headers = self._auth_headers(path, body='')
+        resp = requests.get(
+            f'{self.BASE_URL}{path}', headers=headers, timeout=10
+        )
+        data = self._check_response(resp, path)
+        result_data = data.get('result', data)
+        if isinstance(result_data, dict):
+            return {
+                'BTC': float(result_data.get('BTC', {}).get('available', 0)),
+                'THB': float(result_data.get('THB', {}).get('available', 0)),
+            }
+        raise RuntimeError(f'Unexpected v4 balances response format')
+
+    def _get_balances_v3(self) -> dict:
+        '''Get balances via v3 POST endpoint (fallback).'''
         path = '/api/v3/market/balances'
         body = '{}'
         headers = self._auth_headers(path, body=body)
@@ -183,31 +199,21 @@ class BitkubClient:
     def get_balances(self) -> dict:
         '''Get wallet balances with multi-endpoint fallback.
 
-        Tries multiple endpoint variants for compatibility.
+        Priority: v4 GET (recommended) > v3 POST (legacy).
         Returns {'BTC': float, 'THB': float}.
         '''
-        for path in ['/api/v3/market/balances', '/api/v3/market/wallet']:
-            body = '{}'
-            headers = self._auth_headers(path, body=body)
-            try:
-                resp = requests.post(
-                    f'{self.BASE_URL}{path}', headers=headers, data=body, timeout=10
-                )
-                data = self._check_response(resp, path)
-                result_data = data.get('result', data)
-                if isinstance(result_data, dict):
-                    return {
-                        'BTC': float(result_data.get('BTC', {}).get('available', 0)),
-                        'THB': float(result_data.get('THB', {}).get('available', 0)),
-                    }
-            except RuntimeError as e:
-                # Application-level error (e.g. invalid signature, rate limit)
-                print(f'[BITKUB] Balance API error ({path}): {e}')
-                raise
-            except Exception as e:
-                print(f'[BITKUB] Balance fetch failed ({path}): {type(e).__name__}: {e}')
-                continue
-        # All variants failed - return zeros (bot will use 0 balance)
+        # Try v4 GET first (Bitkub recommended endpoint)
+        try:
+            return self._get_balances_v4()
+        except Exception as e:
+            print(f'[BITKUB] v4 balances failed: {type(e).__name__}: {e}')
+
+        # Fallback to v3 POST
+        try:
+            return self._get_balances_v3()
+        except Exception as e:
+            print(f'[BITKUB] v3 balances failed: {type(e).__name__}: {e}')
+
         print('[BITKUB] WARNING: Could not fetch wallet balance. Using 0.')
         return {'BTC': 0.0, 'THB': 0.0}
 
