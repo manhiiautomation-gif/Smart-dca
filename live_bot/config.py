@@ -249,7 +249,7 @@ TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
 DRY_RUN = os.environ.get('DRY_RUN', 'false').lower() == 'true'
 DRY_RUN_INITIAL_CASH = _env_float('DRY_RUN_INITIAL_CASH', '10000')
 MIN_BUY_USDT = 10.0   # Binance minimum order
-MIN_BUY_THB = 100.0   # Bitkub minimum order
+MIN_BUY_THB = 10.0    # Bitkub minimum order
 
 # ═══════════════════════════════════════════════════════════════
 #  FEE ASSUMPTIONS
