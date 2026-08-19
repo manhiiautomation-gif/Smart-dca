@@ -53,14 +53,15 @@ class BitkubClient:
     def _check_response(self, resp, path: str = ''):
         '''Check Bitkub API response for application-level errors.
 
-        Bitkub often returns HTTP 200 with error in body:
-            {"error": 42, "message": "insufficient balance"}
-        This method raises RuntimeError for such responses.
+        Bitkub returns HTTP 200 with error in body:
+            {"error": 0, "message": "success", "result": {...}}  ← success
+            {"error": 42, "message": "insufficient balance"}      ← actual error
+        error=0 means success.  Only raise on non-zero error codes.
         Returns the parsed JSON body on success.
         '''
         resp.raise_for_status()
         data = resp.json()
-        if isinstance(data, dict) and 'error' in data:
+        if isinstance(data, dict) and data.get('error', 0) != 0:
             err_code = data['error']
             err_msg = data.get('message', 'Unknown error')
             raise RuntimeError(f'Bitkub API error {err_code}: {err_msg} (path: {path})')
@@ -170,25 +171,15 @@ class BitkubClient:
             result.append({'date': dt, 'close': float(c[4])})
         return result
 
-    def _get_balances_v4(self) -> dict:
-        '''Get balances via v4 GET endpoint (Bitkub recommended).'''
-        path = '/api/v4/market/balances'
-        headers = self._auth_headers('GET', path)
-        resp = requests.get(
-            f'{self.BASE_URL}{path}', headers=headers, timeout=10
-        )
-        data = self._check_response(resp, path)
-        result_data = data.get('result', data)
-        if isinstance(result_data, dict):
-            return {
-                'BTC': float(result_data.get('BTC', {}).get('available', 0)),
-                'THB': float(result_data.get('THB', {}).get('available', 0)),
-            }
-        raise RuntimeError(f'Unexpected v4 balances response format')
+    def get_balances(self) -> dict:
+        '''Get wallet balances via /api/v3/market/wallet (POST, auth required).
 
-    def _get_balances_v3(self) -> dict:
-        '''Get balances via v3 POST endpoint (fallback).'''
-        path = '/api/v3/market/balances'
+        Bitkub response format:
+            {"error": 0, "result": {"THB": 188379.27, "BTC": 8.90397323}}
+        Values are flat numbers, NOT nested dicts.
+        Returns {'BTC': float, 'THB': float}.
+        '''
+        path = '/api/v3/market/wallet'
         body = '{}'
         headers = self._auth_headers('POST', path, body=body)
         resp = requests.post(
@@ -196,31 +187,13 @@ class BitkubClient:
         )
         data = self._check_response(resp, path)
         result_data = data.get('result', data)
+        # Bitkub wallet returns flat numbers: {"BTC": 8.9, "THB": 188379.27}
+        btc = result_data.get('BTC', 0)
+        thb = result_data.get('THB', 0)
         return {
-            'BTC': float(result_data.get('BTC', {}).get('available', 0)),
-            'THB': float(result_data.get('THB', {}).get('available', 0)),
+            'BTC': float(btc) if not isinstance(btc, dict) else float(btc.get('available', 0)),
+            'THB': float(thb) if not isinstance(thb, dict) else float(thb.get('available', 0)),
         }
-
-    def get_balances(self) -> dict:
-        '''Get wallet balances with multi-endpoint fallback.
-
-        Priority: v4 GET (recommended) > v3 POST (legacy).
-        Returns {'BTC': float, 'THB': float}.
-        '''
-        # Try v4 GET first (Bitkub recommended endpoint)
-        try:
-            return self._get_balances_v4()
-        except Exception as e:
-            print(f'[BITKUB] v4 balances failed: {type(e).__name__}: {e}')
-
-        # Fallback to v3 POST
-        try:
-            return self._get_balances_v3()
-        except Exception as e:
-            print(f'[BITKUB] v3 balances failed: {type(e).__name__}: {e}')
-
-        print('[BITKUB] WARNING: Could not fetch wallet balance. Using 0.')
-        return {'BTC': 0.0, 'THB': 0.0}
 
     def market_buy(self, thb_amount: float) -> dict:
         '''Market buy BTC with THB.
