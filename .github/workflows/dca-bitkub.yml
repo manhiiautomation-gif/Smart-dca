@@ -75,7 +75,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           BOT_ENABLED: ${{ secrets.BOT_ENABLED || 'true' }}
           BGEOMETRICS_TOKEN: ${{ secrets.BGEOMETRICS_TOKEN || '' }}
-          DAILY_BUDGET_THB: ${{ github.event.inputs.budget || '100' }}
+          DAILY_BUDGET_THB: ${{ github.event.inputs.budget || secrets.DAILY_BUDGET_THB || '100' }}
           MAX_BUY_THB: ${{ secrets.MAX_BUY_THB || '1000' }}
           MAX_DCA_BUYS_PER_DAY: ${{ secrets.MAX_DCA_BUYS_PER_DAY || '1' }}
           RESERVE_FLOOR: ${{ secrets.RESERVE_FLOOR || '' }}

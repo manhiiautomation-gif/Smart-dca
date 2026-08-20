@@ -101,6 +101,10 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     currency = exchange.currency
     today = _thai_today()
 
+    # ── 0a. Print effective config (for debugging budget/multiplier issues) ──
+    print(f'[BOT] Config: DAILY_BUDGET_THB={config.DAILY_BUDGET_THB} MAX_BUY_THB={config.MAX_BUY_THB} '
+          f'MAX_DCA_BUYS_PER_DAY={config.MAX_DCA_BUYS_PER_DAY}')
+
     # ── 0. Idempotency guard: skip if already ran today (unless --force) ──
     # H1: Uses Thai timezone so daily guard aligns with THB calendar day
     # (cron at 13:00/13:10/13:30 UTC = 20:00/20:10/20:30 THB)
@@ -112,6 +116,33 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     if not force and bot_state.get('last_run_date') == today.isoformat():
         print(f'[BOT] Already ran today ({today} THB). Skipping to prevent duplicate trades.')
         print(f'[BOT] Use --force to override (e.g. for testing).')
+        return bot_state
+
+    # ── 0b. Daily buy count guard (MAX_DCA_BUYS_PER_DAY) ──
+    # This is a SECONDARY guard on top of the idempotency guard above.
+    # It counts actual buys in trade_log.json for today (Thai date),
+    # preventing runaway buys from: manual workflow_dispatch with --force,
+    # stale state from failed git push, or concurrent process race conditions.
+    max_daily_buys = config.MAX_DCA_BUYS_PER_DAY
+    today_str = today.isoformat()
+    try:
+        existing_log = state_mod.load_trade_log(trade_log_path)
+        today_buy_count = sum(
+            1 for t in existing_log
+            if t.get('type') == 'buy' and t.get('date', '').startswith(today_str)
+        )
+    except Exception:
+        today_buy_count = 0
+
+    if not force and today_buy_count >= max_daily_buys:
+        print(f'[BOT] Daily buy limit reached: {today_buy_count}/{max_daily_buys} buys today ({today}). Skipping.')
+        notifier.send_telegram(
+            f'Phoenix v5.1: Daily buy limit BLOCKED {today_buy_count+1}th buy '
+            f'({today_buy_count}/{max_daily_buys} already done today).'
+        )
+        # Still update last_run_date to prevent re-running the full pipeline
+        bot_state['last_run_date'] = today_str
+        bot_state['run_count'] += 1
         return bot_state
 
     # ── -1. Kill Switch Check ──

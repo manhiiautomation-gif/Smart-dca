@@ -40,8 +40,9 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           BOT_ENABLED: ${{ secrets.BOT_ENABLED || 'true' }}
-          DAILY_BUDGET_THB: ${{ github.event.inputs.budget || '100' }}
+          DAILY_BUDGET_THB: ${{ github.event.inputs.budget || secrets.DAILY_BUDGET_THB || '100' }}
           MAX_BUY_THB: ${{ secrets.MAX_BUY_THB || '1000' }}
+          MAX_DCA_BUYS_PER_DAY: ${{ secrets.MAX_DCA_BUYS_PER_DAY || '1' }}
           USD_THB_RATE: ${{ secrets.USD_THB_RATE || '33.426' }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
         run: python live_bot/main.py --exchange binance --state-file live_bot/state.json
