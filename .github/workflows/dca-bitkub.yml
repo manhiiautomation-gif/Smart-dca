@@ -130,20 +130,20 @@ jobs:
           git add live_bot/state.json live_bot/_mvrv_history.py trade_log.json \
                   kill_switch.json dashboard/dist/index.html \
                   live_bot/bg_cache.json live_bot/usd_thb_rate.json 2>/dev/null
-          # Stash any other unstaged changes that would block rebase
-          git stash push -m "auto-stash before push"
           if git diff --staged --quiet; then
             echo "No changes to commit"
-            git stash pop 2>/dev/null || true
           else
+            # Stash only UNSTAGED changes (keep staged intact for commit)
+            git stash push -k -m "auto-stash before push" 2>/dev/null || true
             for i in 1 2 3; do
               git commit -m "bot: bitkub update $(date -u +%Y-%m-%d\ %H:%M\ UTC)" && \
               git pull --rebase && \
               git push && \
               { git stash pop 2>/dev/null || true; } && \
               break || \
-              { sleep 10; git stash pop 2>/dev/null || true; }
+              { sleep 10; }
             done
+            git stash pop 2>/dev/null || true
           fi
 
   deploy:
