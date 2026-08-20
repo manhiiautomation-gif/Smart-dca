@@ -181,23 +181,21 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     mvrv_z_source = 'N/A'
     mvrv_source = 'N/A'
 
-    # Try BG cache first (fetched via get_all_metrics_today in section 4b)
-    # We do a lightweight cache-only check here to decide MVRV early,
-    # then section 4b does the full batch fetch (including MVRV if needed)
+    # Try BG cache ONLY (no API calls) for early MVRV preview.
+    # The actual batch fetch happens later in section 4b.
     try:
         from . import bg_metrics
-        bg_early = bg_metrics.get_all_metrics_today(target_date=today)
-        bg_mvrv = bg_early.get('mvrv', float('nan'))
+        bg_mvrv = bg_metrics.get_cached_value('mvrv', today)
         if not math.isnan(bg_mvrv):
             mvrv_val = bg_mvrv
-            mvrv_source = bg_early.get('mvrv_source', 'BG')
-            print(f'[BOT] MVRV from BG cache: {mvrv_val:.4f} ({mvrv_source})')
-        # MVRV Z-Score from BG
-        bg_z = bg_early.get('mvrv_zscore', float('nan'))
+            mvrv_source = 'BG-cache'
+            print(f'[BOT] MVRV from BG cache: {mvrv_val:.4f}')
+        # MVRV Z-Score from BG cache
+        bg_z = bg_metrics.get_cached_value('mvrv_zscore', today)
         if not math.isnan(bg_z):
             mvrv_z = bg_z
-            mvrv_z_source = 'BG'
-            print(f'[BOT] MVRV Z-Score from BG: {mvrv_z:.3f}')
+            mvrv_z_source = 'BG-cache'
+            print(f'[BOT] MVRV Z-Score from BG cache: {mvrv_z:.3f}')
     except ImportError:
         pass
 
@@ -766,12 +764,11 @@ def run_demo(exchange, demo_state: dict, project_root: str,
 
     try:
         from . import bg_metrics
-        bg_early = bg_metrics.get_all_metrics_today(target_date=today)
-        bg_mvrv = bg_early.get('mvrv', float('nan'))
+        bg_mvrv = bg_metrics.get_cached_value('mvrv', today)
         if not math.isnan(bg_mvrv):
             mvrv_val = bg_mvrv
-            mvrv_source = bg_early.get('mvrv_source', 'BG')
-            print(f'[DEMO] MVRV from BG: {mvrv_val:.4f} ({mvrv_source})')
+            mvrv_source = 'BG-cache'
+            print(f'[DEMO] MVRV from BG cache: {mvrv_val:.4f}')
     except ImportError:
         pass
 

@@ -62,14 +62,16 @@ _METRIC_DEFS = {
     'mvrv_zscore':        ('mvrv-zscore',        'mvrvZscore'),
 }
 
-# Metrics where the API typically returns only a few recent values
-# (not a full multi-year history like STH-SOPR).
-# These use min_days=1 so even a single cached day is considered valid.
-_SINGLE_VALUE_METRICS = {'lth_realized_price', 'sth_realized_price', 'realized_price'}
+# Metrics where the API historically returned only a few recent values.
+# NOTE: BG now returns full history for most metrics.  Keeping sth_realized_price
+# only because it's not used in live mode and rarely needs full history.
+_SINGLE_VALUE_METRICS = {'sth_realized_price'}
 
 # For live mode: how far back from today we consider "needs fresh data"
 # If cache newest date >= (today - LIVE_FRESHNESS_DAYS), skip fetch
-_LIVE_FRESHNESS_DAYS = 2  # cache covers up to yesterday = fresh enough
+# BG API data is inherently 1-2 days behind, so 3 days avoids unnecessary fetches
+# while keeping data within D-2 to D-4 range (acceptable for daily DCA).
+_LIVE_FRESHNESS_DAYS = 3  # cache covers up to yesterday = fresh enough
 
 # Rate limit tracking
 _MAX_REQUESTS_PER_HOUR = 10
@@ -205,6 +207,31 @@ def _parse_series(raw: List[dict], json_key: str, metric_name: str = '') -> Dict
                           f'(expected "{json_key}", got {len(result)} records)')
 
     return result
+
+
+# ── Public API: cache-only lookup (ZERO API calls) ─────────────────
+
+def get_cached_value(metric_name: str, target_date=None) -> float:
+    """Look up a single metric from DISK CACHE ONLY.  Never calls the API.
+
+    Use this for early/preview reads where you want to avoid triggering
+    any network requests.  The actual fetch is deferred to
+    get_all_metrics_today() later in the pipeline.
+
+    Args:
+        metric_name: e.g. 'mvrv', 'mvrv_zscore', 'sth_sopr'
+        target_date: date to look up (default: today)
+
+    Returns:
+        float value, or NaN if not in cache.
+    """
+    if target_date is None:
+        target_date = date.today()
+    cache = _load_cache()
+    series = cache.get('metrics', {}).get(metric_name, {})
+    if not series:
+        return float('nan')
+    return _lookup(series, target_date)
 
 
 # ── Public API: batch fetch (1 API call per metric, once per day) ─────
