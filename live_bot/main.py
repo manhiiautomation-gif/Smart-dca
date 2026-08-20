@@ -54,6 +54,8 @@ def main():
                         help='Path to state JSON file')
     parser.add_argument('--force', '-f', action='store_true',
                         help='Force run even if already ran today (for testing)')
+    parser.add_argument('--refresh-only', '-r', action='store_true',
+                        help='Refresh dashboard data without executing any trades')
     parser.add_argument('--loop', '-l', type=int, default=0,
                         help='Loop mode: run every N minutes (dry-run only, e.g. --loop 10)')
     # Demo portfolio simulation flags
@@ -256,7 +258,18 @@ def main():
     try:
         _acquire_lock()
 
-        if args.loop > 0:
+        # ── REFRESH-ONLY MODE: fetch data + update dashboard, no trades ──
+        if args.refresh_only:
+            print('[BOT] ═══════════════════════════════════════════════════')
+            print('[BOT]   REFRESH-ONLY MODE — NO TRADES')
+            print('[BOT]   Dry Run: {}'.format(dry_run))
+            print('[BOT] ═══════════════════════════════════════════════════')
+            bot_state = engine.refresh_dashboard(
+                exchange, bot_state, dry_run=dry_run,
+                trade_log_path=trade_log_path,
+                kill_switch_path=kill_switch_path,
+            )
+        elif args.loop > 0:
             # ── Loop mode: dry-run testing at N-minute intervals ──
             if not dry_run:
                 print('ERROR: --loop is only allowed in dry-run mode.')

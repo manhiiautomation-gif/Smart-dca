@@ -50,10 +50,14 @@ jobs:
           BITKUB_API_KEY: ${{ secrets.BITKUB_API_KEY }}
           BITKUB_API_SECRET: ${{ secrets.BITKUB_API_SECRET }}
           BOT_ENABLED: 'true'
+          DRY_RUN: ${{ secrets.DRY_RUN || 'false' }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           KILL_REASON: ${{ github.event.inputs.reason }}
           UPDATE_EXCHANGE: ${{ github.event.inputs.exchange || 'bitkub' }}
+          DAILY_BUDGET_THB: ${{ secrets.DAILY_BUDGET_THB || '20' }}
+          MAX_BUY_THB: ${{ secrets.MAX_BUY_THB || '1000' }}
+          MAX_DCA_BUYS_PER_DAY: ${{ secrets.MAX_DCA_BUYS_PER_DAY || '1' }}
         run: |
           ACTION="${{ github.event.inputs.action }}"
 
@@ -64,8 +68,12 @@ jobs:
             echo "[ACTION] Resuming bot (deactivating kill switch)"
             python3 -c 'import json;ks={"enabled":True,"reason":"","activated_at":None,"activated_by":"dashboard"};open("kill_switch.json","w").write(json.dumps(ks,indent=2));print("Kill switch deactivated")'
           elif [ "$ACTION" = "update" ]; then
-            echo "[ACTION] Running bot dry-run on $UPDATE_EXCHANGE + updating dashboard"
-            python live_bot/main.py --exchange "$UPDATE_EXCHANGE" --state-file live_bot/state.json --dry-run || true
+            echo "[ACTION] Refreshing dashboard data on $UPDATE_EXCHANGE (DRY_RUN=$DRY_RUN)"
+            FLAGS="--exchange $UPDATE_EXCHANGE --state-file live_bot/state.json --refresh-only"
+            if [ "$DRY_RUN" = "true" ]; then
+              FLAGS="$FLAGS --dry-run"
+            fi
+            python live_bot/main.py $FLAGS || true
           fi
 
       - name: Generate dashboard

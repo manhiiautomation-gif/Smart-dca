@@ -114,8 +114,91 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     # If 1st run fails (exception/timeout), last_run_date is NOT updated,
     # so the next cron slot proceeds normally.
     if not force and bot_state.get('last_run_date') == today.isoformat():
-        print(f'[BOT] Already ran today ({today} THB). Skipping to prevent duplicate trades.')
+        print(f'[BOT] Already ran today ({today} THB). Skipping TRADE but refreshing dashboard data.')
         print(f'[BOT] Use --force to override (e.g. for testing).')
+        # Still fetch indicators + balances for dashboard (no trading)
+        try:
+            refresh_price = exchange.get_price()
+            refresh_klines = _fetch_price_history_with_dates(exchange)
+            refresh_closes = [k['close'] for k in refresh_klines]
+            if len(refresh_closes) >= 50:
+                r_sma200 = ind.sma(refresh_closes, 200)
+                r_sma365 = ind.sma(refresh_closes, 365)
+                r_rsi = ind.rsi(refresh_closes, 14)
+                _, _, r_macd_h = ind.macd(refresh_closes)
+                r_ath = max(refresh_closes) if refresh_closes else 0
+                r_sma14 = ind.sma(refresh_closes, 14)
+                r_sma30 = ind.sma(refresh_closes, 30)
+                r_macd_bear = ind.macd_cross_bear(ind.compute_all_macd_hist(refresh_closes))
+                r_macd_declining = ind.macd_hist_declining(ind.compute_all_macd_hist(refresh_closes), 4)
+                r_rsi_div = ind.rsi_divergence(refresh_closes, ind.compute_all_rsi(refresh_closes, 14), 40)
+
+                # MVRV
+                r_mvrv = float('nan'); r_mvrv_src = 'N/A'
+                try:
+                    from . import bg_metrics as bg_r
+                    r_bg_mvrv = bg_r.get_cached_value('mvrv', today)
+                    if not math.isnan(r_bg_mvrv):
+                        r_mvrv = r_bg_mvrv; r_mvrv_src = 'BG-cache'
+                except ImportError: pass
+                if math.isnan(r_mvrv):
+                    r_mvrv = strategy.get_mvrv_for_date(today)
+                    r_mvrv_src = 'embedded' if not math.isnan(r_mvrv) else 'N/A'
+                r_mvrv_pct = strategy.compute_mvrv_percentile(today, r_mvrv) if not math.isnan(r_mvrv) else 0
+                r_mvrv_z = strategy.compute_mvrv_zscore(today, r_mvrv) if not math.isnan(r_mvrv) else 0
+                r_nupl = 1.0 - 1.0 / r_mvrv if r_mvrv > 0 and not math.isnan(r_mvrv) else 0
+                r_sopr = refresh_price / r_sma14 if r_sma14 > 0 else 1.0
+                r_rp = refresh_price / r_mvrv if r_mvrv > 0 and not math.isnan(r_mvrv) else float('nan')
+                r_lth_rp = r_rp * 1.15 if not math.isnan(r_rp) else float('nan')
+
+                # Balances
+                if dry_run:
+                    r_btc = bot_state.get('dry_run_btc', 0.0)
+                    r_cash = bot_state.get('dry_run_cash', config.DRY_RUN_INITIAL_CASH)
+                else:
+                    r_btc = _get_btc_balance(exchange)
+                    r_cash = _get_cash_balance(exchange)
+                r_portfolio = r_btc * refresh_price + r_cash
+
+                bot_state['last_indicators'] = {
+                    'price': round(refresh_price, 2),
+                    'mvrv': round(r_mvrv, 3) if not math.isnan(r_mvrv) else None,
+                    'mvrv_source': r_mvrv_src,
+                    'mvrv_pct': round(r_mvrv_pct, 3),
+                    'mvrv_z': round(r_mvrv_z, 2),
+                    'mvrv_z_source': 'embedded-365d',
+                    'rsi': round(r_rsi, 1),
+                    'macd_h': round(r_macd_h, 4),
+                    'nupl': round(r_nupl, 3),
+                    'sopr': round(r_sopr, 3),
+                    'sopr_source': 'proxy-sma14',
+                    'sma_200': round(r_sma200, 2) if not math.isnan(r_sma200) else None,
+                    'sma_365': round(r_sma365, 2) if not math.isnan(r_sma365) else None,
+                    'macd_bear': r_macd_bear,
+                    'macd_declining': r_macd_declining,
+                    'rsi_divergence': r_rsi_div,
+                    'ath': round(r_ath, 2),
+                    'sell_score': bot_state.get('last_indicators', {}).get('sell_score', 0),
+                    'path_taken': bot_state.get('last_indicators', {}).get('path_taken', 'none'),
+                    'in_bear': refresh_price < r_sma200 if not math.isnan(r_sma200) else False,
+                    'cooldown': bot_state.get('cooldown', 0),
+                    'realized_price': round(r_rp, 2) if not math.isnan(r_rp) else None,
+                    'lth_realized_price': round(r_lth_rp, 2) if not math.isnan(r_lth_rp) else None,
+                    'lth_source': 'proxy-rp*1.15',
+                    'rp_source': 'mvrv-derived',
+                }
+                bot_state['last_btc_balance'] = round(r_btc, 8)
+                bot_state['last_cash_balance'] = round(r_cash, 2)
+                bot_state['last_portfolio_value'] = round(r_portfolio, 2)
+                bot_state['last_price'] = round(refresh_price, 2)
+                bot_state['last_exchange_currency'] = currency
+                bot_state['last_exchange_name'] = exchange.__class__.__name__.replace('Client', '').upper()
+                bot_state['last_dry_run'] = dry_run
+                if r_portfolio > bot_state.get('peak_value', 0):
+                    bot_state['peak_value'] = r_portfolio
+                print(f'[BOT] Dashboard data refreshed (skipped trade). Portfolio: {r_portfolio:,.2f} {currency}')
+        except Exception as e:
+            print(f'[BOT] Dashboard refresh failed: {e}')
         return bot_state
 
     # ── 0b. Daily buy count guard (MAX_DCA_BUYS_PER_DAY) ──
@@ -671,6 +754,184 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         print('[BOT] Telegram not configured or failed')
 
     print(f'[BOT] Done. Portfolio: {portfolio:,.2f} {currency}')
+    return bot_state
+
+
+def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
+                      trade_log_path: str = 'trade_log.json',
+                      kill_switch_path: str = 'kill_switch.json') -> dict:
+    '''Refresh dashboard data WITHOUT executing any trades.
+
+    Fetches: price, indicators, MVRV, on-chain metrics, balances.
+    Snapshots everything to state for dashboard generation.
+    Used by dashboard "Update" button — always runs, never trades.
+
+    Returns updated state dict.
+    '''
+    currency = exchange.currency
+    today = _thai_today()
+
+    print(f'[REFRESH] ═══════════════════════════════════════════════════')
+    print(f'[REFRESH]   DASHBOARD REFRESH MODE — NO TRADES')
+    print(f'[REFRESH]   Exchange: {exchange.__class__.__name__} | Dry-run: {dry_run}')
+    print(f'[REFRESH] ═══════════════════════════════════════════════════')
+
+    # ── 1. Fetch current price ──
+    print(f'[REFRESH] Fetching price...')
+    price = exchange.get_price()
+    print(f'[REFRESH] Current price: {price:,.2f} {currency}')
+
+    # ── 2. Fetch price history for indicators ──
+    print('[REFRESH] Fetching price history (500d)...')
+    klines = _fetch_price_history_with_dates(exchange)
+    closes = [k['close'] for k in klines]
+    print(f'[REFRESH] Got {len(closes)} daily closes')
+
+    if len(closes) < 50:
+        print('[REFRESH] ERROR: Not enough price history')
+        return bot_state
+
+    # ── 3. Compute technical indicators ──
+    print('[REFRESH] Computing indicators...')
+    sma_200 = ind.sma(closes, 200)
+    sma_365 = ind.sma(closes, 365)
+    rsi_val = ind.rsi(closes, 14)
+    macd_line, macd_sig, macd_h = ind.macd(closes)
+    macd_hist_series = ind.compute_all_macd_hist(closes)
+    rsi_series = ind.compute_all_rsi(closes, 14)
+    macd_bear = ind.macd_cross_bear(macd_hist_series)
+    macd_declining = ind.macd_hist_declining(macd_hist_series, 4)
+    rsi_div = ind.rsi_divergence(closes, rsi_series, 40)
+    ath = max(closes) if closes else 0
+    sma14 = ind.sma(closes, 14)
+    sma30 = ind.sma(closes, 30)
+    print(f'[REFRESH] SMA200={sma_200:,.2f} RSI={rsi_val:.1f} MACD_H={macd_h:.4f}')
+
+    # ── 4. Get MVRV ──
+    mvrv_val = float('nan')
+    mvrv_z = float('nan')
+    mvrv_z_source = 'N/A'
+    mvrv_source = 'N/A'
+    try:
+        from . import bg_metrics
+        bg_mvrv = bg_metrics.get_cached_value('mvrv', today)
+        if not math.isnan(bg_mvrv):
+            mvrv_val = bg_mvrv
+            mvrv_source = 'BG-cache'
+        bg_z = bg_metrics.get_cached_value('mvrv_zscore', today)
+        if not math.isnan(bg_z):
+            mvrv_z = bg_z
+            mvrv_z_source = 'BG-cache'
+    except ImportError:
+        pass
+    if math.isnan(mvrv_val):
+        mvrv_val = strategy.get_mvrv_for_date(today)
+        mvrv_source = 'embedded' if not math.isnan(mvrv_val) else 'N/A'
+    mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val) if not math.isnan(mvrv_val) else 0
+    if math.isnan(mvrv_z):
+        mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val) if not math.isnan(mvrv_val) else 0
+        mvrv_z_source = 'embedded-365d'
+    nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 and not math.isnan(mvrv_val) else 0
+    realized_price = price / mvrv_val if mvrv_val > 0 and not math.isnan(mvrv_val) else float('nan')
+
+    # ── 4b. Batch on-chain metrics ──
+    def _sopr_proxy(price_val, sma14_val, sma30_val):
+        if sma14_val > 0 and not math.isnan(sma14_val): return price_val / sma14_val
+        if sma30_val > 0 and not math.isnan(sma30_val): return price_val / sma30_val
+        return 1.0
+    def _lth_rp_proxy(rp_val, price, mv):
+        if not math.isnan(rp_val) and rp_val > 0: return rp_val * 1.15
+        if mv > 0 and not math.isnan(mv) and price > 0: return (price / mv) * 1.15
+        return float('nan')
+    rp_source = 'mvrv-derived'
+    sopr = float('nan'); lth_rp = float('nan')
+    sopr_source = 'N/A'; lth_source = 'N/A'
+    try:
+        from . import bg_metrics as bg_m
+        bg = bg_m.get_all_metrics_today(target_date=today)
+        if not math.isnan(bg.get('mvrv', float('nan'))):
+            bg_mvrv_val = bg['mvrv']
+            if bg.get('mvrv_source', 'BG') == 'BG':
+                mvrv_val = bg_mvrv_val; mvrv_source = 'BG'
+                nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 else 0
+                realized_price = price / mvrv_val if mvrv_val > 0 else realized_price
+        if not math.isnan(bg.get('mvrv_zscore', float('nan'))):
+            mvrv_z = bg['mvrv_zscore']; mvrv_z_source = 'BG'
+        if not math.isnan(bg.get('sth_sopr', float('nan'))):
+            sopr = bg['sth_sopr']; sopr_source = 'BG'
+        else:
+            sopr = _sopr_proxy(price, sma14, sma30); sopr_source = 'proxy-sma14'
+        if not math.isnan(bg.get('realized_price', float('nan'))):
+            realized_price = bg['realized_price']; rp_source = 'BG'
+        if not math.isnan(bg.get('lth_realized_price', float('nan'))):
+            lth_rp = bg['lth_realized_price']; lth_source = 'BG'
+        else:
+            lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val)
+            lth_source = 'proxy-rp*1.15'
+    except ImportError:
+        sopr = _sopr_proxy(price, sma14, sma30); sopr_source = 'proxy-sma14'
+        lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val)
+        lth_source = 'proxy-rp*1.15'
+
+    print(f'[REFRESH] MVRV={mvrv_val:.3f} ({mvrv_source}) NUPL={nupl:.3f} SOPR={sopr:.4f} ({sopr_source})')
+
+    # ── 5. Get balances ──
+    if dry_run:
+        btc_balance = bot_state.get('dry_run_btc', 0.0)
+        cash_balance = bot_state.get('dry_run_cash', config.DRY_RUN_INITIAL_CASH)
+        print(f'[REFRESH] DRY-RUN balances: BTC={btc_balance:.8f} Cash={cash_balance:,.2f} {currency}')
+    else:
+        btc_balance = _get_btc_balance(exchange)
+        cash_balance = _get_cash_balance(exchange)
+        print(f'[REFRESH] LIVE balances: BTC={btc_balance:.8f} Cash={cash_balance:,.2f} {currency}')
+    portfolio = btc_balance * price + cash_balance
+
+    # ── 6. Snapshot indicators to state (same format as run_daily) ──
+    bot_state['last_indicators'] = {
+        'price': round(price, 2),
+        'mvrv': round(mvrv_val, 3) if not math.isnan(mvrv_val) else None,
+        'mvrv_source': mvrv_source,
+        'mvrv_pct': round(mvrv_pct, 3),
+        'mvrv_z': round(mvrv_z, 2),
+        'mvrv_z_source': mvrv_z_source,
+        'rsi': round(rsi_val, 1),
+        'macd_h': round(macd_h, 4),
+        'nupl': round(nupl, 3),
+        'sopr': round(sopr, 3) if not math.isnan(sopr) else None,
+        'sopr_source': sopr_source,
+        'sma_200': round(sma_200, 2) if not math.isnan(sma_200) else None,
+        'sma_365': round(sma_365, 2) if not math.isnan(sma_365) else None,
+        'macd_bear': macd_bear,
+        'macd_declining': macd_declining,
+        'rsi_divergence': rsi_div,
+        'ath': round(ath, 2),
+        'sell_score': bot_state.get('last_indicators', {}).get('sell_score', 0),
+        'path_taken': bot_state.get('last_indicators', {}).get('path_taken', 'none'),
+        'in_bear': price < sma_200 if not math.isnan(sma_200) else False,
+        'cooldown': bot_state.get('cooldown', 0),
+        'realized_price': round(realized_price, 2) if not math.isnan(realized_price) else None,
+        'lth_realized_price': round(lth_rp, 2) if not math.isnan(lth_rp) else None,
+        'lth_source': lth_source,
+        'rp_source': rp_source,
+        'refreshed': True,
+    }
+    bot_state['last_btc_balance'] = round(btc_balance, 8)
+    bot_state['last_cash_balance'] = round(cash_balance, 2)
+    bot_state['last_portfolio_value'] = round(portfolio, 2)
+    bot_state['last_price'] = round(price, 2)
+    bot_state['last_exchange_currency'] = currency
+    bot_state['last_exchange_name'] = exchange.__class__.__name__.replace('Client', '').upper()
+    bot_state['last_dry_run'] = dry_run
+
+    # Track peak and drawdown
+    if portfolio > bot_state.get('peak_value', 0):
+        bot_state['peak_value'] = portfolio
+    if bot_state['peak_value'] > 0:
+        dd = (bot_state['peak_value'] - portfolio) / bot_state['peak_value']
+        if dd > bot_state.get('max_drawdown', 0):
+            bot_state['max_drawdown'] = dd
+
+    print(f'[REFRESH] Done. Portfolio: {portfolio:,.2f} {currency} (no trades executed)')
     return bot_state
 
 
