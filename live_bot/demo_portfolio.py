@@ -261,7 +261,7 @@ def process_demo_trade(state: dict, decision: dict, price: float,
     if buy_signal:
         buy_amount = decision['buy_amount']
         buy_attempted = buy_amount  # Track original for status reporting
-        min_buy = 10.0 if currency == 'USDT' else 100.0
+        min_buy = 10.0 if currency == 'USDT' else 10.0
 
         if buy_amount < min_buy:
             reason = f'below_min ({buy_amount:.2f} < {min_buy})'
@@ -338,7 +338,7 @@ def process_demo_trade(state: dict, decision: dict, price: float,
         if btc_to_sell >= state['btc'] * 0.99:
             btc_to_sell = state['btc'] * 0.99
 
-        min_sell = 10.0 if currency == 'USDT' else 100.0
+        min_sell = 10.0 if currency == 'USDT' else 10.0
         if btc_to_sell * price < min_sell:
             reason = f'below_min ({btc_to_sell * price:.2f} < {min_sell})'
             val['skipped_sells_reason'][reason] = val['skipped_sells_reason'].get(reason, 0) + 1

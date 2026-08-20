@@ -12,13 +12,7 @@ import json
 import os
 from datetime import date, datetime, timezone, timedelta
 
-# H1: Thai timezone — must match engine.py
-_THAI_TZ = timezone(timedelta(hours=7))
-
-
-def _thai_today() -> date:
-    """Return today's date in Thai timezone (UTC+7)."""
-    return datetime.now(_THAI_TZ).date()
+from .tz import THAI_TZ, thai_today
 
 
 DEFAULT_STATE = {
@@ -65,7 +59,7 @@ def load_state(path: str) -> dict:
     """Load state from JSON file with shared lock, merging with defaults."""
     lock = _lock_path(path)
     if os.path.exists(path):
-        with open(lock, 'w') as lf:
+        with open(lock, 'a+') as lf:               # D-10: 'a+' not 'w' (don't truncate)
             fcntl.flock(lf, fcntl.LOCK_SH)  # shared lock — allow concurrent reads
             try:
                 with open(path, 'r') as f:
@@ -130,8 +124,8 @@ def update_state_after_run(state: dict, decision: dict,
     This ensures ROI calculations remain accurate after partial sells.
     """
     from datetime import datetime as _dt
-    today = _thai_today().isoformat()
-    now_str = _dt.now(_THAI_TZ).strftime('%Y-%m-%d %H:%M')
+    today = thai_today().isoformat()
+    now_str = _dt.now(THAI_TZ).strftime('%Y-%m-%d %H:%M')
     state['last_run_date'] = today
     state['run_count'] += 1
     state['cooldown'] = decision['new_cooldown']
@@ -165,7 +159,7 @@ def load_trade_log(path: str = 'trade_log.json') -> list:
     """Load trade log from JSON file with shared lock (H4)."""
     lock = path + '.lock'
     if os.path.exists(path):
-        with open(lock, 'w') as lf:
+        with open(lock, 'a+') as lf:               # D-10: 'a+' not 'w' (don't truncate)
             fcntl.flock(lf, fcntl.LOCK_SH)
             try:
                 with open(path, 'r') as f:
@@ -182,7 +176,7 @@ def append_trade_log(log_path: str, trade_type: str, amount: float,
     from datetime import datetime as _dt
     log = load_trade_log(log_path)
     record = {
-        'date': _dt.now(_THAI_TZ).strftime('%Y-%m-%d %H:%M'),
+        'date': _dt.now(THAI_TZ).strftime('%Y-%m-%d %H:%M'),
         'type': trade_type,  # 'buy' or 'sell'
         'amount': round(amount, 2),
         'btc': round(btc_amount, 8),

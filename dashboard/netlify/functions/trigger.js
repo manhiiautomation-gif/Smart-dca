@@ -1,9 +1,34 @@
-const headers = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'Content-Type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Content-Type': 'application/json',
-};
+// S-10: CORS allowlist — replaces the previous static `headers` const with
+// `Access-Control-Allow-Origin: "*"`.
+//
+// Allowlist of dashboard origins. The Netlify dashboard URL is the primary
+// (override via DASHBOARD_URL env var); the GitHub Pages mirror is for
+// redundancy; localhost for dev only.
+//
+// NOTE: Replace the placeholder `https://PLACEHOLDER.netlify.app` after first
+// deployment by setting the `DASHBOARD_URL` Netlify env var to the actual
+// dashboard URL. The same value should also be set in `dashboard/netlify.toml`.
+const ALLOWED_ORIGINS = new Set([
+  process.env.DASHBOARD_URL || 'https://PLACEHOLDER.netlify.app',  // prod (override via env)
+  'https://manhiiautomation-gif.github.io',                        // GitHub Pages mirror
+  'http://localhost:3000',                                          // dev only
+]);
+
+function get_origin(event) {
+  // Netlify normalizes request headers to lowercase, but accept both cases.
+  return (event.headers && (event.headers.origin || event.headers.Origin)) || '';
+}
+
+function cors_headers(origin) {
+  return {
+    // Echo back the origin only if allowlisted; empty string otherwise (browser blocks).
+    'Access-Control-Allow-Origin': ALLOWED_ORIGINS.has(origin) ? origin : '',
+    'Vary': 'Origin',  // critical: response cache key must include origin
+    'Access-Control-Allow-Headers': 'Content-Type',  // S-01 will add X-Phoenix-Signature here
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Content-Type': 'application/json',
+  };
+}
 
 // Simple in-memory rate limiter (per IP)
 const rateLimits = {};
@@ -23,9 +48,20 @@ function isRateLimited(ip) {
 const ALLOWED_ACTIONS = ['update', 'kill', 'resume'];
 
 export const handler = async (event) => {
-  // Handle CORS preflight
+  const origin = get_origin(event);
+  const headers = cors_headers(origin);
+
+  // Handle CORS preflight (always return 204 with CORS headers — even for
+  // disallowed origins, so the browser's preflight sees an empty ACAO and
+  // blocks the subsequent actual request).
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 204, headers };
+  }
+
+  // S-10: reject cross-site requests from untrusted origins BEFORE doing any
+  // work — saves cycles and prevents CSRF in case CORS preflight is bypassed.
+  if (!ALLOWED_ORIGINS.has(origin)) {
+    return { statusCode: 403, headers, body: JSON.stringify({ error: 'Forbidden origin' }) };
   }
 
   // Only POST allowed
@@ -52,9 +88,15 @@ export const handler = async (event) => {
     return { statusCode: 400, headers, body: JSON.stringify({ error: `Invalid action. Allowed: ${ALLOWED_ACTIONS.join(', ')}` }) };
   }
 
-  // Validate reason length for kill action
-  if (action === 'kill' && reason && reason.length > 200) {
-    return { statusCode: 400, headers, body: JSON.stringify({ error: 'Reason too long (max 200 chars)' }) };
+  // S-02 (defense in depth): reject reasons containing HTML/JS metacharacters
+  // or exceeding 200 chars. The Python `activate_kill_switch()` re-validates.
+  if (action === 'kill' && reason) {
+    if (typeof reason !== 'string' || reason.length > 200) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'Reason too long (max 200 chars)' }) };
+    }
+    if (/[<>&"'\/]/.test(reason)) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'Reason contains forbidden characters' }) };
+    }
   }
 
   // Get PAT from environment variable
