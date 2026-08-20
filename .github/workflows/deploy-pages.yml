@@ -12,9 +12,13 @@ on:
         type: boolean
         default: true
         description: 'Skip dashboard regeneration (use committed HTML)'
-  push:
-    branches: [main]
-    paths: ['dashboard/dist/**']
+
+# NOTE: push trigger REMOVED to prevent race condition.
+# deploy-pages is now called ONLY via workflow_call (skip_build=true)
+# from dca-bitkub.yml and dashboard-trigger.yml, which already
+# generate the dashboard before calling this workflow.
+# A stray push trigger was regenerating dashboard from stale
+# committed files, overwriting the live-updated version.
 
 jobs:
   deploy:

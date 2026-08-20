@@ -41,7 +41,7 @@
   "last_portfolio_value": 9998.3,
   "last_price": 2117227.44,
   "last_exchange_currency": "THB",
-  "last_dry_run": true,
+  "last_dry_run": false,
   "dry_run_cash": 9398.5,
   "dry_run_btc": 0.00028329,
   "price_history": [],
