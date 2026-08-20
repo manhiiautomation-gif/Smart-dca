@@ -90,6 +90,8 @@ def generate_dashboard(state_path='live_bot/state.json',
     # Load data
     state = load_state(state_path)
     trade_log = load_trade_log(trade_log_path)
+    # Filter out dry-run trades — only show live trades on dashboard
+    trade_log = [t for t in trade_log if not t.get('dry_run', False)]
     ks_status = get_full_status(kill_switch_path)
     indicators = state.get('last_indicators', {})
     exchange_name = state.get('last_exchange_name', '')

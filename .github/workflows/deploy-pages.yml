@@ -5,7 +5,7 @@ on:
     inputs:
       skip_build:
         type: boolean
-        default: false
+        default: true
   workflow_dispatch:
     inputs:
       skip_build:

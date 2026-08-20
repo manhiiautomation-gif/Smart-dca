@@ -25,6 +25,10 @@ on:
         type: string
         default: 'Manual kill from dashboard'
 
+concurrency:
+  group: dashboard-action
+  cancel-in-progress: false
+
 jobs:
   action:
     runs-on: ubuntu-latest

@@ -14,6 +14,10 @@ on:
         type: number
         default: 100
 
+concurrency:
+  group: binance-dca
+  cancel-in-progress: false
+
 jobs:
   dca:
     runs-on: ubuntu-latest

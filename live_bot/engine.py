@@ -253,6 +253,13 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     price = exchange.get_price()
     print(f'[BOT] Current price: {price:,.2f} {currency}')
 
+    if price <= 0:
+        print(f'[BOT] ERROR: Invalid price from exchange: {price}. Skipping.')
+        notifier.send_telegram(
+            f'Phoenix v5.1 ERROR: Invalid price from exchange: {price}. Skipping.'
+        )
+        return bot_state
+
     # ── 2. Fetch price history for indicators ──
     print('[BOT] Fetching price history (500d)...')
     klines = _fetch_price_history_with_dates(exchange)
@@ -464,8 +471,8 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         print(f'[BOT] STH-SOPR={sopr:.4f} ({sopr_source}) '
               f'LTH-RP={lth_rp:,.2f} ({lth_source}) '
               f'RP={realized_price:,.2f} ({rp_source})')
-    except ImportError:
-        print('[BOT] bg_metrics not found, using all-proxy mode')
+    except Exception as e:
+        print(f'[BOT] BG metrics failed: {e}. Using all-proxy mode')
         sopr = _sopr_proxy(price, sma14, sma30)
         lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val)
         sopr_source = 'proxy-sma14'
@@ -547,6 +554,10 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     sell_btc_sold = 0.0
     buy_cost_actual = 0.0
     sell_proceeds_actual = 0.0
+    trade_attempted = False
+    trade_succeeded = False
+    _original_buy_amt = decision['buy_amount']
+    _original_sell_amt = decision['sell_amount']
 
     # BUY
     if decision['buy_amount'] > 0:
@@ -569,6 +580,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     # Trades are simulated locally with virtual balances only.
     # ═══════════════════════════════════════════════════════════════
     if decision['buy_amount'] > 0 and not dry_run:
+        trade_attempted = True
         print(f'[BOT] LIVE BUY: {decision["buy_amount"]:.2f} {currency} of BTC...')
         try:
             result = exchange.market_buy(decision['buy_amount'])
@@ -580,6 +592,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
                 buy_btc_got = buy_cost_actual / price
             buy_fee = float(result.get('fee', buy_cost_actual * config.BUY_FEE_PCT))
             bot_state['total_btc_bought'] += buy_btc_got
+            trade_succeeded = True
             print(f'[BOT] Bought {buy_btc_got:.8f} BTC for {buy_cost_actual:.2f} {currency} (fee: {buy_fee:.2f})')
             print(f'[BOT] BUY STATUS: SUCCESS')
         except Exception as e:
@@ -607,6 +620,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             print(f'[BOT] Sell amount {btc_to_sell * price:.2f} below minimum {min_sell}. Skipping.')
             decision['sell_amount'] = 0
         else:
+            trade_attempted = True
             print(f'[BOT] LIVE SELL: {btc_to_sell:.8f} BTC (~{decision["sell_amount"]:.2f} {currency})...')
             try:
                 result = exchange.market_sell(btc_to_sell)
@@ -615,7 +629,8 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
                 sell_fee = float(result.get('fee', sell_proceeds_actual * config.SELL_FEE_PCT))
                 bot_state['total_btc_sold'] += sell_btc_sold
                 # Update cash reserve after sell
-                cash_balance += sell_proceeds_actual - sell_fee
+                cash_balance += sell_proceeds_actual
+                trade_succeeded = True
                 print(f'[BOT] Sold {sell_btc_sold:.8f} BTC for {sell_proceeds_actual:.2f} {currency} (fee: {sell_fee:.2f})')
             except Exception as e:
                 print(f'[BOT] SELL ERROR: {e}')
@@ -634,19 +649,27 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         btc_balance=btc_balance, cash_balance=cash_balance,
     )
 
+    # If a trade was attempted but failed (amount zeroed), don't consume daily slot
+    if trade_attempted and not trade_succeeded:
+        bot_state.pop('last_run_date', None)
+        bot_state['run_count'] -= 1  # Revert the increment
+        print(f'[BOT] Trade failed — not consuming daily slot. Cron retry will try again.')
+
     # Record trades in trade log
     if decision['buy_amount'] > 0 and buy_btc_got > 0:
         state_mod.append_trade_log(
             trade_log_path, 'buy', buy_cost_actual, buy_btc_got,
             price, buy_fee,
-            extra={'reserve': round(decision.get('reserve_injection', 0), 2)}
+            extra={'dry_run': dry_run,
+                   'reserve': round(decision.get('reserve_injection', 0), 2)}
         )
 
     if decision['sell_amount'] > 0 and sell_btc_sold > 0:
         state_mod.append_trade_log(
             trade_log_path, 'sell', sell_proceeds_actual, sell_btc_sold,
             price, sell_fee,
-            extra={'path': decision.get('path_taken', ''),
+            extra={'dry_run': dry_run,
+                   'path': decision.get('path_taken', ''),
                    'score': decision.get('sell_score', 0)}
         )
 
@@ -666,9 +689,9 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         # LIVE: Fetch latest real balances from exchange
         current_btc = _get_btc_balance(exchange)
         current_cash = _get_cash_balance(exchange)
-        # Track sell proceeds for reserve
+        # Track sell proceeds for reserve (sell_proceeds_actual is net-of-fee for Bitkub)
         if sell_proceeds_actual > 0:
-            bot_state['sell_proceeds_reserve'] = bot_state.get('sell_proceeds_reserve', 0.0) + sell_proceeds_actual - sell_fee
+            bot_state['sell_proceeds_reserve'] = bot_state.get('sell_proceeds_reserve', 0.0) + sell_proceeds_actual
     portfolio = current_btc * price + current_cash
 
     if portfolio > bot_state['peak_value']:
@@ -780,6 +803,10 @@ def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
     print(f'[REFRESH] Fetching price...')
     price = exchange.get_price()
     print(f'[REFRESH] Current price: {price:,.2f} {currency}')
+
+    if price <= 0:
+        print(f'[REFRESH] ERROR: Invalid price from exchange: {price}. Aborting.')
+        return bot_state
 
     # ── 2. Fetch price history for indicators ──
     print('[REFRESH] Fetching price history (500d)...')

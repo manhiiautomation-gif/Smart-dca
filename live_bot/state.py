@@ -70,6 +70,9 @@ def load_state(path: str) -> dict:
             try:
                 with open(path, 'r') as f:
                     saved = json.load(f)
+            except (json.JSONDecodeError, ValueError) as e:
+                print(f'[STATE] WARNING: Corrupted state file: {e}. Using defaults.')
+                saved = {}
             finally:
                 fcntl.flock(lf, fcntl.LOCK_UN)
         merged = {**DEFAULT_STATE, **saved}

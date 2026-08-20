@@ -119,24 +119,42 @@ jobs:
               json={'chat_id': chat_id, 'text': msg, 'parse_mode': 'HTML'}, timeout=10)
           "
 
-      - name: Generate dashboard
-        run: python scripts/generate_dashboard.py
-
-      - name: Commit and push (with retry)
+      - name: Commit state and trade data (critical)
         run: |
           git config user.name "Phoenix Bot"
           git config user.email "phoenix-bot@users.noreply.github.com"
-          # Stage bot-modified files (state, cache, dashboard)
           git add live_bot/state.json live_bot/_mvrv_history.py trade_log.json \
-                  kill_switch.json dashboard/dist/index.html \
-                  live_bot/bg_cache.json live_bot/usd_thb_rate.json 2>/dev/null
+                  kill_switch.json live_bot/bg_cache.json live_bot/usd_thb_rate.json 2>/dev/null
           if git diff --staged --quiet; then
-            echo "No changes to commit"
+            echo "No state changes to commit"
           else
-            # Stash only UNSTAGED changes (keep staged intact for commit)
             git stash push -k -m "auto-stash before push" 2>/dev/null || true
             for i in 1 2 3; do
-              git commit -m "bot: bitkub update $(date -u +%Y-%m-%d\ %H:%M\ UTC)" && \
+              git commit -m "bot: state update $(date -u +%Y-%m-%d\ %H:%M\ UTC)" && \
+              git pull --rebase && \
+              git push && \
+              { git stash pop 2>/dev/null || true; } && \
+              break || \
+              { sleep 10; }
+            done
+            git stash pop 2>/dev/null || true
+          fi
+
+      - name: Generate dashboard
+        if: always()
+        continue-on-error: true
+        run: python scripts/generate_dashboard.py
+
+      - name: Commit dashboard (non-critical)
+        if: always()
+        run: |
+          git config user.name "Phoenix Bot"
+          git config user.email "phoenix-bot@users.noreply.github.io"
+          git add dashboard/dist/index.html 2>/dev/null
+          if git diff --staged --quiet; then
+            git stash push -k -m "auto-stash before push" 2>/dev/null || true
+            for i in 1 2 3; do
+              git commit -m "bot: dashboard $(date -u +%Y-%m-%d\ %H:%M\ UTC)" && \
               git pull --rebase && \
               git push && \
               { git stash pop 2>/dev/null || true; } && \
