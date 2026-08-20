@@ -1,0 +1,14 @@
+# Phoenix v5.1 — direct dependencies (human-edited).
+# Transitive deps + hashes are auto-generated in requirements.lock by `pip-compile`.
+# Bump constraints here, then run:
+#   pip-compile --generate-hashes --output-file requirements.lock requirements.in
+#
+# This file is the single source of truth for direct deps.
+# live_bot/requirements.txt mirrors these constraints for backwards-compat local installs.
+
+# S-12: requests 2.32.3 fixes CVE-2024-35195 (Session.proxies cert bypass).
+requests>=2.32.3,<3.0
+
+# S-13: numpy 1.26.4 fixes CVE-2021-33430 and CVE-2021-41495.
+# 1.26 is LTS; 2.x has breaking changes (avoid for now).
+numpy>=1.26.4,<3.0

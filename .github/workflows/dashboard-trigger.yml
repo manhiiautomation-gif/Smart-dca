@@ -32,13 +32,15 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
           token: ${{ secrets.GH_PAT }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
         with:
           python-version: '3.11'
+          cache: 'pip'                                   # E-12
+          cache-dependency-path: requirements.lock       # E-09
 
       - name: Install dependencies
         run: pip install -r live_bot/requirements.txt
@@ -59,10 +61,10 @@ jobs:
 
           if [ "$ACTION" = "kill" ]; then
             echo "[ACTION] Activating kill switch: $KILL_REASON"
-            python3 -c 'import json,os;from datetime import datetime,timezone;ks={"enabled":False,"reason":os.environ.get("KILL_REASON","Manual kill from dashboard"),"activated_at":datetime.now(timezone.utc).isoformat(),"activated_by":"dashboard"};open("kill_switch.json","w").write(json.dumps(ks,indent=2));print("Kill switch activated")'
+            python3 -c 'from live_bot.kill_switch import activate_kill_switch; activate_kill_switch(__import__("os").environ.get("KILL_REASON","Manual kill from dashboard"), ks_path="kill_switch.json", activated_by="dashboard")'
           elif [ "$ACTION" = "resume" ]; then
             echo "[ACTION] Resuming bot (deactivating kill switch)"
-            python3 -c 'import json;ks={"enabled":True,"reason":"","activated_at":None,"activated_by":"dashboard"};open("kill_switch.json","w").write(json.dumps(ks,indent=2));print("Kill switch deactivated")'
+            python3 -c 'from live_bot.kill_switch import deactivate_kill_switch; deactivate_kill_switch(ks_path="kill_switch.json", activated_by="dashboard")'
           elif [ "$ACTION" = "update" ]; then
             echo "[ACTION] Running bot dry-run on $UPDATE_EXCHANGE + updating dashboard"
             python live_bot/main.py --exchange "$UPDATE_EXCHANGE" --state-file live_bot/state.json --dry-run || true

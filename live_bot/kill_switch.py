@@ -7,8 +7,12 @@ Engine checks L1 first, then L2. If either is OFF, trading is skipped.
 '''
 
 import json
+import logging
 import os
+import re
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_KILL_SWITCH = {
@@ -18,14 +22,66 @@ DEFAULT_KILL_SWITCH = {
     'activated_by': 'system',
 }
 
+# Reject reasons containing HTML/JS metacharacters at write-time (S-02).
+# Combined with S-01 webhook validation + S-02 dashboard escaping = triple defense.
+_REASON_FORBIDDEN_RE = re.compile(r'[<>&"\'/]')
+_REASON_MAX_LEN = 200
+
+
+def _validate_reason(reason) -> str:
+    """Validate kill-switch reason. Raises ValueError on invalid input.
+
+    S-02: defense in depth — reject any HTML/JS metacharacters at write-time so a
+    compromised webhook (S-01) or a rogue operator cannot inject persistent XSS
+    payloads into the dashboard via kill_switch.json.
+    """
+    if reason is None or reason == '':
+        return ''
+    if not isinstance(reason, str):
+        raise ValueError(f'reason must be a string, got {type(reason).__name__}')
+    if len(reason) > _REASON_MAX_LEN:
+        raise ValueError(f'reason too long ({len(reason)} > {_REASON_MAX_LEN} chars)')
+    if _REASON_FORBIDDEN_RE.search(reason):
+        raise ValueError('reason contains forbidden characters (<>&"\'/)')
+    return reason
+
 
 def load_kill_switch(path: str = 'kill_switch.json') -> dict:
-    """Load kill switch state from JSON file."""
-    if os.path.exists(path):
+    """Load kill switch state from JSON file.
+
+    S-08: fail-safe on malformed JSON — if the file is corrupt, unreadable, or
+    contains a non-dict value, return DEFAULT_KILL_SWITCH (enabled=True) so the
+    bot continues trading. The operator can intervene manually via L1 (BOT_ENABLED
+    env var) or by re-pushing a valid kill_switch.json. We do NOT fail-closed
+    here because L1 is the master switch — L2 corrupting should not halt trading.
+    """
+    try:
         with open(path, 'r') as f:
             saved = json.load(f)
-        return {**DEFAULT_KILL_SWITCH, **saved}
-    return dict(DEFAULT_KILL_SWITCH)
+    except FileNotFoundError:
+        return dict(DEFAULT_KILL_SWITCH)
+    except PermissionError as e:
+        logger.warning('kill_switch.json unreadable (permission denied: %s); '
+                       'returning DEFAULT_KILL_SWITCH (enabled=True)', e)
+        return dict(DEFAULT_KILL_SWITCH)
+    except json.JSONDecodeError as e:
+        logger.warning('kill_switch.json is corrupted (JSON parse error: %s); '
+                       'returning DEFAULT_KILL_SWITCH (enabled=True) — bot '
+                       'continues trading, operator should intervene manually', e)
+        return dict(DEFAULT_KILL_SWITCH)
+    except OSError as e:
+        logger.warning('kill_switch.json could not be read (OS error: %s); '
+                       'returning DEFAULT_KILL_SWITCH (enabled=True)', e)
+        return dict(DEFAULT_KILL_SWITCH)
+
+    # S-08: defend against valid JSON that isn't a dict (e.g. `[1,2,3]` or `"x"`)
+    if not isinstance(saved, dict):
+        logger.warning('kill_switch.json contains non-object JSON (%r); '
+                       'returning DEFAULT_KILL_SWITCH (enabled=True)',
+                       type(saved).__name__)
+        return dict(DEFAULT_KILL_SWITCH)
+
+    return {**DEFAULT_KILL_SWITCH, **saved}
 
 
 def save_kill_switch(ks: dict, path: str = 'kill_switch.json'):
@@ -69,7 +125,12 @@ def check_kill_switch(ks_path: str = 'kill_switch.json') -> tuple:
 
 def activate_kill_switch(reason: str, ks_path: str = 'kill_switch.json',
                         activated_by: str = 'manual'):
-    """Activate kill switch (disable bot)."""
+    """Activate kill switch (disable bot).
+
+    S-02: validates `reason` before writing — rejects HTML/JS metacharacters
+    so persistent XSS cannot be injected via kill_switch.json.
+    """
+    reason = _validate_reason(reason)  # NEW (S-02): validate before write
     ks = load_kill_switch(ks_path)
     ks['enabled'] = False
     ks['reason'] = reason

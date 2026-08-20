@@ -6,12 +6,19 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
+# S-10: CORS allowlist for the webhook endpoint.
+# Replaces the previous `Access-Control-Allow-Origin = "*"` (open to any website).
+# The Netlify Function also sets CORS headers dynamically based on the Origin
+# header (defense in depth — both static and dynamic checks must allow).
+# NOTE: Replace `https://PLACEHOLDER.netlify.app` with the actual deployed
+# dashboard URL after first deployment. Set the same value as the
+# `DASHBOARD_URL` Netlify env var so `trigger.js` can mirror it dynamically.
 [[headers]]
-  for = "/api/*"
+  for = "/.netlify/functions/trigger"
   [headers.values]
-    Access-Control-Allow-Origin = "*"
-    Access-Control-Allow-Headers = "Content-Type"
+    Access-Control-Allow-Origin = "https://PLACEHOLDER.netlify.app"
     Access-Control-Allow-Methods = "POST, OPTIONS"
+    Access-Control-Allow-Headers = "Content-Type"
 
 [[headers]]
   for = "/*"

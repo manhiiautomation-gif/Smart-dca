@@ -11,7 +11,15 @@ import os
 DOWNLOAD_DIR = '/home/z/my-project/download'
 CACHE_DIR    = '/home/z/my-project/cache'
 
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-os.makedirs(CACHE_DIR, exist_ok=True)
+
+def ensure_dirs():
+    """Ensure cache and download dirs exist. Call once at startup.
+
+    Q-19 fix: previously these ran at import time, which made the module
+    un-importable in test environments without write access to /home/z/my-project.
+    """
+    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+    os.makedirs(CACHE_DIR, exist_ok=True)
+
 
 CACHE_MAX_AGE_HOURS = 168  # 7 days — historical data doesn't change

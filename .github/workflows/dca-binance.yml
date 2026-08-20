@@ -21,16 +21,18 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
         with:
           token: ${{ secrets.GH_PAT }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
         with:
           python-version: '3.11'
+          cache: 'pip'                                   # E-12
+          cache-dependency-path: requirements.lock       # E-09
 
       - name: Install dependencies
-        run: pip install -r live_bot/requirements.txt
+        run: pip install --no-input --require-hashes -r requirements.lock   # E-13
 
       - name: Run Phoenix v5.1
         env:

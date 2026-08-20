@@ -27,7 +27,7 @@ import os
 # Add parent dir so we can import the smart_dca package
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from smart_dca.config import DOWNLOAD_DIR, CACHE_DIR
+from smart_dca.config import DOWNLOAD_DIR, CACHE_DIR, ensure_dirs
 from smart_dca.data_pipeline import build_master_dataframe
 from smart_dca.backtest_engine import backtest_strategy
 from smart_dca.visualization import print_summary_table, generate_charts, save_results_csv
@@ -35,6 +35,8 @@ from smart_dca.strategies import STRATEGY_REGISTRY
 
 
 def main():
+    # Q-19 fix: explicitly create cache/download dirs (was module-level side effect)
+    ensure_dirs()
     strategy_names = [s[0] for s in STRATEGY_REGISTRY]
     print("=" * 70)
     print("  SMART DCA BACKTEST SUITE (Modular v3)")

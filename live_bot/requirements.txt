@@ -1,2 +1,10 @@
-requests>=2.28.0
-numpy>=1.21.0
+# Pin to safe versions to avoid known CVEs (S-12, S-13).
+# Run `pip-audit` in CI to catch new CVEs automatically (recommended follow-up).
+# To install locally with hashes: pip install --require-hashes -r ../requirements.lock
+
+# S-12: requests 2.32.3 fixes CVE-2024-35195 (Session.proxies cert bypass).
+requests>=2.32.3,<3.0
+
+# S-13: numpy 1.26.4 fixes CVE-2021-33430 and CVE-2021-41495.
+# 1.26 is LTS; 2.x has breaking changes (avoid for now).
+numpy>=1.26.4,<3.0

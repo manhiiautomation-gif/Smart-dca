@@ -147,8 +147,14 @@ def fetch_coinmetrics_mvrv(start_date, end_date):
         return None
 
 
-def fetch_bgeometrics_metric(metric_name, token='7NqNRwWhyc'):
+def fetch_bgeometrics_metric(metric_name, token=None):
     """Fetch REAL on-chain metric from BGeometrics API (FALLBACK only)."""
+    if token is None:
+        token = os.environ.get('BGEOMETRICS_TOKEN', '')
+        if not token:
+            print('[DATA] BGEOMETRICS_TOKEN env var not set — skipping BG fetch')
+            return None
+
     cache_key = f'bgeometrics_{metric_name}'
     cached = _load_cache(cache_key)
     if cached is not None:

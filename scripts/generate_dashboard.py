@@ -5,6 +5,7 @@ Reads state.json, trade_log.json, kill_switch.json → produces dashboard.html
 Deployed to Netlify for password-protected viewing.
 '''
 
+import html as _html
 import json
 import os
 import sys
@@ -17,6 +18,18 @@ if PROJECT_ROOT not in sys.path:
 from live_bot.kill_switch import get_full_status
 from live_bot.state import load_state, load_trade_log
 from live_bot import config as cfg
+
+
+def _esc(s):
+    """HTML-escape any user-controlled string before interpolation into the dashboard.
+
+    Used for ALL fields sourced from kill_switch.json (reason, activated_at, activated_by)
+    because any of them can be set via the public webhook (S-01) or via git push (S-04).
+    S-02: prevents persistent XSS → PAT theft chain.
+    """
+    if s is None:
+        return ''
+    return _html.escape(str(s), quote=True)
 
 
 def fmt_num(n, decimals=2):
@@ -652,9 +665,9 @@ def build_html(**kw) -> str:
             <span class="pulse"></span> BOT ACTIVE
         </div>'''
     else:
-        reason = kw.get('ks_reason', 'Unknown')
+        reason = kw.get('ks_reason', 'Unknown') or 'Unknown'
         status_html = f'''<div class="status-badge killed">
-            KILLED: {reason}
+            KILLED: {_esc(reason)}
         </div>'''
 
     # L1/L2 indicators
@@ -1156,9 +1169,9 @@ def build_html(**kw) -> str:
                 </div>
             </div>
             {('<div class="kill-detail" style="margin-top:12px; color:var(--red);">'
-              + f'Reason: {ks_reason}<br>'
-              + f'At: {ks_time}<br>'
-              + f'By: {ks_by}'
+              + f'Reason: {_esc(ks_reason)}<br>'
+              + f'At: {_esc(ks_time)}<br>'
+              + f'By: {_esc(ks_by)}'
               + '</div>') if not bot_alive else ''}
         </div>
     </div>

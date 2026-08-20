@@ -12,15 +12,7 @@ import math
 import numpy as np
 from datetime import date, datetime, timezone, timedelta
 
-# H1: Thai timezone for idempotency check
-# GitHub Actions cron: 13:00/13:10/13:30 UTC = 20:00/20:10/20:30 THB
-_THAI_TZ = timezone(timedelta(hours=7))
-
-
-def _thai_today() -> date:
-    """Return today's date in Thai timezone (UTC+7)."""
-    return datetime.now(_THAI_TZ).date()
-
+from .tz import THAI_TZ, thai_today
 from . import config
 from . import indicators as ind
 from . import strategy
@@ -99,7 +91,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         11. Send notification
     '''
     currency = exchange.currency
-    today = _thai_today()
+    today = thai_today()
 
     # ── 0. Idempotency guard: skip if already ran today (unless --force) ──
     # H1: Uses Thai timezone so daily guard aligns with THB calendar day
@@ -661,7 +653,7 @@ def _snapshot_indicators(bot_state: dict, price: float, currency: str,
         sma14_quick = ind.sma(closes, 14)
         sopr = price / sma14_quick if sma14_quick > 0 else 1.0
 
-        today = _thai_today()
+        today = thai_today()
         mvrv_val = strategy.get_mvrv_for_date(today)
         mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val) if not math.isnan(mvrv_val) else 0
         mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val) if not math.isnan(mvrv_val) else 0
@@ -713,7 +705,7 @@ def run_demo(exchange, demo_state: dict, project_root: str,
     from . import demo_portfolio as dp
 
     currency = exchange.currency
-    today = _thai_today()
+    today = thai_today()
 
     # ── 0. Idempotency guard ──
     if not force and demo_state.get('last_run_date') == today.isoformat():
