@@ -106,13 +106,14 @@ def save_state(state: dict, path: str):
     clean_state = _sanitize_for_json(state)
     with open(lock, 'w') as lf:
         fcntl.flock(lf, fcntl.LOCK_EX)  # exclusive lock
+        tmp_path = None
         try:
             fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
             with os.fdopen(fd, 'w') as f:
                 json.dump(clean_state, f, indent=2, default=str)
             os.replace(tmp_path, path)
         except Exception:
-            if os.path.exists(tmp_path):
+            if tmp_path is not None and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
             raise
         finally:
@@ -124,7 +125,8 @@ def update_state_after_run(state: dict, decision: dict,
                           exchange_currency: str,
                           buy_fee: float = 0.0, sell_fee: float = 0.0,
                           btc_balance: float = 0.0,
-                          cash_balance: float = 0.0) -> dict:
+                          cash_balance: float = 0.0,
+                          sell_proceeds_actual: float = 0.0) -> dict:
     """Update state after a trading decision has been executed.
 
     H5: When selling, adjusted_invested is reduced proportionally.
@@ -150,7 +152,8 @@ def update_state_after_run(state: dict, decision: dict,
 
     if decision['sell_amount'] > 0:
         state['sell_count'] += 1
-        state['total_sell_proceeds'] += decision['sell_amount']
+        actual_sell = sell_proceeds_actual if sell_proceeds_actual > 0 else decision['sell_amount']
+        state['total_sell_proceeds'] += actual_sell
         state['last_sell_date'] = now_str
 
         # H5: Reduce adjusted_invested proportionally when selling
@@ -181,12 +184,20 @@ def load_trade_log(path: str = 'trade_log.json') -> list:
 def append_trade_log(log_path: str, trade_type: str, amount: float,
                      btc_amount: float, price: float, fee: float = 0.0,
                      extra: dict = None):
-    """Append a trade record to the trade log. Atomic write."""
+    """Append a trade record to the trade log. Atomic write.
+
+    Uses a SINGLE exclusive lock for the entire read-modify-write cycle
+    to prevent TOCTOU race conditions (H3).
+    """
     from datetime import datetime as _dt
-    log = load_trade_log(log_path)
+    import tempfile
+    dir_name = os.path.dirname(log_path) or '.'
+    os.makedirs(dir_name, exist_ok=True)
+    lock = log_path + '.lock'
+
     record = {
         'date': _dt.now(_THAI_TZ).strftime('%Y-%m-%d %H:%M'),
-        'type': trade_type,  # 'buy' or 'sell'
+        'type': trade_type,
         'amount': round(amount, 2),
         'btc': round(btc_amount, 8),
         'price': round(price, 2),
@@ -194,24 +205,29 @@ def append_trade_log(log_path: str, trade_type: str, amount: float,
     }
     if extra:
         record.update(extra)
-    log.append(record)
-    # Keep last 500 trades max to prevent file bloat
-    if len(log) > 500:
-        log = log[-500:]
-    # Atomic save with exclusive lock (H4)
-    import tempfile
-    dir_name = os.path.dirname(log_path) or '.'
-    os.makedirs(dir_name, exist_ok=True)
-    lock = log_path + '.lock'
+
+    tmp_path = None
     with open(lock, 'w') as lf:
-        fcntl.flock(lf, fcntl.LOCK_EX)
+        fcntl.flock(lf, fcntl.LOCK_EX)  # exclusive lock for ENTIRE read-modify-write
         try:
+            # Read existing log (under exclusive lock)
+            if os.path.exists(log_path):
+                with open(log_path, 'r') as f:
+                    log = json.load(f)
+            else:
+                log = []
+
+            log.append(record)
+            if len(log) > 500:
+                log = log[-500:]
+
+            # Atomic write (still under exclusive lock)
             fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
             with os.fdopen(fd, 'w') as f:
                 json.dump(log, f, indent=2, default=str)
             os.replace(tmp_path, log_path)
         except Exception:
-            if os.path.exists(tmp_path):
+            if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
             raise
         finally:

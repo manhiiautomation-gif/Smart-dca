@@ -510,7 +510,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     # In demo: sell_proceeds_reserve is tracked separately
     # In live/dry-run: we track total_sell_proceeds in state as reserve proxy
     # cash_reserve passed to strategy = ONLY profits from BTC sales
-    sell_proceeds_reserve = bot_state.get('total_sell_proceeds', 0.0) - bot_state.get('total_invested_from_reserve', 0.0)
+    sell_proceeds_reserve = bot_state.get('total_sell_proceeds', 0.0) - bot_state.get('total_reserve_injected', 0.0)
     sell_proceeds_reserve = max(sell_proceeds_reserve, 0.0)
     # For dry-run, also consider virtual sell proceeds
     if dry_run and bot_state.get('dry_run_sell_proceeds'):
@@ -635,6 +635,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             except Exception as e:
                 print(f'[BOT] SELL ERROR: {e}')
                 decision['sell_amount'] = 0
+                decision['new_cooldown'] = 0
     elif decision['sell_amount'] > 0 and dry_run:
         sell_btc_sold = decision['sell_amount'] / price
         sell_proceeds_actual = decision['sell_amount']
@@ -642,20 +643,9 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         bot_state['total_btc_sold'] += sell_btc_sold
         print(f'[BOT] DRY RUN SELL: {sell_btc_sold:.8f} BTC → {sell_proceeds_actual:.2f} {currency} (fee: {sell_fee:.2f})')
 
-    # ── 10. Update state ──
-    bot_state = state_mod.update_state_after_run(
-        bot_state, decision, price, price, currency,
-        buy_fee=buy_fee, sell_fee=sell_fee,
-        btc_balance=btc_balance, cash_balance=cash_balance,
-    )
-
-    # If a trade was attempted but failed (amount zeroed), don't consume daily slot
-    if trade_attempted and not trade_succeeded:
-        bot_state.pop('last_run_date', None)
-        bot_state['run_count'] -= 1  # Revert the increment
-        print(f'[BOT] Trade failed — not consuming daily slot. Cron retry will try again.')
-
-    # Record trades in trade log
+    # Record trades in trade log FIRST (before mutating state)
+    # This ensures if trade log write fails, state is not yet mutated,
+    # preventing data inconsistency between state.json and trade_log.json.
     if decision['buy_amount'] > 0 and buy_btc_got > 0:
         state_mod.append_trade_log(
             trade_log_path, 'buy', buy_cost_actual, buy_btc_got,
@@ -672,6 +662,20 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
                    'path': decision.get('path_taken', ''),
                    'score': decision.get('sell_score', 0)}
         )
+
+    # ── 10. Update state ──
+    bot_state = state_mod.update_state_after_run(
+        bot_state, decision, price, price, currency,
+        buy_fee=buy_fee, sell_fee=sell_fee,
+        btc_balance=btc_balance, cash_balance=cash_balance,
+        sell_proceeds_actual=sell_proceeds_actual,
+    )
+
+    # If a trade was attempted but failed (amount zeroed), don't consume daily slot
+    if trade_attempted and not trade_succeeded:
+        bot_state.pop('last_run_date', None)
+        bot_state['run_count'] -= 1  # Revert the increment
+        print(f'[BOT] Trade failed — not consuming daily slot. Cron retry will try again.')
 
     # Track portfolio value
     if dry_run:

@@ -142,7 +142,7 @@ def generate_dashboard(state_path='live_bot/state.json',
                 net_cash_out += trade['amount'] + trade.get('fee', 0)
             else:
                 running_btc -= trade['btc']
-                net_cash_out -= trade['amount'] - trade.get('fee', 0)
+                net_cash_out -= trade['amount']  # amount is already net of fees for Bitkub sells
             # Value BTC at current price (realistic P&L)
             pv = running_btc * current_price - net_cash_out
             portfolio_series.append({
@@ -210,13 +210,13 @@ def generate_dashboard(state_path='live_bot/state.json',
     # U2: Empty state detection
     is_empty = (buy_count == 0 and sell_count == 0 and invested == 0)
 
-    # U11: Next expected run time (cron: '10 17 * * *' UTC = 00:10 THB)
+    # U11: Next expected run time (cron: '0 13 * * *' UTC = 20:00 THB)
     from datetime import timezone, timedelta
     tz_thai = timezone(timedelta(hours=7))
     now_thai = datetime.now(tz_thai)
-    # Next 00:10 THB
-    next_run_date = now_thai.replace(hour=0, minute=10, second=0, microsecond=0)
-    if now_thai.hour >= 0 and now_thai.minute >= 10 and now_thai.hour < 24:
+    # Next 20:00 THB
+    next_run_date = now_thai.replace(hour=20, minute=0, second=0, microsecond=0)
+    if now_thai.hour >= 20:
         next_run_date += timedelta(days=1)
     next_run_str = next_run_date.strftime('%H:%M')
     next_run_day = next_run_date.strftime('%d %b')

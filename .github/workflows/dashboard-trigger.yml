@@ -54,14 +54,20 @@ jobs:
           BITKUB_API_KEY: ${{ secrets.BITKUB_API_KEY }}
           BITKUB_API_SECRET: ${{ secrets.BITKUB_API_SECRET }}
           BOT_ENABLED: 'true'
+          BGEOMETRICS_TOKEN: ${{ secrets.BGEOMETRICS_TOKEN || '' }}
           DRY_RUN: ${{ secrets.DRY_RUN || 'false' }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           KILL_REASON: ${{ github.event.inputs.reason }}
           UPDATE_EXCHANGE: ${{ github.event.inputs.exchange || 'bitkub' }}
-          DAILY_BUDGET_THB: ${{ secrets.DAILY_BUDGET_THB || '20' }}
+          DAILY_BUDGET_THB: ${{ secrets.DAILY_BUDGET_THB || '100' }}
           MAX_BUY_THB: ${{ secrets.MAX_BUY_THB || '1000' }}
           MAX_DCA_BUYS_PER_DAY: ${{ secrets.MAX_DCA_BUYS_PER_DAY || '1' }}
+          RESERVE_FLOOR: ${{ secrets.RESERVE_FLOOR || '' }}
+          MAX_RESERVE_INJECTION: ${{ secrets.MAX_RESERVE_INJECTION || '' }}
+          RESERVE_BOOST_MULTIPLIER: ${{ secrets.RESERVE_BOOST_MULTIPLIER || '1.8' }}
+          RESERVE_BOOST_PRICE_RATIO: ${{ secrets.RESERVE_BOOST_PRICE_RATIO || '1.05' }}
+          LOW_BALANCE_DAYS: ${{ secrets.LOW_BALANCE_DAYS || '7' }}
         run: |
           ACTION="${{ github.event.inputs.action }}"
 
