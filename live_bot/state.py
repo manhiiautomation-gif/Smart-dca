@@ -62,8 +62,15 @@ def _lock_path(path: str) -> str:
 
 
 def load_state(path: str) -> dict:
-    """Load state from JSON file with shared lock, merging with defaults."""
+    """Load state from JSON file with shared lock, merging with defaults.
+
+    Corruption recovery: if state.json is corrupted, tries to restore
+    from state.json.bak (last known good state). Falls back to defaults
+    only if both files are unreadable.
+    """
+    import shutil
     lock = _lock_path(path)
+    backup_path = path + '.bak'
     if os.path.exists(path):
         with open(lock, 'w') as lf:
             fcntl.flock(lf, fcntl.LOCK_SH)  # shared lock — allow concurrent reads
@@ -71,8 +78,19 @@ def load_state(path: str) -> dict:
                 with open(path, 'r') as f:
                     saved = json.load(f)
             except (json.JSONDecodeError, ValueError) as e:
-                print(f'[STATE] WARNING: Corrupted state file: {e}. Using defaults.')
-                saved = {}
+                print(f'[STATE] WARNING: Corrupted state file: {e}.')
+                # Try restoring from backup
+                if os.path.exists(backup_path):
+                    try:
+                        with open(backup_path, 'r') as bf:
+                            saved = json.load(bf)
+                        print(f'[STATE] Recovered state from backup ({backup_path}).')
+                    except (json.JSONDecodeError, ValueError, OSError) as e2:
+                        print(f'[STATE] WARNING: Backup also corrupted: {e2}. Using defaults.')
+                        saved = {}
+                else:
+                    print(f'[STATE] No backup found. Using defaults.')
+                    saved = {}
             finally:
                 fcntl.flock(lf, fcntl.LOCK_UN)
         merged = {**DEFAULT_STATE, **saved}
@@ -98,9 +116,11 @@ def save_state(state: dict, path: str):
     Uses fcntl.flock(LOCK_EX) to prevent concurrent writes.
     Write is atomic (temp + rename) so readers always see valid JSON.
     NaN/Infinity values are replaced with None to produce valid JSON.
+    Also creates a .bak backup of the previous state for corruption recovery.
     """
     import tempfile
     lock = _lock_path(path)
+    backup_path = path + '.bak'
     os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
     dir_name = os.path.dirname(path) or '.'
     clean_state = _sanitize_for_json(state)
@@ -108,6 +128,14 @@ def save_state(state: dict, path: str):
         fcntl.flock(lf, fcntl.LOCK_EX)  # exclusive lock
         tmp_path = None
         try:
+            # Backup current state before overwriting
+            if os.path.exists(path):
+                try:
+                    with open(path, 'r') as src:
+                        with open(backup_path, 'w') as dst:
+                            dst.write(src.read())
+                except OSError:
+                    pass  # non-critical: backup failure shouldn't block save
             fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
             with os.fdopen(fd, 'w') as f:
                 json.dump(clean_state, f, indent=2, default=str)

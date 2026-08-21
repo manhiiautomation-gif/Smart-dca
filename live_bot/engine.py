@@ -605,10 +605,10 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             decision['buy_amount'] = 0
         else:
             buy_btc_got = decision['buy_amount'] / price
-        buy_cost_actual = decision['buy_amount']
-        buy_fee = buy_cost_actual * config.BUY_FEE_PCT
-        bot_state['total_btc_bought'] += buy_btc_got
-        print(f'[BOT] DRY RUN BUY: {decision["buy_amount"]:.2f} {currency} → {buy_btc_got:.8f} BTC @ {price:,.2f} (fee: {buy_fee:.2f})')
+            buy_cost_actual = decision['buy_amount']
+            buy_fee = buy_cost_actual * config.BUY_FEE_PCT
+            bot_state['total_btc_bought'] += buy_btc_got
+            print(f'[BOT] DRY RUN BUY: {decision["buy_amount"]:.2f} {currency} → {buy_btc_got:.8f} BTC @ {price:,.2f} (fee: {buy_fee:.2f})')
 
     # SELL
     # ═══════════════════════════════════════════════════════════════
@@ -619,41 +619,41 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         if price <= 0:
             print(f'[BOT] LIVE SELL SKIP: invalid price {price}')
             decision['sell_amount'] = 0
-        elif:
-            btc_to_sell = decision['sell_amount'] / price
-        if btc_to_sell >= btc_balance * 0.99:
-            btc_to_sell = btc_balance * 0.99  # Never sell 100%
-        min_sell = 10.0 if currency == 'USDT' else 10.0
-        if btc_to_sell * price < min_sell:
-            print(f'[BOT] Sell amount {btc_to_sell * price:.2f} below minimum {min_sell}. Skipping.')
-            decision['sell_amount'] = 0
         else:
-            trade_attempted = True
-            print(f'[BOT] LIVE SELL: {btc_to_sell:.8f} BTC (~{decision["sell_amount"]:.2f} {currency})...')
-            try:
-                result = exchange.market_sell(btc_to_sell)
-                sell_btc_sold = float(result.get('executed_qty', result.get('amount', 0)))
-                sell_proceeds_actual = float(result.get('cummulative_quote_qty', result.get('cost', decision['sell_amount'])))
-                sell_fee = float(result.get('fee', sell_proceeds_actual * config.SELL_FEE_PCT))
-                bot_state['total_btc_sold'] += sell_btc_sold
-                # Update cash reserve after sell
-                cash_balance += sell_proceeds_actual
-                trade_succeeded = True
-                print(f'[BOT] Sold {sell_btc_sold:.8f} BTC for {sell_proceeds_actual:.2f} {currency} (fee: {sell_fee:.2f})')
-            except Exception as e:
-                print(f'[BOT] SELL ERROR: {e}')
+            btc_to_sell = decision['sell_amount'] / price
+            if btc_to_sell >= btc_balance * 0.99:
+                btc_to_sell = btc_balance * 0.99  # Never sell 100%
+            min_sell = 10.0 if currency == 'USDT' else 10.0
+            if btc_to_sell * price < min_sell:
+                print(f'[BOT] Sell amount {btc_to_sell * price:.2f} below minimum {min_sell}. Skipping.')
                 decision['sell_amount'] = 0
-                decision['new_cooldown'] = 0
+            else:
+                trade_attempted = True
+                print(f'[BOT] LIVE SELL: {btc_to_sell:.8f} BTC (~{decision["sell_amount"]:.2f} {currency})...')
+                try:
+                    result = exchange.market_sell(btc_to_sell)
+                    sell_btc_sold = float(result.get('executed_qty', result.get('amount', 0)))
+                    sell_proceeds_actual = float(result.get('cummulative_quote_qty', result.get('cost', decision['sell_amount'])))
+                    sell_fee = float(result.get('fee', sell_proceeds_actual * config.SELL_FEE_PCT))
+                    bot_state['total_btc_sold'] += sell_btc_sold
+                    # Update cash reserve after sell
+                    cash_balance += sell_proceeds_actual
+                    trade_succeeded = True
+                    print(f'[BOT] Sold {sell_btc_sold:.8f} BTC for {sell_proceeds_actual:.2f} {currency} (fee: {sell_fee:.2f})')
+                except Exception as e:
+                    print(f'[BOT] SELL ERROR: {e}')
+                    decision['sell_amount'] = 0
+                    decision['new_cooldown'] = 0
     elif decision['sell_amount'] > 0 and dry_run:
         if price <= 0:
             print(f'[BOT] DRY RUN SELL SKIP: invalid price {price}')
             decision['sell_amount'] = 0
         else:
             sell_btc_sold = decision['sell_amount'] / price
-        sell_proceeds_actual = decision['sell_amount']
-        sell_fee = sell_proceeds_actual * config.SELL_FEE_PCT
-        bot_state['total_btc_sold'] += sell_btc_sold
-        print(f'[BOT] DRY RUN SELL: {sell_btc_sold:.8f} BTC → {sell_proceeds_actual:.2f} {currency} (fee: {sell_fee:.2f})')
+            sell_proceeds_actual = decision['sell_amount']
+            sell_fee = sell_proceeds_actual * config.SELL_FEE_PCT
+            bot_state['total_btc_sold'] += sell_btc_sold
+            print(f'[BOT] DRY RUN SELL: {sell_btc_sold:.8f} BTC → {sell_proceeds_actual:.2f} {currency} (fee: {sell_fee:.2f})')
 
     # Record trades in trade log FIRST (before mutating state)
     # This ensures if trade log write fails, state is not yet mutated,
