@@ -600,7 +600,11 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             print(f'[BOT] BUY STATUS: FAILED')
             decision['buy_amount'] = 0
     elif decision['buy_amount'] > 0 and dry_run:
-        buy_btc_got = decision['buy_amount'] / price
+        if price <= 0:
+            print(f'[BOT] DRY RUN BUY SKIP: invalid price {price}')
+            decision['buy_amount'] = 0
+        else:
+            buy_btc_got = decision['buy_amount'] / price
         buy_cost_actual = decision['buy_amount']
         buy_fee = buy_cost_actual * config.BUY_FEE_PCT
         bot_state['total_btc_bought'] += buy_btc_got
@@ -612,7 +616,11 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     # When dry_run=True, exchange.market_sell() is NEVER called.
     # ═══════════════════════════════════════════════════════════════
     if decision['sell_amount'] > 0 and not dry_run:
-        btc_to_sell = decision['sell_amount'] / price
+        if price <= 0:
+            print(f'[BOT] LIVE SELL SKIP: invalid price {price}')
+            decision['sell_amount'] = 0
+        elif:
+            btc_to_sell = decision['sell_amount'] / price
         if btc_to_sell >= btc_balance * 0.99:
             btc_to_sell = btc_balance * 0.99  # Never sell 100%
         min_sell = 10.0 if currency == 'USDT' else 10.0
@@ -637,7 +645,11 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
                 decision['sell_amount'] = 0
                 decision['new_cooldown'] = 0
     elif decision['sell_amount'] > 0 and dry_run:
-        sell_btc_sold = decision['sell_amount'] / price
+        if price <= 0:
+            print(f'[BOT] DRY RUN SELL SKIP: invalid price {price}')
+            decision['sell_amount'] = 0
+        else:
+            sell_btc_sold = decision['sell_amount'] / price
         sell_proceeds_actual = decision['sell_amount']
         sell_fee = sell_proceeds_actual * config.SELL_FEE_PCT
         bot_state['total_btc_sold'] += sell_btc_sold
