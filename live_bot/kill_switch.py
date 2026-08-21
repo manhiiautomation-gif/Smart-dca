@@ -21,11 +21,16 @@ DEFAULT_KILL_SWITCH = {
 
 def load_kill_switch(path: str = 'kill_switch.json') -> dict:
     """Load kill switch state from JSON file."""
-    if os.path.exists(path):
+    DEFAULT = {'enabled': True, 'reason': '', 'activated_at': None, 'activated_by': ''}
+    if not os.path.exists(path):
+        return dict(DEFAULT)
+    try:
         with open(path, 'r') as f:
-            saved = json.load(f)
-        return {**DEFAULT_KILL_SWITCH, **saved}
-    return dict(DEFAULT_KILL_SWITCH)
+            data = json.load(f)
+        return {**DEFAULT, **data}
+    except (json.JSONDecodeError, ValueError, OSError) as e:
+        print(f'[KILL_SWITCH] WARNING: Corrupted file: {e}. Using defaults.')
+        return dict(DEFAULT)
 
 
 def save_kill_switch(ks: dict, path: str = 'kill_switch.json'):

@@ -5,6 +5,7 @@ Reads state.json, trade_log.json, kill_switch.json → produces dashboard.html
 Deployed to Netlify for password-protected viewing.
 '''
 
+import html as html_mod
 import json
 import os
 import sys
@@ -122,11 +123,17 @@ def generate_dashboard(state_path='live_bot/state.json',
     total_fees = sum(t.get('fee', 0) for t in trade_log)
     total_reserve = sum(t.get('reserve', 0) for t in tl_buys)
     last_trade_date = trade_log[-1]['date'] if trade_log else '—'
-    roi = ((portfolio - invested) / invested * 100) if invested > 0 else 0.0
+    # ROI should be on BTC position only, not total exchange balance
+    btc_value = btc_bal * current_price if current_price > 0 else 0
+    if invested > 0:
+        roi = ((btc_value - invested) / invested * 100)
+    else:
+        roi = 0
 
     # --- Investment control metrics ---
     net_btc = total_btc_bought - total_btc_sold
-    avg_buy_price = (invested / net_btc) if net_btc > 0 else 0
+    adjusted_invested = state.get('adjusted_invested', invested)
+    avg_buy_price = (adjusted_invested / net_btc) if net_btc > 0 else 0
     unrealized_pnl = (current_price - avg_buy_price) * btc_bal if avg_buy_price > 0 else 0
     unrealized_pnl_pct = (unrealized_pnl / invested * 100) if invested > 0 else 0
     avg_buy_size = (invested / buy_count) if buy_count > 0 else 0
@@ -139,7 +146,7 @@ def generate_dashboard(state_path='live_bot/state.json',
         for trade in trade_log:
             if trade['type'] == 'buy':
                 running_btc += trade['btc']
-                net_cash_out += trade['amount'] + trade.get('fee', 0)
+                net_cash_out += trade['amount']  # fee embedded (less BTC received)
             else:
                 running_btc -= trade['btc']
                 net_cash_out -= trade['amount']  # amount is already net of fees for Bitkub sells
@@ -186,9 +193,9 @@ def generate_dashboard(state_path='live_bot/state.json',
     l1_ok = os.environ.get('BOT_ENABLED', 'true').lower() == 'true'
     bot_alive = l1_ok and ks_status['l2_enabled']
     l2_ok = ks_status['l2_enabled']
-    ks_reason = ks_status.get('l2_reason', '')
-    ks_time = ks_status.get('l2_activated_at', '')
-    ks_by = ks_status.get('l2_activated_by', '')
+    ks_reason = html_mod.escape(ks_status.get('l2_reason') or '')
+    ks_time = html_mod.escape(ks_status.get('l2_activated_at') or '')
+    ks_by = html_mod.escape(ks_status.get('l2_activated_by') or '')
 
     # Indicators
     mvrv = indicators.get('mvrv')
@@ -358,11 +365,16 @@ def generate_dashboard(state_path='live_bot/state.json',
     # Demo section removed — bot is now live, no demo data needed
 
     # ── Config settings for dashboard display ──
+    # Fetch live USD/THB rate for dashboard display
+    try:
+        live_usd_thb = cfg.get_usd_thb_rate()
+    except Exception:
+        live_usd_thb = cfg.USD_THB_RATE
     # Show effective values (after THB→local conversion)
     cfg_items = [
         ('Exchange', cfg.EXCHANGE.upper()),
         ('Currency', cfg.CURRENCY),
-        ('USD/THB Rate', f'{cfg.USD_THB_RATE:.3f}'),
+        ('USD/THB Rate', f'{live_usd_thb:.3f}'),
         ('Daily DCA Budget', f'{cfg.DAILY_BUDGET_THB:,.0f} THB = {cfg.get_daily_budget():.2f} {cfg.CURRENCY}'),
         ('Max Buy/Trade', f'{cfg.MAX_BUY_THB:,.0f} THB = {cfg.get_max_buy():.2f} {cfg.CURRENCY}'),
         ('Max DCA Buys/Day', str(cfg.MAX_DCA_BUYS_PER_DAY)),
@@ -620,7 +632,7 @@ def build_html(**kw) -> str:
         tclass = 'buy' if t['type'] == 'buy' else 'sell'
         extra = ''
         if 'path' in t and t['path']:
-            extra = f" | Path: {t['path']} (score: {t.get('score', 0)})"
+            extra = f" | Path: {html_mod.escape(t['path'])} (score: {t.get('score', 0)})"
         if 'reserve' in t and t['reserve'] > 0:
             extra += f" | Reserve: {t['reserve']:.0f}"
         trade_rows += f'''

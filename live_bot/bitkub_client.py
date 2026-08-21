@@ -57,6 +57,7 @@ class BitkubClient:
             {"error": 0, "message": "success", "result": {...}}  ← success
             {"error": 42, "message": "insufficient balance"}      ← actual error
         error=0 means success.  Only raise on non-zero error codes.
+        Also validates that 'result' key exists on success.
         Returns the parsed JSON body on success.
         '''
         resp.raise_for_status()
@@ -65,6 +66,8 @@ class BitkubClient:
             err_code = data['error']
             err_msg = data.get('message', 'Unknown error')
             raise RuntimeError(f'Bitkub API error {err_code}: {err_msg} (path: {path})')
+        if isinstance(data, dict) and 'result' not in data:
+            raise ValueError('Bitkub API response missing "result" key')
         return data
 
     def get_price(self) -> float:

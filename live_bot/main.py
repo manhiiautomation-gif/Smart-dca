@@ -307,6 +307,7 @@ def main():
         import traceback
         traceback.print_exc()
         notifier.send_telegram(f'Phoenix v5.1 FATAL ERROR: {e}')
+        sys.exit(1)
     finally:
         # C2: Always save state — prevents double-buy on crash/interrupt
         try:

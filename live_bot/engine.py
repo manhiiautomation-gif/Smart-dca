@@ -309,6 +309,8 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         bg_mvrv = bg_metrics.get_cached_value('mvrv', today)
         if not math.isnan(bg_mvrv):
             mvrv_val = bg_mvrv
+            if mvrv_val is not None and mvrv_val <= 0:
+                mvrv_val = float('nan')
             mvrv_source = 'BG-cache'
             print(f'[BOT] MVRV from BG cache: {mvrv_val:.4f}')
         # MVRV Z-Score from BG cache
@@ -323,6 +325,8 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     # Fallback: embedded history + web
     if math.isnan(mvrv_val):
         mvrv_val = strategy.get_mvrv_for_date(today)
+        if mvrv_val is not None and mvrv_val <= 0:
+            mvrv_val = float('nan')
         if not math.isnan(mvrv_val):
             mvrv_source = 'embedded'
             # Check if embedded data is stale, try web update in background
@@ -346,6 +350,8 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
                 if web_date and web_date > strategy._MVRV_HISTORY_MAX:
                     mvrv_fetcher.append_mvrv_to_history(web_mvrv, web_date)
                 mvrv_val = web_mvrv
+                if mvrv_val is not None and mvrv_val <= 0:
+                    mvrv_val = float('nan')
                 mvrv_source = web_source
             else:
                 print(f'[BOT] WARNING: All MVRV sources failed: {web_source}')
@@ -434,6 +440,8 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             # Only override if section 4 used a lower-priority source
             if mvrv_source != 'BG' and bg_mvrv_src == 'BG':
                 mvrv_val = bg_mvrv_val
+                if mvrv_val is not None and mvrv_val <= 0:
+                    mvrv_val = float('nan')
                 mvrv_source = 'BG'
                 # Recompute derived values with BG MVRV
                 nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 else 0
@@ -598,6 +606,12 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         except Exception as e:
             print(f'[BOT] BUY ERROR: {e}')
             print(f'[BOT] BUY STATUS: FAILED')
+            # C2: If timeout/connection error, order likely executed on exchange.
+            # Consume daily slot to prevent double-buy on retry.
+            _err_str = str(e).lower()
+            if 'timeout' in _err_str or 'connection' in _err_str:
+                print(f'[BOT] BUY TIMEOUT — assuming order executed. Consuming daily slot to prevent double-buy.')
+                trade_succeeded = True
             decision['buy_amount'] = 0
     elif decision['buy_amount'] > 0 and dry_run:
         if price <= 0:
@@ -860,6 +874,8 @@ def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
         bg_mvrv = bg_metrics.get_cached_value('mvrv', today)
         if not math.isnan(bg_mvrv):
             mvrv_val = bg_mvrv
+            if mvrv_val is not None and mvrv_val <= 0:
+                mvrv_val = float('nan')
             mvrv_source = 'BG-cache'
         bg_z = bg_metrics.get_cached_value('mvrv_zscore', today)
         if not math.isnan(bg_z):
@@ -869,6 +885,8 @@ def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
         pass
     if math.isnan(mvrv_val):
         mvrv_val = strategy.get_mvrv_for_date(today)
+        if mvrv_val is not None and mvrv_val <= 0:
+            mvrv_val = float('nan')
         mvrv_source = 'embedded' if not math.isnan(mvrv_val) else 'N/A'
     mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val) if not math.isnan(mvrv_val) else 0
     if math.isnan(mvrv_z):
@@ -896,6 +914,8 @@ def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
             bg_mvrv_val = bg['mvrv']
             if bg.get('mvrv_source', 'BG') == 'BG':
                 mvrv_val = bg_mvrv_val; mvrv_source = 'BG'
+                if mvrv_val is not None and mvrv_val <= 0:
+                    mvrv_val = float('nan')
                 nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 else 0
                 realized_price = price / mvrv_val if mvrv_val > 0 else realized_price
         if not math.isnan(bg.get('mvrv_zscore', float('nan'))):
@@ -998,6 +1018,8 @@ def _snapshot_indicators(bot_state: dict, price: float, currency: str,
 
         today = _thai_today()
         mvrv_val = strategy.get_mvrv_for_date(today)
+        if mvrv_val is not None and mvrv_val <= 0:
+            mvrv_val = float('nan')
         mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val) if not math.isnan(mvrv_val) else 0
         mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val) if not math.isnan(mvrv_val) else 0
         mvrv_z_source = 'embedded-365d'
@@ -1102,6 +1124,8 @@ def run_demo(exchange, demo_state: dict, project_root: str,
         bg_mvrv = bg_metrics.get_cached_value('mvrv', today)
         if not math.isnan(bg_mvrv):
             mvrv_val = bg_mvrv
+            if mvrv_val is not None and mvrv_val <= 0:
+                mvrv_val = float('nan')
             mvrv_source = 'BG-cache'
             print(f'[DEMO] MVRV from BG cache: {mvrv_val:.4f}')
     except ImportError:
@@ -1109,6 +1133,8 @@ def run_demo(exchange, demo_state: dict, project_root: str,
 
     if math.isnan(mvrv_val):
         mvrv_val = strategy.get_mvrv_for_date(today)
+        if mvrv_val is not None and mvrv_val <= 0:
+            mvrv_val = float('nan')
         if not math.isnan(mvrv_val):
             mvrv_source = 'embedded'
         else:
@@ -1117,6 +1143,8 @@ def run_demo(exchange, demo_state: dict, project_root: str,
             web_mvrv, web_date, web_source = mvrv_fetcher.fetch_mvrv_from_web()
             if web_mvrv is not None:
                 mvrv_val = web_mvrv
+                if mvrv_val is not None and mvrv_val <= 0:
+                    mvrv_val = float('nan')
                 mvrv_source = web_source
                 print(f'[DEMO] Web MVRV: {web_mvrv:.4f}')
             else:
@@ -1168,6 +1196,8 @@ def run_demo(exchange, demo_state: dict, project_root: str,
             bg_mvrv_src = bg.get('mvrv_source', 'BG')
             if mvrv_source != 'BG' and bg_mvrv_src == 'BG':
                 mvrv_val = bg_mvrv_val
+                if mvrv_val is not None and mvrv_val <= 0:
+                    mvrv_val = float('nan')
                 mvrv_source = 'BG'
                 nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 else 0
                 realized_price = price / mvrv_val if mvrv_val > 0 else realized_price

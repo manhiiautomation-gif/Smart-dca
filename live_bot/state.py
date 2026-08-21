@@ -246,8 +246,8 @@ def append_trade_log(log_path: str, trade_type: str, amount: float,
                 log = []
 
             log.append(record)
-            if len(log) > 500:
-                log = log[-500:]
+            if len(log) > 5000:
+                log = log[-5000:]
 
             # Atomic write (still under exclusive lock)
             fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
