@@ -6,7 +6,8 @@
     "btc": 0.0001416,
     "price": 2118702.79,
     "fee": 0.75,
-    "reserve": 0.0
+    "reserve": 0.0,
+    "dry_run": true
   },
   {
     "date": "2026-08-18 17:11",
@@ -15,16 +16,7 @@
     "btc": 0.00014169,
     "price": 2117227.44,
     "fee": 0.75,
-    "reserve": 0.0
-  },
-  {
-    "date": "2026-08-21 20:51",
-    "type": "buy",
-    "amount": 40.0,
-    "btc": 1.577e-05,
-    "price": 2536377.77,
-    "fee": 0.0,
-    "dry_run": false,
-    "reserve": 0.0
+    "reserve": 0.0,
+    "dry_run": true
   }
 ]

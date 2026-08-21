@@ -193,7 +193,9 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
                 bot_state['last_price'] = round(refresh_price, 2)
                 bot_state['last_exchange_currency'] = currency
                 bot_state['last_exchange_name'] = exchange.__class__.__name__.replace('Client', '').upper()
-                bot_state['last_dry_run'] = dry_run
+                # D2: Do NOT overwrite last_dry_run in refresh-only paths.
+                # This path only refreshes dashboard data without trading,
+                # so it should not change the provenance of existing trade data.
                 if r_portfolio > bot_state.get('peak_value', 0):
                     bot_state['peak_value'] = r_portfolio
                 print(f'[BOT] Dashboard data refreshed (skipped trade). Portfolio: {r_portfolio:,.2f} {currency}')
@@ -227,6 +229,27 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         bot_state['last_run_date'] = today_str
         bot_state['run_count'] += 1
         return bot_state
+
+    # ── 0c. Dry-run → Live transition reset (D3) ──
+    # When transitioning from dry-run to first live run, reset all
+    # counters and metrics that were contaminated by dry-run data.
+    # This prevents phantom invested/BTC/count values on the dashboard.
+    if not dry_run and bot_state.get('last_dry_run') is True:
+        print('[BOT] D3: Dry-run → Live transition detected. Resetting contaminated state.')
+        for _key in ('total_invested', 'adjusted_invested', 'total_sell_proceeds',
+                     'total_btc_bought', 'total_btc_sold', 'cumulative_fees',
+                     'peak_value', 'max_drawdown', 'sell_proceeds_reserve',
+                     'dry_run_sell_proceeds'):
+            bot_state[_key] = 0.0 if isinstance(bot_state.get(_key, 0), (int, float)) else None
+        for _key in ('buy_count', 'sell_count'):
+            bot_state[_key] = 0
+        bot_state['last_trade_date'] = ''
+        bot_state['last_sell_date'] = ''
+        bot_state['realized_price'] = None
+        bot_state['lth_realized_price'] = None
+        bot_state['dry_run_btc'] = None
+        bot_state['dry_run_cash'] = None
+        print('[BOT] D3: State reset complete. Starting fresh with live data.')
 
     # ── -1. Kill Switch Check ──
     is_alive, kill_reason = ks_mod.check_kill_switch(kill_switch_path)
@@ -984,7 +1007,9 @@ def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
     bot_state['last_price'] = round(price, 2)
     bot_state['last_exchange_currency'] = currency
     bot_state['last_exchange_name'] = exchange.__class__.__name__.replace('Client', '').upper()
-    bot_state['last_dry_run'] = dry_run
+    # D2: Do NOT overwrite last_dry_run in refresh-only paths.
+    # refresh_dashboard() only fetches data for the dashboard, it doesn't trade,
+    # so it must not change the provenance flag of existing trade data.
 
     # Track peak and drawdown
     if portfolio > bot_state.get('peak_value', 0):
@@ -1048,7 +1073,7 @@ def _snapshot_indicators(bot_state: dict, price: float, currency: str,
         bot_state['last_price'] = round(price, 2)
         bot_state['last_exchange_currency'] = currency
         bot_state['last_exchange_name'] = exchange.__class__.__name__.replace('Client', '').upper()
-        bot_state['last_dry_run'] = dry_run
+        # D2: Do NOT overwrite last_dry_run in kill-switch snapshot path.
     except Exception as e:
         print(f'[BOT] Indicator snapshot failed: {e}')
 

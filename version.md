@@ -1,6 +1,22 @@
-## 2026-08-21 (Wave 2) — Expert Audit: Security + Reliability + Data Integrity
+## 2026-08-21 (Wave 3) — Dashboard Stale Dry-Run Data Fix
 
-ผล audit จาก 3 ทีมผู้เชี่ยวชาญ (Security, Reliability, Data Integrity) แบบ parallel
+Dashboard แสดงข้อมูลเก่าจาก dry-run testing (2026-08-18) แทนข้อมูลจริงจาก exchange
+Root cause: trade_log ขาด `dry_run` flag + `last_dry_run` ถูก overwrite โดย refresh-only paths
+
+### CRITICAL (แก้ไขแล้ว)
+
+| # | ปัญหา | ไฟล์ | รายละเอียด |
+|---|--------|------|----------|
+| D1 | trade_log dry-run ไม่มี flag | `trade_log.json` | 2 รายการ buy จาก dry-run ขาด `dry_run: true` → dashboard เข้าใจว่าเป็น trade จริง → เพิ่ม flag + เปลี่ยน filter เป็น strict check `t.get('dry_run') is False` |
+| D2 | `last_dry_run` ถูก overwrite | `engine.py` L196,989,1055 | refresh-only paths (idempotency, refresh_dashboard, kill snapshot) เขียน `last_dry_run = dry_run` ทับ → ลบออกจากทั้ง 3 ที่ |
+| D3 | dry-run→live transition | `engine.py` L233-252 | เพิ่ม auto-reset: พอ first live run หลัง dry-run จะ reset peak_value, counters, invested ทั้งหมด |
+
+### HIGH (แก้ไขแล้ว)
+
+| # | ปัญหา | ไฟล์ | รายละเอียด |
+|---|--------|------|----------|
+| D4 | state.json เป็น virtual balance | `state.json` | dry-run virtual balances (9,998 THB) อยู่ใน `last_btc_balance`/`last_cash_balance` → reset สู่ค่าเริ่มต้น |
+| D5 | peak_value ติดค่า dry-run | `engine.py` | `peak_value: 10000` (= DRY_RUN_INITIAL_CASH) จาก dry-run ไม่ลด — D3 reset แก้ปัญหานี้ |
 
 ### CRITICAL (แก้ไขแล้ว)
 
