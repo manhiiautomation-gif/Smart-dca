@@ -107,7 +107,7 @@ def generate_dashboard(state_path='live_bot/state.json',
     current_price = state.get('last_price', 0)
     btc_bal = state.get('last_btc_balance', 0)
     cash_bal = state.get('last_cash_balance', 0)
-    last_run = state.get('last_run_date', '—')
+    last_run = state.get('last_run_date', '—') or '—'
     run_count = state.get('run_count', 0)
     dry_run = state.get('last_dry_run', False)
     peak = state.get('peak_value', 0)
@@ -351,13 +351,22 @@ def generate_dashboard(state_path='live_bot/state.json',
                 '</div></div>'
             )
         else:
-            next_html = (
-                '<div style="margin-bottom:16px;">'
-                '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">ประเมินรอบถัดไป</div>'
-                '<div style="text-align:center;padding:12px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--text-dim);font-size:0.85rem;">'
-                f'MVRV สูง ({fmt_num(mvrv, 2)}) - ไม่ซื้อรอบนี้ (0x)'
-                '</div></div>'
-            )
+            if mvrv is None:
+                next_html = (
+                    '<div style="margin-bottom:16px;">'
+                    '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">ประเมินรอบถัดไป</div>'
+                    '<div style="text-align:center;padding:12px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--text-dim);font-size:0.85rem;">'
+                    'MVRV ยังไม่มีข้อมูล — รอรันครั้งแรก'
+                    '</div></div>'
+                )
+            else:
+                next_html = (
+                    '<div style="margin-bottom:16px;">'
+                    '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">ประเมินรอบถัดไป</div>'
+                    '<div style="text-align:center;padding:12px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--text-dim);font-size:0.85rem;">'
+                    f'MVRV สูง ({fmt_num(mvrv, 2)}) - ไม่ซื้อรอบนี้ (0x)'
+                    '</div></div>'
+                )
 
         return today_html + next_html
 
@@ -1054,7 +1063,7 @@ def build_html(**kw) -> str:
                 </div>
                 <div class="ind-item">
                     <span class="label">Exchange</span>
-                    <span class="val">{exchange_name or currency.upper()}</span>
+                    <span class="val">{exchange_name or cfg.EXCHANGE.upper()}</span>
                 </div>
                 <div class="ind-item">
                     <span class="label">รันล่าสุด</span>

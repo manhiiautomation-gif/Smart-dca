@@ -73,10 +73,10 @@ jobs:
 
           if [ "$ACTION" = "kill" ]; then
             echo "[ACTION] Activating kill switch: $KILL_REASON"
-            python3 -c 'import json,os;from datetime import datetime,timezone;ks={"enabled":False,"reason":os.environ.get("KILL_REASON","Manual kill from dashboard"),"activated_at":datetime.now(timezone.utc).isoformat(),"activated_by":"dashboard"};open("kill_switch.json","w").write(json.dumps(ks,indent=2));print("Kill switch activated")'
+            python3 -c 'from live_bot.kill_switch import activate_kill_switch; activate_kill_switch(os.environ.get("KILL_REASON", "Manual kill from dashboard"), by="dashboard"); print("Kill switch activated (atomic)")'
           elif [ "$ACTION" = "resume" ]; then
             echo "[ACTION] Resuming bot (deactivating kill switch)"
-            python3 -c 'import json;ks={"enabled":True,"reason":"","activated_at":None,"activated_by":"dashboard"};open("kill_switch.json","w").write(json.dumps(ks,indent=2));print("Kill switch deactivated")'
+            python3 -c 'from live_bot.kill_switch import deactivate_kill_switch; deactivate_kill_switch(by="dashboard"); print("Kill switch deactivated (atomic)")'
           elif [ "$ACTION" = "update" ]; then
             echo "[ACTION] Refreshing dashboard data on $UPDATE_EXCHANGE (DRY_RUN=$DRY_RUN)"
             FLAGS="--exchange $UPDATE_EXCHANGE --state-file live_bot/state.json --refresh-only"
@@ -93,11 +93,11 @@ jobs:
         run: |
           git config user.name "Phoenix Bot"
           git config user.email "phoenix-bot@users.noreply.github.com"
-          git add live_bot/state.json live_bot/_mvrv_history.py trade_log.json kill_switch.json dashboard/dist/index.html
+          git add live_bot/state.json live_bot/_mvrv_history.py trade_log.json kill_switch.json live_bot/bg_cache.json live_bot/usd_thb_rate.json dashboard/dist/index.html
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "dashboard: ${{ github.event.inputs.action }} $(date +%Y-%m-%d\ %H:%M)"
+            git commit -m "dashboard: ${{ github.event.inputs.action }} $(date +%Y-%m-%d %H:%M)"
             for i in 1 2 3; do
               git pull --rebase && git push && break || sleep 10
             done
@@ -112,4 +112,4 @@ jobs:
     uses: ./.github/workflows/deploy-pages.yml
     with:
       skip_build: true
-    secrets: inherit
+      secrets: inherit

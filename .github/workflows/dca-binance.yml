@@ -15,7 +15,7 @@ on:
         default: 100
 
 concurrency:
-  group: binance-dca
+  group: dca-any-exchange
   cancel-in-progress: false
 
 jobs:

@@ -26,7 +26,7 @@ on:
         default: false
 
 concurrency:
-  group: bitkub-dca
+  group: dca-any-exchange
   cancel-in-progress: false  # Backup cron must wait, not cancel main run
 
 jobs:

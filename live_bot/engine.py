@@ -640,7 +640,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             # Consume daily slot to prevent double-buy on retry.
             # Also estimate the trade details so trade_log and state are updated.
             _err_str = str(e).lower()
-            if 'timeout' in _err_str or 'connection' in _err_str:
+            if 'timeout' in _err_str or 'connection' in _err_str or 'ssl' in _err_str:
                 print(f'[BOT] BUY TIMEOUT — assuming order executed. Estimating trade details.')
                 trade_succeeded = True
                 # Use the ACTUAL amount sent to exchange (may be reduced by insufficient cash).
@@ -973,7 +973,8 @@ def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
         else:
             lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val)
             lth_source = 'proxy-rp*1.15'
-    except ImportError:
+    except Exception as e:
+        print(f'[REFRESH] BG metrics failed: {e}. Using proxy.')
         sopr = _sopr_proxy(price, sma14, sma30); sopr_source = 'proxy-sma14'
         lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val)
         lth_source = 'proxy-rp*1.15'

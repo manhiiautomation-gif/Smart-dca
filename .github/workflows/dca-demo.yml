@@ -109,13 +109,14 @@ jobs:
           fi
 
       - name: Generate dashboard
+        if: false  # W5-fix: Demo must NOT overwrite live dashboard
         run: python scripts/generate_dashboard.py
 
       - name: Commit and push (with retry)
+        if: false  # W5-fix: Demo must NOT commit/push dashboard
         run: |
           git config user.name "Phoenix Bot"
           git config user.email "phoenix-bot@users.noreply.github.com"
-          git add demo_state.json demo_trades.json demo_report.json dashboard/dist/index.html live_bot/demo_portfolio.py live_bot/engine.py live_bot/main.py scripts/generate_dashboard.py
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
