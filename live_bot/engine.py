@@ -249,6 +249,13 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         bot_state['lth_realized_price'] = None
         bot_state['dry_run_btc'] = None
         bot_state['dry_run_cash'] = None
+        # D3-ext: Also clear trade_log.json to remove contaminated dry-run entries.
+        # The dashboard's D1 filter (dry_run=False check) handles this at read time,
+        # but cleaning the source file is the correct approach.
+        try:
+            state_mod.clear_trade_log(trade_log_path)
+        except Exception as e:
+            print(f'[BOT] D3: WARNING — failed to clear trade log: {e}')
         print('[BOT] D3: State reset complete. Starting fresh with live data.')
 
     # ── -1. Kill Switch Check ──
@@ -631,11 +638,22 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             print(f'[BOT] BUY STATUS: FAILED')
             # C2: If timeout/connection error, order likely executed on exchange.
             # Consume daily slot to prevent double-buy on retry.
+            # Also estimate the trade details so trade_log and state are updated.
             _err_str = str(e).lower()
             if 'timeout' in _err_str or 'connection' in _err_str:
-                print(f'[BOT] BUY TIMEOUT — assuming order executed. Consuming daily slot to prevent double-buy.')
+                print(f'[BOT] BUY TIMEOUT — assuming order executed. Estimating trade details.')
                 trade_succeeded = True
-            decision['buy_amount'] = 0
+                # Use the ACTUAL amount sent to exchange (may be reduced by insufficient cash).
+                # _actual_sent_amt is the amount AFTER any cash adjustment.
+                _actual_sent_amt = decision['buy_amount']  # already adjusted if cash was insufficient
+                if price > 0:
+                    buy_btc_got = _actual_sent_amt / price
+                buy_cost_actual = _actual_sent_amt
+                buy_fee = buy_cost_actual * config.BUY_FEE_PCT
+                bot_state['total_btc_bought'] += buy_btc_got
+                print(f'[BOT] TIMEOUT ESTIMATE: {buy_btc_got:.8f} BTC for {buy_cost_actual:.2f} {currency}')
+            else:
+                decision['buy_amount'] = 0
     elif decision['buy_amount'] > 0 and dry_run:
         if price <= 0:
             print(f'[BOT] DRY RUN BUY SKIP: invalid price {price}')
@@ -718,6 +736,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         buy_fee=buy_fee, sell_fee=sell_fee,
         btc_balance=btc_balance, cash_balance=cash_balance,
         sell_proceeds_actual=sell_proceeds_actual,
+        actual_buy_cost=buy_cost_actual,
     )
 
     # If a trade was attempted but failed (amount zeroed), don't consume daily slot

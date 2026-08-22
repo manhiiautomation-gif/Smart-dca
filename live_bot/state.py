@@ -154,7 +154,8 @@ def update_state_after_run(state: dict, decision: dict,
                           buy_fee: float = 0.0, sell_fee: float = 0.0,
                           btc_balance: float = 0.0,
                           cash_balance: float = 0.0,
-                          sell_proceeds_actual: float = 0.0) -> dict:
+                          sell_proceeds_actual: float = 0.0,
+                          actual_buy_cost: float = 0.0) -> dict:
     """Update state after a trading decision has been executed.
 
     H5: When selling, adjusted_invested is reduced proportionally.
@@ -174,8 +175,11 @@ def update_state_after_run(state: dict, decision: dict,
 
     if decision['buy_amount'] > 0:
         state['buy_count'] += 1
-        state['total_invested'] += decision['buy_amount']
-        state['adjusted_invested'] += decision['buy_amount']
+        # B5-fix: Use actual exchange-returned cost when available,
+        # falling back to decision amount (accurate for dry-run).
+        _cost = actual_buy_cost if actual_buy_cost > 0 else decision['buy_amount']
+        state['total_invested'] += _cost
+        state['adjusted_invested'] += _cost
         state['last_trade_date'] = now_str
 
     if decision['sell_amount'] > 0:
@@ -261,3 +265,30 @@ def append_trade_log(log_path: str, trade_type: str, amount: float,
         finally:
             fcntl.flock(lf, fcntl.LOCK_UN)
     return record
+
+
+def clear_trade_log(log_path: str):
+    """Clear all entries from the trade log. Atomic write with exclusive lock (H4).
+
+    Used during D3 (dry-run → live transition) to remove contaminated dry-run
+    entries so the dashboard only shows live trades.
+    """
+    import tempfile
+    dir_name = os.path.dirname(log_path) or '.'
+    os.makedirs(dir_name, exist_ok=True)
+    lock = log_path + '.lock'
+    tmp_path = None
+    with open(lock, 'w') as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
+            with os.fdopen(fd, 'w') as f:
+                json.dump([], f, indent=2)
+            os.replace(tmp_path, log_path)
+            print('[STATE] Trade log cleared (D3: dry-run → live transition).')
+        except Exception:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            raise
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)

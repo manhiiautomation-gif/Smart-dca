@@ -1,6 +1,33 @@
 # Phoenix DCA Bot — Work Log
 
 ---
+Task ID: 2-a, 2-b, 2-c, 8
+Agent: main + 3 subagents + 1 reviewer
+Task: ตรวจสอบ dashboard data pipeline ทั้งหมด (state.json → trade_log → dashboard → deploy)
+
+Work Log:
+- สร้าง subagent ตรวจสอบโครงสร้างโปรเจกต์ (Explore)
+- สร้าง subagent 3 ตัว parallel:
+  - 2-a: ตรวจ state.json/trade_log.json write pipeline (engine.py + state.py)
+  - 2-b: ตรวจ generate_dashboard.py read/filter/display logic
+  - 2-c: ตรวจ GitHub Actions workflows + deploy pipeline
+- รวบรวมผล → พบบั๊ก 5 รายการ (B1-B5)
+- วางแผนแก้ไขรอบที่ 1 → ทบทวนรอบที่ 2
+- แก้ไข B1: state.py clear_trade_log() + engine.py D3-ext
+- แก้ไข B2: engine.py timeout buy ใช้ actual sent amount
+- แก้ไข B3: generate_dashboard.py ใช้ state.json exchange_name/currency
+- แก้ไข B5: state.py actual_buy_cost parameter
+- สร้าง reviewer subagent ตรวจโค้ดทั้งหมด → พบ B2 bug (insufficient cash + timeout) → แก้ซ้ำ
+- เขียน version.md Wave 4
+
+Stage Summary:
+- B1 (HIGH): D3 reset ล้าง trade_log.json ด้วย clear_trade_log() (atomic, LOCK_EX)
+- B2 (HIGH): Timeout buy ประมาณ trade details จาก amount ที่ส่งจริง (รวมกรณี insufficient cash)
+- B3 (MEDIUM): Dashboard Config section ใช้ exchange_name จาก state.json แทน cfg.EXCHANGE default
+- B5 (LOW): total_invested ใช้ actual_buy_cost จาก exchange แทน decision amount
+- Review ยืนยัน: ไม่มี regression, locking ถูกต้อง, fallback ปลอดภัย
+
+---
 Task ID: U1-U12
 Agent: main
 Task: ปรับปรุง UX Dashboard ทั้ง 12 จุด

@@ -1,3 +1,33 @@
+## 2026-08-22 (Wave 4) — Dashboard Data Pipeline Integrity Fix
+
+สร้าง subagents 3 ตัวตรวจสอบ data pipeline ทั้งหมด (state.json → trade_log.json → generate_dashboard.py → deploy) หลังจาก dashboard แสดงข้อมูล 0 ทั้งหมด พบว่า D1 filter ทำงานถูก (ไม่ใช่แสดง dry-run เก่า) แต่มีบั๊กที่เกี่ยวข้องกับการบันทึก/แสดงข้อมูล
+
+### HIGH (แก้ไขแล้ว)
+
+| # | ปัญหา | ไฟล์ | รายละเอียด |
+|---|--------|------|----------|
+| B1 | D3 reset ไม่ล้าง trade_log.json | `engine.py` L252-258, `state.py` L266-290 | D3 transition (dry-run→live) reset state.json แต่ไม่ล้าง trade_log.json → เพิ่ม `clear_trade_log()` ใน state.py (atomic write + LOCK_EX) และเรียกใน D3 block |
+| B2 | Timeout buy ไม่บันทึก trade log | `engine.py` L636-656 | เดิม: timeout → `trade_succeeded=True` แต่ `decision['buy_amount']=0` → trade log ไม่บันทึก, counter ไม่เพิ่ม, ข้อมูลสูญหาย → แก้: ประมาณ `buy_btc_got`, `buy_cost_actual`, `buy_fee` จาก amount ที่ส่งไป exchange จริง (รวมกรณี insufficient cash ปรับ amount แล้ว) |
+
+### MEDIUM (แก้ไขแล้ว)
+
+| # | ปัญหา | ไฟล์ | รายละเอียด |
+|---|--------|------|----------|
+| B3 | Dashboard แสดง Exchange: BINANCE ผิด | `generate_dashboard.py` L376-381 | Config section ใช้ `cfg.EXCHANGE` (default `'binance'` จาก env var) แทนข้อมูลจาก state.json → เปลี่ยนใช้ `exchange_name` จาก state (fallback เป็น cfg) และ `currency` จาก state |
+
+### LOW (แก้ไขแล้ว)
+
+| # | ปัญหา | ไฟล์ | รายละเอียด |
+|---|--------|------|----------|
+| B5 | total_invested ใช้ decision amount | `state.py` L151-183, `engine.py` L738 | เดิม: `total_invested += decision['buy_amount']` (ยอดที่ตั้งใจ) ไม่ใช่ยอดจริงจาก exchange → เพิ่ม param `actual_buy_cost` ใช้ `buy_cost_actual` จาก exchange response |
+
+### สรุปสถานะ dashboard
+- Dashboard ตอนนี้แสดง **ค่า 0 ทั้งหมด** (ไม่ใช่ข้อมูล dry-run เก่า) เพราะ D1 filter ทำงานถูก + ยังไม่มี live trade สำเร็จหลัง D3 reset
+- หลัง live buy ครั้งแรกสำเร็จ: state.json จะอัปเดต (balances, indicators, exchange_name) + trade_log จะมี entry `dry_run: false` + dashboard จะแสดงข้อมูลจริง
+- Config section จะแสดง **BITKUB / THB** ถูกต้อง (จาก state.json) แทน BINANCE/USDT
+
+---
+
 ## 2026-08-21 (Wave 3) — Dashboard Stale Dry-Run Data Fix
 
 Dashboard แสดงข้อมูลเก่าจาก dry-run testing (2026-08-18) แทนข้อมูลจริงจาก exchange

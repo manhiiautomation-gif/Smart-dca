@@ -373,9 +373,12 @@ def generate_dashboard(state_path='live_bot/state.json',
     except Exception:
         live_usd_thb = cfg.USD_THB_RATE
     # Show effective values (after THB→local conversion)
+    # Use exchange_name from state.json (set by engine.py during live runs)
+    # Fallback to cfg.EXCHANGE only if state has no exchange info yet.
+    _display_exchange = exchange_name if exchange_name else cfg.EXCHANGE.upper()
     cfg_items = [
-        ('Exchange', cfg.EXCHANGE.upper()),
-        ('Currency', cfg.CURRENCY),
+        ('Exchange', _display_exchange),
+        ('Currency', currency),
         ('USD/THB Rate', f'{live_usd_thb:.3f}'),
         ('Daily DCA Budget', f'{cfg.DAILY_BUDGET_THB:,.0f} THB = {cfg.get_daily_budget():.2f} {cfg.CURRENCY}'),
         ('Max Buy/Trade', f'{cfg.MAX_BUY_THB:,.0f} THB = {cfg.get_max_buy():.2f} {cfg.CURRENCY}'),
