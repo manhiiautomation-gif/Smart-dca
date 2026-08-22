@@ -10,6 +10,8 @@ between simultaneous GitHub Actions runs or local processes.
 import fcntl
 import json
 import os
+import shutil
+import time
 from datetime import date, datetime, timezone, timedelta
 
 # H1: Thai timezone — must match engine.py
@@ -200,7 +202,10 @@ def update_state_after_run(state: dict, decision: dict,
 
 
 def load_trade_log(path: str = 'trade_log.json') -> list:
-    """Load trade log from JSON file with shared lock (H4)."""
+    """Load trade log from JSON file with shared lock (H4).
+
+    Handles corrupted JSON gracefully (same as load_state).
+    """
     lock = path + '.lock'
     if os.path.exists(path):
         with open(lock, 'w') as lf:
@@ -208,6 +213,16 @@ def load_trade_log(path: str = 'trade_log.json') -> list:
             try:
                 with open(path, 'r') as f:
                     return json.load(f)
+            except json.JSONDecodeError:
+                print(f'[STATE] WARNING: corrupted trade log at {path}, returning empty list')
+                # Backup corrupted file
+                bak = path + '.corrupted.' + str(int(time.time()))
+                try:
+                    shutil.copy2(path, bak)
+                    print(f'[STATE] Corrupted trade log backed up to {bak}')
+                except Exception:
+                    pass
+                return []
             finally:
                 fcntl.flock(lf, fcntl.LOCK_UN)
     return []

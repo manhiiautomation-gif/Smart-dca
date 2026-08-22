@@ -80,8 +80,9 @@
         .grid { display: grid; gap: 16px; margin-bottom: 16px; }
         .grid-2 { grid-template-columns: 1fr 1fr; }
         .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+        .dca-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
         @media (max-width: 640px) {
-            .grid-2, .grid-3 { grid-template-columns: 1fr; }
+            .grid-2, .grid-3, .dca-grid { grid-template-columns: 1fr; }
             body { padding: 10px; }
             .card { padding: 12px; border-radius: 10px; }
             .grid { gap: 10px; margin-bottom: 10px; }
@@ -394,11 +395,11 @@
                 </div>
                 <div class="ind-item">
                     <span class="label">Exchange</span>
-                    <span class="val">THB</span>
+                    <span class="val">BINANCE</span>
                 </div>
                 <div class="ind-item">
                     <span class="label">รันล่าสุด</span>
-                    <span class="val"></span>
+                    <span class="val">—</span>
                 </div>
                 <div class="ind-item">
                     <span class="label">จำนวนรัน (ตลอดกาล)</span>
@@ -421,7 +422,7 @@
     <!-- Row 1.5: DCA Buy Info -->
     <div class="card" style="margin-bottom:16px;">
         <div class="card-title">DCA Status</div>
-        <div style="margin-bottom:16px;"><div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">DCA รอบล่าสุด</div><div style="text-align:center;padding:12px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--text-dim);font-size:0.85rem;">ยังไม่มีการซื้อขาย (ยังไม่ถึงเวลารัน หรือ multipler = 0)</div></div><div style="margin-bottom:16px;"><div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">ประเมินรอบถัดไป</div><div style="text-align:center;padding:12px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--text-dim);font-size:0.85rem;">MVRV สูง (—) - ไม่ซื้อรอบนี้ (0x)</div></div>
+        <div style="margin-bottom:16px;"><div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">DCA รอบล่าสุด</div><div style="text-align:center;padding:12px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--text-dim);font-size:0.85rem;">ยังไม่มีการซื้อขาย (ยังไม่ถึงเวลารัน หรือ multipler = 0)</div></div><div style="margin-bottom:16px;"><div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">ประเมินรอบถัดไป</div><div style="text-align:center;padding:12px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--text-dim);font-size:0.85rem;">MVRV ยังไม่มีข้อมูล — รอรันครั้งแรก</div></div>
     </div>
 
     <!-- Row 2: Indicators -->
@@ -580,14 +581,14 @@
         <div class="collapsible-body">
             <div class="ind-grid" style="margin-top:12px;">
                 <div class="ind-item"><span class="label">Exchange</span><span class="val">BINANCE</span></div>
-<div class="ind-item"><span class="label">Currency</span><span class="val">USDT</span></div>
-<div class="ind-item"><span class="label">USD/THB Rate</span><span class="val">32.650</span></div>
-<div class="ind-item"><span class="label">Daily DCA Budget</span><span class="val">100 THB = 3.06 USDT</span></div>
-<div class="ind-item"><span class="label">Max Buy/Trade</span><span class="val">1,000 THB = 30.63 USDT</span></div>
+<div class="ind-item"><span class="label">Currency</span><span class="val">THB</span></div>
+<div class="ind-item"><span class="label">USD/THB Rate</span><span class="val">32.600</span></div>
+<div class="ind-item"><span class="label">Daily DCA Budget</span><span class="val">100 THB = 3.07 USDT</span></div>
+<div class="ind-item"><span class="label">Max Buy/Trade</span><span class="val">1,000 THB = 30.67 USDT</span></div>
 <div class="ind-item"><span class="label">Max DCA Buys/Day</span><span class="val">1</span></div>
 <div class="ind-item"><span class="label">Reserve Floor</span><span class="val">6.13 USDT</span></div>
-<div class="ind-item"><span class="label">Max Reserve Inject</span><span class="val">27.57 USDT</span></div>
-<div class="ind-item"><span class="label">Max Boosted Inject</span><span class="val">49.62 USDT</span></div>
+<div class="ind-item"><span class="label">Max Reserve Inject</span><span class="val">27.61 USDT</span></div>
+<div class="ind-item"><span class="label">Max Boosted Inject</span><span class="val">49.69 USDT</span></div>
 <div class="ind-item"><span class="label">Boost Multiplier</span><span class="val">1.8x</span></div>
 <div class="ind-item"><span class="label">Boost Price Ratio</span><span class="val">1.05x realized</span></div>
 <div class="ind-item"><span class="label">Low Balance Alert</span><span class="val">< 7 days remaining</span></div>
@@ -628,7 +629,7 @@
 
     <!-- Footer -->
     <div class="footer">
-        Phoenix v5.1 DCA Bot | Generated: 2026-08-21 14:56:58 | Auto-refresh: 5 min | <a href="https://github.com/manhiiautomation-gif/Smart-dca" target="_blank" style="color:var(--blue);text-decoration:none;">GitHub</a>
+        Phoenix v5.1 DCA Bot | Generated: 2026-08-22 08:37 | Auto-refresh: 5 min | <a href="https://github.com/manhiiautomation-gif/Smart-dca" target="_blank" style="color:var(--blue);text-decoration:none;">GitHub</a>
     </div>
 
     <script>
@@ -802,7 +803,7 @@
             if (isAlive) {
                 title.textContent = 'Kill Bot?';
                 msg.innerHTML = '⚠️ ก่อน Kill:<br>' +
-                    '• กำลังถือ: <b>' + 0.00 + ' BTC</b> (~' + 0.00 + ' THB)<br>' +
+                    '• กำลังถือ: <b>' + '0.00' + ' BTC</b> (~' + '0.00' + ' THB)<br>' +
                     '• ถ้าราคาเปลี่ยน จะไม่มี auto-sell<br>' +
                     '• ต้อง Resume ด้วยมือเท่านั้น';
                 input.value = '';
@@ -859,7 +860,11 @@
             if (e.target === this) closeConfirm();
         });
         document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape') { closeConfirm(); toggleHelp(); }
+            if (e.key === 'Escape') {
+                var confirmEl = document.getElementById('confirmOverlay');
+                if (confirmEl && confirmEl.classList.contains('active')) { closeConfirm(); }
+                else { toggleHelp(); }
+            }
         });
         // Help modal
         window.toggleHelp = function() {
@@ -877,9 +882,9 @@
 
         // U9: Freshness badge — shows relative time since generation
         (function() {
-            var genTime = new Date('2026-08-21 14:56:58');
+            var genTime = 1787387828 * 1000;
             var el = document.getElementById('freshness');
-            if (!el || isNaN(genTime)) return;
+            if (!el) return;
             function update() {
                 var diff = Math.floor((Date.now() - genTime) / 60000);
                 if (diff < 1) el.textContent = 'อัปเดตเมื่อสักครู่';

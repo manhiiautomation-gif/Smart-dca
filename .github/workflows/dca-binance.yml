@@ -52,6 +52,8 @@ jobs:
         run: python live_bot/main.py --exchange binance --state-file live_bot/state.json
 
       - name: Generate dashboard
+        if: always()
+        continue-on-error: true
         run: python scripts/generate_dashboard.py
 
       - name: Commit updated files

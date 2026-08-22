@@ -9,6 +9,7 @@ import html as html_mod
 import json
 import os
 import sys
+import time as time_mod
 from datetime import datetime, date
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -308,7 +309,7 @@ def generate_dashboard(state_path='live_bot/state.json',
             today_html = (
                 '<div style="margin-bottom:16px;">'
                 '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">DCA รอบล่าสุด</div>'
-                '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'
+                '<div class="dca-grid">'
                 f'<div style="text-align:center;padding:8px;border-radius:8px;background:rgba({"63,185,80" if ld_mult >= 2 else "88,166,255" if ld_mult >= 1 else "210,153,34"},0.1);border:1px solid var(--border);">'
                 f'<div style="font-size:1.4rem;font-weight:700;color:var(--{mult_color});">{ld_mult}x</div>'
                 f'<div style="font-size:10px;color:var(--text-dim);">Multiplier</div></div>'
@@ -338,7 +339,7 @@ def generate_dashboard(state_path='live_bot/state.json',
             next_html = (
                 '<div style="margin-bottom:16px;">'
                 '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">ประเมินรอบถัดไป <span style="font-size:9px;opacity:0.6;">(จาก indicators ปัจจุบัน)</span></div>'
-                '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'
+                '<div class="dca-grid">'
                 f'<div style="text-align:center;padding:8px;border-radius:8px;background:rgba({"63,185,80" if est_mult >= 2 else "88,166,255" if est_mult >= 1 else "210,153,34"},0.1);border:1px solid var(--border);">'
                 f'<div style="font-size:1.4rem;font-weight:700;color:var(--{est_color});">{est_mult}x</div>'
                 f'<div style="font-size:10px;color:var(--text-dim);">Multiplier</div></div>'
@@ -477,7 +478,8 @@ def generate_dashboard(state_path='live_bot/state.json',
         portfolio_series=portfolio_series,
         recent_trades=recent_trades,
         last_trade_date=last_trade_date,
-        now=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        now_ts=int(time_mod.time()),
+        now_str=datetime.now().strftime('%Y-%m-%d %H:%M'),
         # demo_html removed (bot is live)
         config_html=config_html,
         avg_buy_price=avg_buy_price,
@@ -551,7 +553,8 @@ def build_html(**kw) -> str:
     state = kw.get('state', {})
     recent_trades = kw['recent_trades']
     portfolio_series = kw['portfolio_series']
-    now_str = kw['now']
+    now_ts = kw['now_ts']
+    now_str = kw['now_str']
     last_trade_date = kw.get('last_trade_date', '—')
     # demo_html removed (bot is live)
     config_html = kw.get('config_html', '')
@@ -751,8 +754,9 @@ def build_html(**kw) -> str:
         .grid {{ display: grid; gap: 16px; margin-bottom: 16px; }}
         .grid-2 {{ grid-template-columns: 1fr 1fr; }}
         .grid-3 {{ grid-template-columns: 1fr 1fr 1fr; }}
+        .dca-grid {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }}
         @media (max-width: 640px) {{
-            .grid-2, .grid-3 {{ grid-template-columns: 1fr; }}
+            .grid-2, .grid-3, .dca-grid {{ grid-template-columns: 1fr; }}
             body {{ padding: 10px; }}
             .card {{ padding: 12px; border-radius: 10px; }}
             .grid {{ gap: 10px; margin-bottom: 10px; }}
@@ -1415,7 +1419,7 @@ def build_html(**kw) -> str:
             if (isAlive) {{
                 title.textContent = 'Kill Bot?';
                 msg.innerHTML = '\u26a0\ufe0f ก่อน Kill:<br>' +
-                    '\u2022 กำลังถือ: <b>' + {fmt_num(btc_bal)} + ' BTC</b> (~' + {fmt_num(btc_bal * current_price)} + ' {currency})<br>' +
+                    '\u2022 กำลังถือ: <b>' + '{fmt_num(btc_bal)}' + ' BTC</b> (~' + '{fmt_num(btc_bal * current_price)}' + ' {currency})<br>' +
                     '\u2022 ถ้าราคาเปลี่ยน จะไม่มี auto-sell<br>' +
                     '\u2022 ต้อง Resume ด้วยมือเท่านั้น';
                 input.value = '';
@@ -1472,7 +1476,11 @@ def build_html(**kw) -> str:
             if (e.target === this) closeConfirm();
         }});
         document.addEventListener('keydown', function(e) {{
-            if (e.key === 'Escape') {{ closeConfirm(); toggleHelp(); }}
+            if (e.key === 'Escape') {{
+                var confirmEl = document.getElementById('confirmOverlay');
+                if (confirmEl && confirmEl.classList.contains('active')) {{ closeConfirm(); }}
+                else {{ toggleHelp(); }}
+            }}
         }});
         // Help modal
         window.toggleHelp = function() {{
@@ -1490,9 +1498,9 @@ def build_html(**kw) -> str:
 
         // U9: Freshness badge — shows relative time since generation
         (function() {{
-            var genTime = new Date('{now_str}');
+            var genTime = {now_ts} * 1000;
             var el = document.getElementById('freshness');
-            if (!el || isNaN(genTime)) return;
+            if (!el) return;
             function update() {{
                 var diff = Math.floor((Date.now() - genTime) / 60000);
                 if (diff < 1) el.textContent = 'อัปเดตเมื่อสักครู่';

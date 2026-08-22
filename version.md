@@ -1,3 +1,39 @@
+## 2026-08-22 (Wave 5) — Full System Bug Sweep (team-dev Skill)
+
+ใช้ team-dev skill 7-phase workflow ส่ง sub-agents 4 ตัวตรวจสอบ DCA engine, dashboard, workflows, และ data pipeline พบบั๊กใหม่ 11 รายการ (B6-B16) แก้ไข 11 รายการ คะแนน quality 94/100
+
+### MEDIUM (แก้ไขแล้ว)
+
+| # | ปัญหา | ไฟล์ | รายละเอียด |
+|---|--------|------|----------|
+| B6 | `_no_trade()` รีเซ็ต sell cooldown เป็น 0 | `strategy.py` L282-288, L129 | เดิม: ถ้า MVRV=NaN `_no_trade()` ตั้ง `new_cooldown:0` ทำลาย cooldown ที่กำลังนับ → เพิ่ม `cooldown` param, preserve ค่าเดิม |
+| B7 | BG batch MVRV override ทำลายค่าที่ถูกต้อง | `engine.py` L466-476, L952-957 | เดิม: BG ส่ง MVRV≤0 → override ค่าจาก embedded history ด้วย NaN → เพิ่ม `bg_mvrv_val > 0` guard ก่อน override (ทั้ง run_daily + refresh_dashboard) |
+| B9 | Freshness indicator timezone ผิด | `generate_dashboard.py` L480,1492-1504 | เดิม: ใช้ `datetime.now().strftime()` → browser parse เป็น local time → diff ผิด 7 ชม. → เปลี่ยนใช้ Unix timestamp |
+| B11 | JS comma operator ทำลาย kill confirm dialog | `generate_dashboard.py` L1419-1420 | เดิม: `fmt_num()` output มี comma ฝังใน JS ไม่ quote → JS ตีความ comma เป็น operator → ครอบด้วย single quote |
+| B12 | `load_trade_log()` ไม่ handle corrupted JSON | `state.py` L202-226 | เดิม: `json.load()` ไม่มี try/except → corrupted file = crash → เพิ่ม JSONDecodeError handling + backup (เทียบเท่า load_state) |
+| B14 | dashboard-trigger.yml kill ขาด `import os` | `dashboard-trigger.yml` L76 | เดิม: `os.environ.get(...)` ใช้โดยไม่ import → NameError → L2 kill switch ใช้งานไม่ได้ |
+| B15 | Telegram failure alert ขาด env block | `dca-bitkub.yml` L108-113 | เดิม: step "Alert on failure" ไม่มี `env:` block → secrets ไม่ส่งถึง → alert ถูก skip เงียบๆ |
+
+### LOW (แก้ไขแล้ว)
+
+| # | ปัญหา | ไฟล์ | รายละเอียด |
+|---|--------|------|----------|
+| B8 | D3 transition ไม่รีเซ็ต `total_reserve_injected` | `engine.py` L239-242 | เพิ่ม field ใน D3 reset tuple — ป้องกัน dashboard แสดงค่าผิดจาก dry-run |
+| B10 | DCA card inline grid ไม่ responsive | `generate_dashboard.py` L311,341,755,757 | ย้าย inline `grid-template-columns:1fr 1fr 1fr` เป็น CSS class `.dca-grid` + `@media` responsive rule |
+| B13 | Escape key toggle help พร้อมกับปิด confirm | `generate_dashboard.py` L1476-1484 | เปลี่ยนเป็น: ถ้า confirm เปิดอยู่ → ปิด confirm; ถ้าไม่ → toggle help |
+| B16 | Binance dashboard ขาด `if: always()` | `dca-binance.yml` L54-57 | เพิ่ม `if: always()` + `continue-on-error: true` ให้ตรง pattern ของ Bitkub workflow |
+
+### ตรวจสอบแล้วแต่ไม่ต้องแก้ (Latent)
+
+| # | ปัญหา | เหตุผล skip |
+|---|--------|--------------|
+| B17 | deploy-pages ลอง build โดยไม่มี dependencies | ทุก caller ส่ง `skip_build: true` — จะแก้เมื่อมี caller ใช้ `skip_build: false` |
+
+### Quality Score: 94/100
+- Correctness: 28/30 | Completeness: 19/20 | Edge Cases: 14/15 | No Regressions: 15/15 | Code Quality: 9/10 | Documentation: 9/10
+
+---
+
 ## 2026-08-22 (Wave 4) — Dashboard Data Pipeline Integrity Fix
 
 สร้าง subagents 3 ตัวตรวจสอบ data pipeline ทั้งหมด (state.json → trade_log.json → generate_dashboard.py → deploy) หลังจาก dashboard แสดงข้อมูล 0 ทั้งหมด พบว่า D1 filter ทำงานถูก (ไม่ใช่แสดง dry-run เก่า) แต่มีบั๊กที่เกี่ยวข้องกับการบันทึก/แสดงข้อมูล

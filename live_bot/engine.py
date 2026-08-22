@@ -239,7 +239,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         for _key in ('total_invested', 'adjusted_invested', 'total_sell_proceeds',
                      'total_btc_bought', 'total_btc_sold', 'cumulative_fees',
                      'peak_value', 'max_drawdown', 'sell_proceeds_reserve',
-                     'dry_run_sell_proceeds'):
+                     'dry_run_sell_proceeds', 'total_reserve_injected'):
             bot_state[_key] = 0.0 if isinstance(bot_state.get(_key, 0), (int, float)) else None
         for _key in ('buy_count', 'sell_count'):
             bot_state[_key] = 0
@@ -463,19 +463,16 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         # BATCH fetch — one call for all metrics, daily guard active
         bg = bg_metrics.get_all_metrics_today(target_date=today)
 
-        # --- MVRV (if BG has fresher value, override) ---
+        # --- MVRV (if BG has valid value, override lower-priority source) ---
         if not math.isnan(bg.get('mvrv', float('nan'))):
             bg_mvrv_val = bg['mvrv']
-            bg_mvrv_src = bg.get('mvrv_source', 'BG')
-            # Only override if section 4 used a lower-priority source
-            if mvrv_source != 'BG' and bg_mvrv_src == 'BG':
+            # Only override if BG value is valid (>0) and current source is lower priority
+            if bg_mvrv_val > 0 and mvrv_source != 'BG':
                 mvrv_val = bg_mvrv_val
-                if mvrv_val is not None and mvrv_val <= 0:
-                    mvrv_val = float('nan')
                 mvrv_source = 'BG'
                 # Recompute derived values with BG MVRV
-                nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 else 0
-                realized_price = price / mvrv_val if mvrv_val > 0 else realized_price
+                nupl = 1.0 - 1.0 / mvrv_val
+                realized_price = price / mvrv_val
                 print(f'[BOT] MVRV upgraded from BG: {mvrv_val:.4f}')
 
         # --- MVRV Z-Score from BG ---
@@ -954,12 +951,10 @@ def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
         bg = bg_m.get_all_metrics_today(target_date=today)
         if not math.isnan(bg.get('mvrv', float('nan'))):
             bg_mvrv_val = bg['mvrv']
-            if bg.get('mvrv_source', 'BG') == 'BG':
+            if bg_mvrv_val > 0:
                 mvrv_val = bg_mvrv_val; mvrv_source = 'BG'
-                if mvrv_val is not None and mvrv_val <= 0:
-                    mvrv_val = float('nan')
-                nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 else 0
-                realized_price = price / mvrv_val if mvrv_val > 0 else realized_price
+                nupl = 1.0 - 1.0 / mvrv_val
+                realized_price = price / mvrv_val
         if not math.isnan(bg.get('mvrv_zscore', float('nan'))):
             mvrv_z = bg['mvrv_zscore']; mvrv_z_source = 'BG'
         if not math.isnan(bg.get('sth_sopr', float('nan'))):

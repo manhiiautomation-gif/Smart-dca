@@ -126,7 +126,7 @@ def phoenix_v5_1_decision(
     """
     # ── Proxy detection ──
     if np.isnan(mvrv):
-        return _no_trade('MVRV unavailable')
+        return _no_trade('MVRV unavailable', cooldown=cooldown)
 
     # ── BEAR BLOCK CHECK ──
     in_bear = not np.isnan(sma_200) and price < sma_200
@@ -279,10 +279,10 @@ def phoenix_v5_1_decision(
     }
 
 
-def _no_trade(reason: str) -> dict:
+def _no_trade(reason: str, cooldown: int = 0) -> dict:
     return {
         'buy_amount': 0.0, 'sell_amount': 0.0,
-        'new_cooldown': 0, 'sell_score': 0,
+        'new_cooldown': cooldown, 'sell_score': 0,
         'reserve_injection': 0.0, 'path_taken': f'no-trade:{reason}',
         'in_bear': False,
     }
