@@ -2,7 +2,7 @@
 
 > **Purpose:** อ่านไฟล์นี้อย่างเดียวแล้วเข้าใจระบบทั้งหมด พร้อมทำงานต่อได้ทันที ไม่ต้องการ context เพิ่มเติม
 >
-> Last updated: 2026-08-20
+> Last updated: 2026-08-22 (Wave 5)
 
 ---
 
@@ -41,6 +41,11 @@ GitHub Actions (cron 20:00 THB)
 - **State file locking** (`state.py`): `load_state()` uses `LOCK_SH` (shared/read), `save_state()` uses `LOCK_EX` (exclusive/write)
   - Lock file: `state.json.lock`
   - Atomic writes via `tempfile.mkstemp()` + `os.replace()` — readers always see valid JSON
+- **Trade log locking**: Same pattern — `LOCK_SH` for read, `LOCK_EX` for append (read-modify-write atomic)
+  - Lock file: `trade_log.json.lock`
+  - Corrupted JSON recovery: `JSONDecodeError` → backup corrupted file → return empty list
+- **GitHub Actions concurrency**: `dca-any-exchange` group, `cancel-in-progress: false`
+  - 3 cron slots (20:00/20:10/20:30 THB) wait for each other, do not cancel
 
 ### Design Principles
 - **Zero pandas** — pure numpy + stdlib only (lightweight for GitHub Actions)
@@ -58,15 +63,15 @@ GitHub Actions (cron 20:00 THB)
 | File | Lines | Purpose | Key Functions |
 |------|-------|---------|--------------|
 | `main.py` | ~150 | CLI entry, concurrency lock, error handler | `main()`, `create_exchange_client()` |
-| `engine.py` | ~965 | Main orchestrator, 13-step run cycle | `run_daily()`, `run_demo()` |
-| `strategy.py` | ~400 | Buy/sell decision logic, scoring | `phoenix_v5_1_decision()` |
+| `engine.py` | ~1375 | Main orchestrator, 13-step run cycle | `run_daily()`, `refresh_dashboard()`, `run_demo()` |
+| `strategy.py` | ~289 | Buy/sell decision logic, scoring | `phoenix_v5_1_decision()`, `_no_trade()` |
 | `config.py` | ~260 | All config from env vars | `get_daily_budget()`, `get_usd_thb_rate()` |
 | `bitkub_client.py` | ~300 | Bitkub API v3 (THB) | `get_price()`, `get_balances()`, `market_buy()`, `market_sell()` |
 | `binance_client.py` | ~450 | Binance Spot API (USDT) + geo-fallback | `get_price()`, `market_buy()`, `market_sell()` |
 | `bg_metrics.py` | ~630 | BGeometrics on-chain metrics cache | `get_all_metrics_today()`, `get_cached_value()` |
 | `mvrv_fetcher.py` | ~200 | MVRV web fetcher (CoinMetrics, ahasignals) | `try_update_mvrv()` |
 | `indicators.py` | ~150 | SMA, EMA, RSI, MACD (pure numpy) | `sma()`, `rsi()`, `macd()`, `rsi_divergence()` |
-| `state.py` | ~200 | JSON state persistence, file locking | `load_state()`, `save_state()` |
+| `state.py` | ~310 | JSON state persistence, file locking, trade log | `load_state()`, `save_state()`, `load_trade_log()`, `append_trade_log()`, `clear_trade_log()` |
 | `kill_switch.py` | ~80 | L1 (env) + L2 (JSON) emergency stop | `is_killed()`, `get_full_status()` |
 | `notifier.py` | ~100 | Telegram message formatting | `send_telegram()`, `format_report()` |
 | `demo_portfolio.py` | ~100 | Simulated portfolio for demo mode | `process_demo_trade()` |
@@ -77,7 +82,7 @@ GitHub Actions (cron 20:00 THB)
 | File | Purpose | Updated by |
 |------|---------|-----------|
 | `live_bot/state.json` | Bot state (balances, run count, indicators) | engine.py every run |
-| `trade_log.json` | Trade history (max 500 entries) | state.py on each trade |
+| `trade_log.json` | Trade history (max 5000 entries, ~13.7 years) | state.py on each trade |
 | `kill_switch.json` | L2 kill switch state | kill_switch.py / dashboard trigger |
 | `live_bot/bg_cache.json` | BGeometrics 5-year cache (up to 8 metrics) | bg_metrics.py on fetch |
 | `live_bot/usd_thb_rate.json` | USD/THB rate cache | config.py |
@@ -126,6 +131,14 @@ External only: requests, numpy (requirements.txt)
 
 ```
 Step 0:  Idempotency check — skip if last_run_date == today (THB timezone)
+         Also checks trade_log for daily buy count (dual-layer protection)
+Step 0c: D3 transition (dry-run to live auto-reset):
+         If last_dry_run == True and this is a live run:
+         - Reset ALL counters: total_invested, total_btc_bought, total_sell_proceeds,
+           cumulative_fees, peak_value, max_drawdown, sell_proceeds_reserve,
+           total_reserve_injected, buy_count, sell_count
+         - Clear trade_log.json atomically (clear_trade_log with LOCK_EX)
+         - Reset last_trade_date, last_sell_date, realized_price, lth_realized_price
 Step -1: Kill switch — L1 (env BOT_ENABLED) + L2 (kill_switch.json)
 Step 1:  Fetch BTC price from exchange
 Step 2:  Fetch 500-day price history (Binance Vision ZIP → CoinGecko fallback)
@@ -161,9 +174,11 @@ Step 13: Telegram notification with daily report
 ```
 
 ### Critical Order Dependencies
-- **Step 4 (MVRV)** must run before **Step 4b (BG batch)** — MVRV from cache is used for early NUPL calculation
-- **Step 4b** is the ONLY place that calls BG API — uses daily guard to prevent duplicate fetches
-- **Step 5 (balances)** needs working exchange auth — if it fails, balances default to 0
+- **Step 0c (D3)** must run before Step -1 (kill switch) — D3 kill switch check re-runs are safe
+- **Step 4 (MVRV)** must run before **Step 4b (BG batch)** — MVRV from cache for NUPL
+- **Step 4b** is the ONLY place that calls BG API — daily guard prevents duplicates
+- **Step 4b MVRV override** only triggers if bg_mvrv_val > 0 (B7 fix)
+- **Step 9** writes trade_log BEFORE state (H2 fix)
 - **Step 10** updates `adjusted_invested` on sell: `adjusted_invested *= (1 - sell_fraction)`
 
 ---
@@ -454,110 +469,125 @@ DAILY_BUDGET_THB (env)
 
 ---
 
-## 8. GitHub Actions Workflow
+## 8. GitHub Actions Workflows
 
-### File: `.github/workflows/dca-bitkub.yml`
+### dca-bitkub.yml (Primary - cron + manual)
 
-### Schedule
-```
-Cron: 13:00, 13:10, 13:30 UTC (= 20:00, 20:10, 20:30 THB)
-Concurrency: group=bitkub-dca, cancel-in-progress=false
-```
-
+Schedule: 13:00, 13:10, 13:30 UTC (= 20:00, 20:10, 20:30 THB)
+Concurrency: group=dca-any-exchange, cancel-in-progress=false
 - 3 slots = redundancy (idempotency prevents duplicate trades)
-- If all 3 fail → Telegram alert
+- If all 3 fail -> Telegram alert (has env block with secrets)
+- Shared concurrency group with Binance workflow
 
-### Pipeline
-
-```
-1. Checkout (with GH_PAT for push back)
+Pipeline:
+1. Checkout (with GH_PAT)
 2. Setup Python 3.11
-3. pip install -r requirements.txt
-4. Determine dry_run: workflow input > secret > default (live)
-   ⚠️ Boolean unchecked = empty string "", NOT "false"
-   Code: if [ "$INPUT" = "true" ]; then FLAGS="$FLAGS --dry-run"; fi
-5. Run bot (3× retry, 60s backoff)
-   python -m live_bot.main --exchange bitkub --state-file live_bot/state.json $FLAGS
-6. On ALL 3 failures → Telegram alert
-7. Generate dashboard (python scripts/generate_dashboard.py)
-8. Git commit & push (3× retry, auto-stash, rebase)
-   Files: state.json, trade_log.json, bg_cache.json, usd_thb_rate.json, dashboard/
-9. Triggers deploy-pages.yml → GitHub Pages
-```
+3. pip install
+4. Determine dry_run (workflow input > secret > default live)
+5. Run bot (3x retry, 60s backoff)
+6. On all 3 failures -> Telegram alert (env: TELEGRAM_BOT_TOKEN/CHAT_ID)
+7. Commit state + trade data (critical, separate from dashboard)
+8. Generate dashboard (if: always(), continue-on-error: true)
+9. Commit dashboard (non-critical, if: always())
+10. Deploy via deploy-pages.yml (skip_build: true)
+
+### dashboard-trigger.yml (Manual)
+Actions: update | kill | resume
+- update: main.py --refresh-only then regenerate dashboard
+- kill: activate L2 kill switch (needs import os in one-liner!)
+- resume: deactivate L2 kill switch
+- Has full env vars, commits all data + dashboard
+
+### dca-binance.yml (Manual)
+- Same as Bitkub but USDT, dashboard step has if: always() (B16)
+
+### deploy-pages.yml (Reusable)
+- Deploys dashboard/dist/ to GitHub Pages
+- All callers pass skip_build: true
+- Latent B17: no setup-python when skip_build: false
 
 ### Workflow Inputs
-
 | Input | Type | Description |
 |-------|------|-------------|
-| `dry_run` | boolean | Checkbox — unchecked = empty = LIVE mode |
+| dry_run | boolean | unchecked = empty = LIVE |
+| budget | number | per-run THB |
+| force | boolean | bypass daily limit |
 
-### dry_run Detection (CRITICAL)
-
-```bash
-# WRONG: elif [ -n "$INPUT" ]  — empty string is truthy in -n!
-# RIGHT:
-if [ "$INPUT" = "true" ]; then
-    FLAGS="$FLAGS --dry-run"
-fi
-```
+dry_run Detection (CRITICAL): Boolean unchecked = empty string "" NOT "false". Use: if [ "$INPUT" = "true" ]; then FLAGS="$FLAGS --dry-run"; fi
 
 ---
 
 ## 9. Dashboard
 
-### Generation
-- `scripts/generate_dashboard.py` reads `state.json`, `trade_log.json`, `kill_switch.json`
-- Outputs self-contained `dashboard/dist/index.html` (dark theme, auto-refresh 5 min)
+- scripts/generate_dashboard.py (~1615 lines) reads state.json, trade_log.json, kill_switch.json
+- Outputs self-contained dashboard/dist/index.html (dark theme, ~48KB)
+- Freshness badge: Unix timestamp-based (no timezone issues)
+- Auto-refresh: meta tag every 5 minutes
 
-### Netlify Trigger Function
-- `dashboard/netlify/functions/trigger.js` — serverless POST endpoint
-- Rate limit: 5 req/min per IP
-- Actions: `update`, `kill`, `resume`
-- Dispatches `dashboard-trigger.yml` GitHub Actions
+Features (U1-U12):
+- Onboarding hero when no live trades, DRY RUN banner, kill switch controls
+- Responsive design (<=640px), smart BTC decimals (fmt_btc), config accordion
+- Next run time in TH timezone, empty chart placeholder, conditional max drawdown color
+- All labels in Thai, quoted JS values for fmt_num()
 
-### Dashboard Data Sources
-- State indicators (last run's full snapshot)
-- Trade log (recent trades)
-- Kill switch status (L1 + L2 combined)
+Data Sources:
+- State indicators (.get() with defaults everywhere)
+- Trade log (strict D1 filter: dry_run is False only)
+- Config section: reads exchange_name/currency from state.json (B3 fix)
+- Kill switch: L1 + L2 combined
+
+Netlify Trigger: dashboard/netlify/functions/trigger.js - POST endpoint, 5 req/min/IP
 
 ---
 
 ## 10. Common Pitfalls & Gotchas
 
 ### Bitkub API
-1. **Signature formula**: `HMAC-SHA256(ts + METHOD + path + body, secret)` — NO api_key in payload
-2. **Header name**: `X-BTK-SIGN` (not `X-BTK-SIGNATURE`)
-3. **Error 0 = success**: `error: 0` in response body means OK, don't throw
-4. **Wallet path**: `/api/v3/market/wallet` (POST, NOT `/api/v3/market/balances`)
-5. **Wallet format**: flat numbers `{"BTC": 8.9}` not nested `{"BTC": {"available": 8.9}}`
-6. **Buy amount**: in THB for place-bid, in BTC for place-ask
+1. Signature: HMAC-SHA256(ts + METHOD + path + body, secret) - NO api_key in payload
+2. Header: X-BTK-SIGN (not X-BTK-SIGNATURE)
+3. error: 0 = success (do not throw)
+4. Wallet: /api/v3/market/wallet POST (not /balances)
+5. Wallet format: flat {"BTC": 8.9} not nested
+6. Buy: THB for place-bid, BTC for place-ask
 
 ### BGeometrics
-7. **Use `get_cached_value()` for early reads** — never `get_all_metrics_today()` for preview
-8. **Rate limit**: 10 req/hr free tier — 5 metrics × 1 call each
-9. **Data lag**: BG data is always 1-2 days behind (D-2 is normal)
-10. **Freshness = 3 days**: cache within 3 days skips fetch entirely
+7. Use get_cached_value() for early reads (0 API calls)
+8. Rate limit: 10 req/hr free tier
+9. Data lag: BG always 1-2 days behind (normal)
+10. Freshness = 3 days: cache within 3 days skips fetch
 
 ### Engine / State
-11. **Thai timezone**: all date logic uses `_thai_today()` (UTC+7)
-12. **Never sell 100%**: hard cap at `btc_balance * 0.99`
-13. **Kill switch skips idempotency**: `last_run_date` NOT updated when killed (allows re-run)
-14. **Adjusted invested**: on sell, `adjusted_invested *= (1 - sell_fraction)` — keeps ROI accurate
-15. **NaN in JSON**: `_sanitize_for_json()` converts NaN/Inf → null before saving
+11. Thai timezone (UTC+7) for all dates
+12. Never sell >99% of BTC
+13. Kill switch skips idempotency (last_run_date NOT updated)
+14. adjusted_invested *= (1 - sell_fraction) on sell
+15. _sanitize_for_json() converts NaN/Inf to null
+16. Trade log BEFORE state (H2 fix)
+17. actual_buy_cost: use exchange return, not decision amount
+18. Timeout buy: assume executed, estimate from sent amount
+19. D3 transition: auto-resets ALL counters + clears trade_log
+20. BG MVRV override: guard > 0 only (B7)
+21. _no_trade() preserves cooldown (B6)
 
 ### GitHub Actions
-16. **Boolean unchecked = empty string `""`**, NOT `"false"` — use `= "true"` comparison
-17. **Git push may fail**: auto-stash + rebase handles uncommitted changes
-18. **bg_cache.json must be in git add**: otherwise cache is lost between runs
+22. Boolean unchecked = "" NOT "false" - use = "true"
+23. Git push: auto-stash + rebase
+24. bg_cache.json must be in git add
+25. Separate state/dashboard commits (C7)
+26. if: always() on dashboard step
+27. Telegram alert needs env: block (B15)
+28. Python one-liners need imports (B14)
 
-### Config
-19. **RESERVE_FLOOR=0 → 200 THB default** (not zero!)
-20. **All budgets in THB**: conversion to USDT at runtime
+### Dashboard
+29. fmt_num() in JS needs quotes (B11)
+30. Unix timestamps for freshness, not datetime (B9)
+31. html.escape() on all user-derived strings (H4)
 
 ### Indicators
-21. **RSI uses Wilder smoothing**: alpha = 1/period (matches `pandas ewm(adjust=False)`)
-22. **MACD bear cross**: histogram crossed below zero on LATEST bar only (not any historical cross)
-23. **RSI divergence**: price ≥ 97% of 40-day high + RSI ≥ 8 pts below 40-day RSI high + RSI still ≥ 58
+32. RSI: Wilder smoothing (alpha=1/period)
+33. MACD bear cross: latest bar only
+34. RSI divergence: price>=97% 40d high + RSI>=8pts below + RSI>=58
+35. MVRV<=0 = treat as NaN (H6)
 
 ---
 
@@ -565,80 +595,83 @@ fi
 
 | Mode | Trigger | Trades Real? | State File | Exchange Client |
 |------|---------|-------------|------------|----------------|
-| **Live** | `DRY_RUN` not set or empty | ✅ Real money | `state.json` | Real API keys |
-| **Dry-run** | `DRY_RUN=true` or `--dry-run` | ❌ Simulated | `state.json` | Dummy keys (public API only) |
-| **Demo** | `--demo` flag | ❌ Simulated + slippage | `demo_state.json` | Dummy keys |
+| Live | DRY_RUN not set or empty | YES real money | state.json | Real API keys |
+| Dry-run | DRY_RUN=true or --dry-run | NO simulated | state.json | Public API only |
+| Demo | --demo flag | NO simulated+slippage | demo_state.json | Public API only |
 
-**Dry-run vs Demo:**
-- Dry-run: uses real prices, checks real min order sizes, but skips actual API calls for buy/sell. Virtual balance initialized to `DRY_RUN_INITIAL_CASH` (10,000)
-- Demo: adds simulated slippage via `demo_portfolio.process_demo_trade()`, separate state file, never touches real state
----
-
-## 12. Example Log (Annotated)
-
-```
-[BOT] Current price: 2,285,000.00 THB              ← Step 1: from Bitkub ticker
-[BOT] Got 500 daily closes from Binance Vision     ← Step 2: OHLCV from data.binance.vision ZIP
-[BOT] SMA200=2,341,541.27 RSI=44.2 MACD_H=-5795  ← Step 3: numpy indicators
-[BG] sth_sopr: cache fresh (1474d, newest=2026-08-17) ← Step 4b: cache hit, 0 API calls
-[BG] Batch complete: 0 API calls                  ← All 5 metrics fresh, NO BG API calls!
-[BOT] MVRV from BG cache: 1.224                   ← Step 4: get_cached_value(), disk only
-[BOT] STH-SOPR=1.0784 (BG)                        ← Step 4b: BG batch (daily guard)
-[BOT] LIVE MODE: Real BTC=0.00321 Cash=1,234.56 THB ← Step 5: from Bitkub /api/v3/market/wallet
-[BOT] Budget: 20.00 THB/run (max buy: 1,000.00)    ← Step 6: DAILY_BUDGET_THB × multiplier
-[BOT] Decision: buy=60.00 sell=0.00 score=0 path=none ← Step 8: strategy output
-[BOT] Bought 0.00002626 BTC for 60.00 THB          ← Step 9: Bitkub place-bid executed
-[BOT] State saved to live_bot/state.json           ← Step 10: atomic JSON write
-[BOT] Telegram notification sent                     ← Step 13
-```
-
-Key things to notice:
-- `BG cache fresh` + `0 API calls` = rate limit optimization working
-- `MVRV from BG cache` (not `get_all_metrics_today`) = early read uses `get_cached_value()`
-- `score=0 path=none` = no sell gate activated (MVRV 1.224 < 2.0)
-- `buy=60.00` = base 20 × 3.0 multiplier (MVRV 1.0–1.5, NUPL < 0.25)
+Dry-run: real prices, check real min order, skip actual buy/sell API calls.
+Demo: adds simulated slippage, separate state file, never touches real state.
 
 ---
 
-## 13. Known Issues & Active Tasks
+## 12. Example Log
 
-> **Last updated: 2026-08-20** — remove items when resolved
-
-### Resolved ✅
-- ~~Bitkub auth 400 Bad Request~~ — fixed signature formula (ts+METHOD+path+body), header X-BTK-SIGN
-- ~~Bitkub wallet 404~~ — changed path from `/api/v3/market/balances` to `/api/v3/market/wallet`
-- ~~`error: 0` treated as failure~~ — now correctly checks `error != 0`
-- ~~5 BG API calls per run~~ — optimized to 0 calls when cache fresh
-- ~~dry_run detection~~ — fixed boolean unchecked = empty string
-
-### Pending 🔄
-- **MVRV Z-Score source priority:** Currently uses BG Z-Score for sell scoring (+15pts). If BG rate-limited (429), falls back to embedded 365d Z-Score. Consider whether embedded Z-Score is reliable enough as sole source.
-- **Embedded MVRV history update:** `mvrv_fetcher.py` can append new days to `_mvrv_history.py`, but only 1 day at a time via web scrape. May need manual update if bot is offline for weeks.
-- **No `get_usdt_balance()` on Bitkub client:** Intentionally removed to prevent engine from getting 0.0 THB balance. If engine is refactored to check USDT balance, this will need attention.
+(see original file for annotated example - format unchanged)
 
 ---
 
-## Quick Reference: Modifying the System
+## 13. Known Issues
 
-### ต้องการเปลี่ยน buy/sell logic?
-→ แก้ `live_bot/strategy.py` — function `phoenix_v5_1_decision()`
-→ แก้ sell scoring table, tiers, multiplier ตรงๆ
+> Last updated: 2026-08-22
 
-### ต้องการเพิ่ม indicator ใหม่?
-→ เพิ่ม function ใน `live_bot/indicators.py` (pure numpy)
-→ เรียกใช้ใน `engine.py` step 3
-→ ส่งเข้า strategy เพื่อใช้ใน scoring
+Resolved (Wave 1-5, 53 bugs total):
+- Wave 1+3: C1-C9, H1-H6, M1-M14 (37 items) - auth, rate limit, budget, duplicates, state, XSS, kill switch, MVRV=0
+- Wave 4: B1-B5 (5 items) - clear trade_log, timeout buy, dashboard config, actual_buy_cost
+- Wave 5: B6-B16 (11 items) - cooldown, BG MVRV guard, D3 reserve, freshness, responsive, JS, workflows
 
-### ต้องการเพิ่ม on-chain metric ใหม่?
-→ เพิ่มใน `_METRIC_DEFS` ใน `bg_metrics.py`
-→ เพิ่มใน `metrics_to_fetch` list ใน `get_all_metrics_today()`
-→ เพิ่มใน `ensure_cache()` defaults
+Pending:
+- B17 (latent): deploy-pages.yml no setup-python when skip_build=false
+- run_demo() BG MVRV override same B7 pattern (demo only, low priority)
+- Embedded MVRV history: 1 day at a time via web scrape
 
-### ต้องการย้าย exchange ใหม่?
-→ สร้าง client ใหม่ตาม `bitkub_client.py` structure
-→ ต้องมี: `get_price()`, `get_balances()`, `market_buy()`, `market_sell()`, `get_klines()`, `currency` property
-→ เพิ่มใน `main.py:create_exchange_client()`
+---
 
-### ต้องการแก้ cron schedule?
-→ `.github/workflows/dca-bitkub.yml` — ปรับ cron times
-→ ระวัง timezone: cron = UTC, bot ใช้ Thai UTC+7
+## 14. Bug Fix History
+
+| Wave | Date | Bugs | Key Areas |
+|------|------|------|------------|
+| 1 | 2026-08-21 | 21 | Auth, rate limit, budget, duplicates, state, dashboard, XSS, MVRV=0 |
+| 3 | 2026-08-21 | 16 | Dry-run filter, D3 transition, timeout, XSS, kill switch, API |
+| 4 | 2026-08-22 | 5 | Clear trade_log, timeout buy, dashboard config, actual_buy_cost |
+| 5 | 2026-08-22 | 11 | Cooldown, BG MVRV, D3 reserve, freshness, responsive, JS, workflows |
+
+Total: 53 bugs across 5 waves. Full details: version.md
+
+---
+
+## 15. team-dev Skill
+
+Skill: /home/z/my-project/skills/team-dev/SKILL.md
+
+7-Phase Workflow:
+1. Analyze - understand task, explore codebase
+2. Divide - launch 2-4 sub-agents parallel (Logic/UI/Integration/Data Flow)
+3. Plan & Review - synthesize, plan Round 1, self-review Round 2
+4. Execute - fix one issue at a time, test after each
+5. Code Review - launch reviewer sub-agent
+6. Quality Score - 100pts, must >= 80 (Correctness 30, Completeness 20, Edge Cases 15, No Regressions 15, Quality 10, Docs 10)
+7. Commit & Push - version.md + worklog.md + commit + push with retry
+
+---
+
+## Quick Reference
+
+### Change buy/sell logic? -> strategy.py phoenix_v5_1_decision()
+### Add indicator? -> indicators.py (numpy), engine.py step 3, strategy scoring
+### Add on-chain metric? -> bg_metrics.py _METRIC_DEFS, metrics_to_fetch, ensure_cache
+### Switch exchange? -> create client like bitkub_client.py, add to main.py
+### Change cron? -> dca-bitkub.yml, cron=UTC, bot=Thai UTC+7
+### Debug/fix bugs? -> use team-dev skill, 4 sub-agents: Logic/UI/Integration/Data Flow
+
+### Key Conventions
+- Thai timezone (UTC+7) for all dates, cron, trade log
+- File locking: fcntl.flock (SH read, EX write)
+- Atomic writes: tempfile.mkstemp + os.replace
+- ROI = (btc_value - invested) / invested
+- html.escape() on ALL user-derived strings
+- MVRV<=0 = NaN (prevent 4.5x buy)
+- Trade timeout = assume executed, consume daily slot
+- _no_trade() must preserve cooldown
+- Trade log BEFORE state
+- BG MVRV override must guard > 0
+- Dashboard fmt_num() in JS must be quoted
