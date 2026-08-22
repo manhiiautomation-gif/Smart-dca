@@ -1,3 +1,46 @@
+## 2026-08-22 (Wave 6) — Dashboard Deployment Reliability Fix
+
+ใช้ team-dev skill 7-phase workflow ตรวจสอบปัญหา Dashboard ไม่แสดงข้อมูล DCA ทั้งที่บอทซื้อสำเร็จ พบว่า data pipeline ถูกต้อง แต่ GHA deployment pipeline มีช่องโหว่ แก้ไข 6 ปัญหา คะแนน quality 92/100
+
+### Root Cause
+Data pipeline (engine → trade_log → dashboard) ถูกต้อง ✓ แต่ GHA workflow มี 2 จุดที่ทำให้ deploy stale dashboard:
+1. `git pull --rebase` conflict ไม่มี `git rebase --abort` → ทุก retry ล้มเหลว → working tree เสีย → dashboard gen อ่าน JSON เสีย → fail
+2. `continue-on-error: true` บน dashboard gen step → ซ่อน error → job สำเร็จ → deploy stale HTML
+
+### CRITICAL (แก้ไขแล้ว)
+
+| # | ปัญหา | ไฟล์ | รายละเอียด |
+|---|--------|------|----------|
+| G1 | Dashboard gen fail ซ่อนด้วย continue-on-error | `dca-bitkub.yml` L146-149, `dca-binance.yml` L55-58 | เอา `continue-on-error: true` ออก, เพิ่ม `id: gen_dash`, commit dashboard มี `if: always() && steps.gen_dash.outcome == 'success'` |
+
+### HIGH (แก้ไขแล้ว)
+
+| # | ปัญหา | ไฟล์ | รายละเอียด |
+|---|--------|------|----------|
+| G2 | Rebase conflict ไม่ abort → retry ทั้งหมด fail | ทุก workflow files, ทุก commit steps | เพิ่ม `git rebase --abort 2>/dev/null || true` ก่อนแต่ละ retry |
+| G3 | dashboard-trigger `|| true` ซ่อน refresh fail → save incomplete state | `dashboard-trigger.yml` L86 | เอา `|| true` ออก, เพิ่ม `id: handle_action`, dashboard gen มี `if: success() || steps.handle_action.outcome == 'skipped'` |
+
+### MEDIUM (แก้ไขแล้ว)
+
+| # | ปัญหา | ไฟล์ | รายละเอียด |
+|---|--------|------|----------|
+| G6 | Dashboard commit fail → ไม่มี alert → deploy skip เงียบๆ | `dca-bitkub.yml` L173-188 | เพิ่ม "Alert on dashboard failure" step + Telegram notification |
+
+### LOW (แก้ไขแล้ว)
+
+| # | ปัญหา | ไฟล์ | รายละเอียด |
+|---|--------|------|----------|
+| G7 | Email typo | `dca-bitkub.yml` L155 | `phoenix-bot@users.noreply.github.io` → `.github.com` |
+| A4 | Stale dry-run entries ใน trade_log | `trade_log.json` | ลบ 2 dry-run entries (Aug 18) ที่เหลืออยู่ก่อน D3 clear fix |
+
+### ปรับปรุงเพิ่มเติม
+- แยก commit state และ commit dashboard เป็น steps ต่างหากใน `dca-binance.yml` (ป้องกัน dashboard fail บล็อก state push)
+- เพิ่ม `id: gen_dash`, `id: commit_dash`, `id: bot_run` สำหรับ step outcome referencing
+- ทุก deploy jobs เพิ่ม `if: success() || failure()` เพื่อ deploy ได้แม้ non-critical step fail
+- dashboard-trigger "Commit & push" เปลี่ยนเป็น `if: always()` เพื่อ kill/resume ยัง push ได้แม้ dashboard gen fail
+
+---
+
 ## 2026-08-22 (Wave 5) — Full System Bug Sweep (team-dev Skill)
 
 ใช้ team-dev skill 7-phase workflow ส่ง sub-agents 4 ตัวตรวจสอบ DCA engine, dashboard, workflows, และ data pipeline พบบั๊กใหม่ 11 รายการ (B6-B16) แก้ไข 11 รายการ คะแนน quality 94/100

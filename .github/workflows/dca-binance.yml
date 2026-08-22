@@ -37,6 +37,7 @@ jobs:
         run: pip install -r live_bot/requirements.txt
 
       - name: Run Phoenix v5.1
+        id: bot_run
         env:
           EXCHANGE: binance
           BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
@@ -51,26 +52,50 @@ jobs:
           DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
         run: python live_bot/main.py --exchange binance --state-file live_bot/state.json
 
-      - name: Generate dashboard
-        if: always()
-        continue-on-error: true
-        run: python scripts/generate_dashboard.py
-
-      - name: Commit updated files
+      - name: Commit state and trade data
         run: |
           git config user.name "Phoenix Bot"
           git config user.email "phoenix-bot@users.noreply.github.com"
-          git add live_bot/state.json live_bot/_mvrv_history.py trade_log.json dashboard/dist/index.html
+          git add live_bot/state.json live_bot/_mvrv_history.py trade_log.json 2>/dev/null
           if git diff --staged --quiet; then
-            echo "No changes to commit"
+            echo "No state changes to commit"
           else
-            git commit -m "bot: binance update $(date +%Y-%m-%d)"
             for i in 1 2 3; do
-              git pull --rebase && git push && break || sleep 10
+              git rebase --abort 2>/dev/null || true
+              git commit -m "bot: binance state $(date -u +%Y-%m-%d\ %H:%M\ UTC)" && \
+              git pull --rebase && \
+              git push && \
+              break || \
+              { sleep 10; }
+            done
+          fi
+
+      - name: Generate dashboard
+        if: always()
+        id: gen_dash
+        run: python scripts/generate_dashboard.py
+
+      - name: Commit dashboard
+        if: always() && steps.gen_dash.outcome == 'success'
+        run: |
+          git config user.name "Phoenix Bot"
+          git config user.email "phoenix-bot@users.noreply.github.com"
+          git add dashboard/dist/index.html 2>/dev/null
+          if git diff --staged --quiet; then
+            echo "No dashboard changes to commit"
+          else
+            for i in 1 2 3; do
+              git rebase --abort 2>/dev/null || true
+              git commit -m "bot: binance dashboard $(date -u +%Y-%m-%d\ %H:%M\ UTC)" && \
+              git pull --rebase && \
+              git push && \
+              break || \
+              { sleep 10; }
             done
           fi
 
   deploy:
+    if: success() || failure()
     needs: dca
     permissions:
       contents: write

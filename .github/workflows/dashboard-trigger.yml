@@ -48,6 +48,7 @@ jobs:
         run: pip install -r live_bot/requirements.txt
 
       - name: Handle action
+        id: handle_action
         env:
           BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
           BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}
@@ -83,13 +84,16 @@ jobs:
             if [ "$DRY_RUN" = "true" ]; then
               FLAGS="$FLAGS --dry-run"
             fi
-            python live_bot/main.py $FLAGS || true
+            python live_bot/main.py $FLAGS
           fi
 
       - name: Generate dashboard
+        id: gen_dash
+        if: success() || steps.handle_action.outcome == 'skipped'
         run: python scripts/generate_dashboard.py
 
       - name: Commit & push
+        if: always()
         run: |
           git config user.name "Phoenix Bot"
           git config user.email "phoenix-bot@users.noreply.github.com"
@@ -99,11 +103,13 @@ jobs:
           else
             git commit -m "dashboard: ${{ github.event.inputs.action }} $(date +%Y-%m-%d %H:%M)"
             for i in 1 2 3; do
+              git rebase --abort 2>/dev/null || true
               git pull --rebase && git push && break || sleep 10
             done
           fi
 
   deploy:
+    if: success() || failure()
     needs: action
     permissions:
       contents: write
