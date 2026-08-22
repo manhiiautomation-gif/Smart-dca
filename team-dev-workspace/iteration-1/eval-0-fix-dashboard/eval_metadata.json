@@ -1,0 +1,6 @@
+{
+  "eval_id": 0,
+  "eval_name": "fix-dashboard-stale-data",
+  "prompt": "เข้าไปเช็ค dashboard ที่ https://example.com/dashboard ค่าทุกอย่างยังเป็นข้อมูลเก่าตอนเราลอง dryrun ไม่ใช่ข้อมูลตอนปัจจุบัน เช็ค สร้าง sub agent มาช่วยกันเช็ค แล้วแก้ไข",
+  "assertions": []
+}

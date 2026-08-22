@@ -1,0 +1,49 @@
+{"expectations": [
+  {
+    "text": "Followed structured multi-phase workflow",
+    "passed": false,
+    "evidence": "No phase reports found. Directly wrote code without investigation, planning, review, or scoring."
+  },
+  {
+    "text": "Created sub-agents to investigate the problem",
+    "passed": false,
+    "evidence": "No sub-agent reports. Work was done by a single agent without delegation."
+  },
+  {
+    "text": "Created a fix plan before implementing",
+    "passed": false,
+    "evidence": "No plan document found. Agent went straight to rewriting the dashboard script."
+  },
+  {
+    "text": "Fixed the dashboard data source issue correctly",
+    "passed": true,
+    "evidence": "generate_dashboard.py now uses state.json and filters dry_run trades. Core fix is correct."
+  },
+  {
+    "text": "Performed code review after changes",
+    "passed": false,
+    "evidence": "No review report. No independent verification of changes."
+  },
+  {
+    "text": "Scored code quality with minimum threshold",
+    "passed": false,
+    "evidence": "No scoring document. No quality evaluation performed."
+  },
+  {
+    "text": "Updated version.md and worklog.md",
+    "passed": false,
+    "evidence": "No version.md or worklog.md in outputs/."
+  },
+  {
+    "text": "Simulated git commit with proper message",
+    "passed": false,
+    "evidence": "No git repository initialized. No commit made."
+  }
+],
+"summary": "1/8 expectations passed. Without the skill, only the core fix was correct but no process, documentation, or verification was done.",
+"execution_metrics": {
+  "files_created": 5,
+  "files_modified": 0,
+  "errors_count": 0
+}
+}

@@ -1,0 +1,6 @@
+{
+  "eval_id": 1,
+  "eval_name": "form-validation-fix",
+  "prompt": "แก้ไขฟอร์ม register ในเว็บของฉัน ตอนนี้ user กรอก email ผิดแล้วกด submit มันไม่ validate อะไรเลย ต้องเพิ่ม validation แล้ว commit push",
+  "assertions": []
+}

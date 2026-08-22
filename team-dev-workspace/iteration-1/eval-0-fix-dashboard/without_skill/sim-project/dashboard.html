@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Trading Bot Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #1a1a2e; color: #eee; }
+        h1 { color: #0f3460; }
+        .card { background: #16213e; border-radius: 8px; padding: 20px; margin: 10px 0; }
+        .metric { font-size: 2em; color: #e94560; }
+        .label { color: #888; font-size: 0.9em; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px 12px; border-bottom: 1px solid #333; text-align: left; }
+        th { background: #0f3460; }
+        .status { padding: 4px 10px; border-radius: 4px; font-weight: bold; }
+        .live { background: #28a745; color: white; }
+        .dry { background: #dc3545; color: white; }
+    </style>
+</head>
+<body>
+    <h1>Trading Bot Dashboard</h1>
+    <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+        <div class="card">
+            <div class="label">Total Trades</div>
+            <div class="metric">2</div>
+        </div>
+        <div class="card">
+            <div class="label">Total Volume ($)</div>
+            <div class="metric">1,520.00</div>
+        </div>
+        <div class="card">
+            <div class="label">Exchange</div>
+            <div class="metric">binance_testnet</div>
+        </div>
+        <div class="card">
+            <div class="label">Mode</div>
+            <div class="metric"><span class="status dry">DRY RUN</span></div>
+        </div>
+    </div>
+    <div class="card" style="margin-top: 20px;">
+        <h2>Trade History</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Time</th><th>Symbol</th><th>Side</th><th>Amount</th><th>Price</th><th>Exchange</th><th>Mode</th>
+                </tr>
+            </thead>
+            <tbody>
+        <tr>
+            <td>2025-01-15T10:30:00</td>
+            <td>BTC/USDT</td>
+            <td>buy</td>
+            <td>0.01</td>
+            <td>42000.0</td>
+            <td>binance_testnet</td>
+            <td>Dry Run</td>
+        </tr>
+        <tr>
+            <td>2025-01-15T11:00:00</td>
+            <td>ETH/USDT</td>
+            <td>sell</td>
+            <td>0.5</td>
+            <td>2200.0</td>
+            <td>binance_testnet</td>
+            <td>Dry Run</td>
+        </tr></tbody>
+        </table>
+    </div>
+    <p style="color:#666; margin-top:20px;">Generated: 2026-08-22T03:05:17.654771</p>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "total_trades": 0,
+  "total_volume": 0.0,
+  "cycles_completed": 0,
+  "last_exchange_name": "",
+  "last_cycle_time": "",
+  "is_live": false,
+  "win_trades": 0,
+  "loss_trades": 0,
+  "started_at": ""
+}

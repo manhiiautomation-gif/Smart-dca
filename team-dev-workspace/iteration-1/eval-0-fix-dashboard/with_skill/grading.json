@@ -1,0 +1,50 @@
+{
+  "expectations": [
+    {
+      "text": "Followed all 7 phases of the team-dev workflow",
+      "passed": true,
+      "evidence": "Outputs contain phase2_subagent_reports.md, phase3_fix_plan.md, phase5_review_report.md, phase6_scoring.md, version.md, worklog.md, and simulated git commit"
+    },
+    {
+      "text": "Created sub-agents to investigate the problem (Phase 2)",
+      "passed": true,
+      "evidence": "phase2_subagent_reports.md contains 3 agent reports: Data Flow Agent, Logic Agent, UI/Display Agent"
+    },
+    {
+      "text": "Created a fix plan with self-review before implementing (Phase 3)",
+      "passed": true,
+      "evidence": "phase3_fix_plan.md contains Round 1 plan and Round 2 self-review sections"
+    },
+    {
+      "text": "Fixed the dashboard data source issue correctly",
+      "passed": true,
+      "evidence": "generate_dashboard.py changed to use state.json as source of truth, filter dry_run trades"
+    },
+    {
+      "text": "Performed code review after changes (Phase 5)",
+      "passed": true,
+      "evidence": "phase5_review_report.md contains reviewer findings with R1 issue identified and fixed"
+    },
+    {
+      "text": "Scored code quality with minimum 80/100 threshold (Phase 6)",
+      "passed": true,
+      "evidence": "phase6_scoring.md shows 92/100, passes >= 80 threshold"
+    },
+    {
+      "text": "Updated version.md and worklog.md (Phase 7)",
+      "passed": true,
+      "evidence": "version.md and worklog.md exist in outputs/ with structured content"
+    },
+    {
+      "text": "Simulated git commit with proper message",
+      "passed": true,
+      "evidence": "Git commit hash 4e53bc0 in simulated project .git/"
+    }
+  ],
+  "summary": "8/8 expectations passed. The skill provided complete structured workflow.",
+  "execution_metrics": {
+    "files_created": 11,
+    "files_modified": 1,
+    "errors_count": 0
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "eval_id": 2,
+  "eval_name": "api-error-handling",
+  "prompt": "ตรวจสอบ API error handling ในโปรเจกต์ backend ของเรา ตอนนี้มัน throw unhandled exception ตอน database timeout และก็ retry ไม่เพียงพอ อยากให้ปรับปรุงให้แข็งแกร่งขึ้น",
+  "assertions": []
+}
