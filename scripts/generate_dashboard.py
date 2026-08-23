@@ -17,7 +17,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from live_bot.kill_switch import get_full_status
-from live_bot.state import load_state, load_trade_log
+from live_bot.state import load_state, load_trade_log, load_indicator_history
 from live_bot import config as cfg
 
 
@@ -99,6 +99,36 @@ def generate_dashboard(state_path='live_bot/state.json',
     ks_status = get_full_status(kill_switch_path)
     indicators = state.get('last_indicators', {})
     exchange_name = state.get('last_exchange_name', '')
+
+    # B22: Load indicator history for time-series charts
+    ih_path = os.path.join(os.path.dirname(trade_log_path), 'indicator_history.json')
+    indicator_history = load_indicator_history(ih_path)
+    # Prepare time-series data for charts
+    ih_dates = []
+    ih_price = []
+    ih_mvrv = []
+    ih_rsi = []
+    ih_sopr = []
+    ih_nupl = []
+    for entry in indicator_history:
+        dt = entry.get('date', '')
+        if not dt:
+            continue
+        ih_dates.append(dt[:10])  # YYYY-MM-DD
+        ih_price.append(entry.get('price'))
+        ih_mvrv.append(entry.get('mvrv'))
+        ih_rsi.append(entry.get('rsi'))
+        ih_sopr.append(entry.get('sopr'))
+        ih_nupl.append(entry.get('nupl'))
+    # Truncate to last 90 days for chart readability
+    _max_chart_points = 90
+    if len(ih_dates) > _max_chart_points:
+        ih_dates = ih_dates[-_max_chart_points:]
+        ih_price = ih_price[-_max_chart_points:]
+        ih_mvrv = ih_mvrv[-_max_chart_points:]
+        ih_rsi = ih_rsi[-_max_chart_points:]
+        ih_sopr = ih_sopr[-_max_chart_points:]
+        ih_nupl = ih_nupl[-_max_chart_points:]
     # Derive currency from exchange name (more reliable than stale state)
     _EXCHANGE_CURRENCY = {'BITKUB': 'THB', 'BINANCE': 'USDT'}
     currency = _EXCHANGE_CURRENCY.get(exchange_name, state.get('last_exchange_currency', 'USDT'))
@@ -496,6 +526,10 @@ def generate_dashboard(state_path='live_bot/state.json',
         next_run_str=next_run_str,
         next_run_day=next_run_day,
         max_dd_class=max_dd_class,
+        # B22: indicator history for time-series charts
+        ih_dates=ih_dates, ih_price=ih_price,
+        ih_mvrv=ih_mvrv, ih_rsi=ih_rsi,
+        ih_sopr=ih_sopr, ih_nupl=ih_nupl,
     )
 
     # Write output
@@ -572,6 +606,13 @@ def build_html(**kw) -> str:
     next_run_str = kw.get('next_run_str', '00:10')
     next_run_day = kw.get('next_run_day', '')
     max_dd_class = kw.get('max_dd_class', 'dim')
+    # B22: Indicator history data
+    ih_dates = kw.get('ih_dates', [])
+    ih_price = kw.get('ih_price', [])
+    ih_mvrv = kw.get('ih_mvrv', [])
+    ih_rsi = kw.get('ih_rsi', [])
+    ih_sopr = kw.get('ih_sopr', [])
+    ih_nupl = kw.get('ih_nupl', [])
     upnl_class = 'green' if unrealized_pnl > 0 else ('red' if unrealized_pnl < 0 else 'neutral')
     chg_class = 'green' if (change_pct or 0) > 0 else ('red' if (change_pct or 0) < 0 else 'neutral')
 
@@ -755,8 +796,11 @@ def build_html(**kw) -> str:
         .grid-2 {{ grid-template-columns: 1fr 1fr; }}
         .grid-3 {{ grid-template-columns: 1fr 1fr 1fr; }}
         .dca-grid {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }}
+        .ind-charts-grid {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }}
+        .ih-chart-box {{ height: 200px; }}
         @media (max-width: 640px) {{
             .grid-2, .grid-3, .dca-grid {{ grid-template-columns: 1fr; }}
+            .ind-charts-grid {{ grid-template-columns: 1fr; }}
             body {{ padding: 10px; }}
             .card {{ padding: 12px; border-radius: 10px; }}
             .grid {{ gap: 10px; margin-bottom: 10px; }}
@@ -1221,6 +1265,16 @@ def build_html(**kw) -> str:
         <div class="chart-container" id="chart"></div>
     </div>
 
+    <!-- Row 3b: Indicator History Charts (B22) -->
+    <div class="card" style="margin-bottom:16px;">
+        <div class="card-title">Indicator History (last {len(ih_dates)} days)</div>
+        <div class="ind-charts-grid" id="ihCharts">
+            <div class="ih-chart-box"><div id="ihChartMvrv"></div></div>
+            <div class="ih-chart-box"><div id="ihChartRsi"></div></div>
+            <div class="ih-chart-box"><div id="ihChartSopr"></div></div>
+        </div>
+    </div>
+
     <!-- Row 4: Recent Trades -->
     <div class="card">
         <div class="card-title">Recent Trades (last 10)</div>
@@ -1600,6 +1654,77 @@ def build_html(**kw) -> str:
             var chart = echarts.init(document.getElementById('chart'));
             chart.setOption(option);
             window.addEventListener('resize', function() {{ chart.resize(); }});
+        }})();
+
+        // B22: Indicator History Charts
+        (function() {{
+            var ihDates = {json.dumps(ih_dates)};
+            var ihPrice = {json.dumps(ih_price)};
+            var ihMvrv = {json.dumps(ih_mvrv)};
+            var ihRsi = {json.dumps(ih_rsi)};
+            var ihSopr = {json.dumps(ih_sopr)};
+
+            if (ihDates.length < 2) {{
+                var box = document.getElementById('ihCharts');
+                if (box) box.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:40px 20px;"><div style="font-size:0.85rem;">กราฟ indicator จะปรากฏหลัง bot ทำงาน 2 วันขึ้นไป</div></div>';
+                return;
+            }}
+
+            var gridBase = {{ backgroundColor: 'transparent', grid: {{ left: 50, right: 15, top: 25, bottom: 35 } } }};
+            var axisLabel = {{ color: '#8b949e', fontSize: 9 }};
+            var axisLine = {{ lineStyle: {{ color: '#30363d' }} }};
+            var tooltipBase = {{ trigger: 'axis', backgroundColor: '#1c2128', borderColor: '#30363d', textStyle: {{ color: '#e6edf3', fontSize: 11 }} }};
+
+            // MVRV Chart
+            var mvrvChart = echarts.init(document.getElementById('ihChartMvrv'));
+            mvrvChart.setOption(Object.assign({{}}, gridBase, {{
+                tooltip: tooltipBase,
+                title: {{ text: 'MVRV', left: 'center', top: 2, textStyle: {{ color: '#8b949e', fontSize: 11 }} }},
+                xAxis: {{ type: 'category', data: ihDates, axisLabel: Object.assign({{}}, axisLabel, {{ showMaxLabel: false }}), axisLine }},
+                yAxis: {{ type: 'value', axisLabel, splitLine: {{ lineStyle: {{ color: '#21262d' }} }},
+                series: [{{
+                    type: 'line', data: ihMvrv, smooth: true,
+                    lineStyle: {{ color: '#58a6ff', width: 2 }},
+                    areaStyle: {{ color: {{ type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{{ offset: 0, color: 'rgba(88,166,255,0.15)' }}, {{ offset: 1, color: 'rgba(88,166,255,0.01)' }}] }} }},
+                    itemStyle: {{ color: '#58a6ff' }},
+                    markLine: {{ data: [{{ yAxis: 1.0, lineStyle: {{ color: '#f8514980', type: 'dashed' }}, label: {{ show: true, formatter: 'MVRV=1', color: '#f8514980', fontSize: 9 }} }}], {{ yAxis: 2.0, lineStyle: {{ color: '#d2992280', type: 'dashed' }}, label: {{ show: true, formatter: 'MVRV=2', color: '#d2992280', fontSize: 9 }} }}] }}
+                }}]
+            }}));
+            window.addEventListener('resize', function() {{ mvrvChart.resize(); }});
+
+            // RSI Chart
+            var rsiChart = echarts.init(document.getElementById('ihChartRsi'));
+            rsiChart.setOption(Object.assign({{}}, gridBase, {{
+                tooltip: tooltipBase,
+                title: {{ text: 'RSI', left: 'center', top: 2, textStyle: {{ color: '#8b949e', fontSize: 11 }} }},
+                xAxis: {{ type: 'category', data: ihDates, axisLabel: Object.assign({{}}, axisLabel, {{ showMaxLabel: false }}), axisLine }},
+                yAxis: {{ type: 'value', min: 0, max: 100, axisLabel, splitLine: {{ lineStyle: {{ color: '#21262d' }} } }},
+                series: [{{
+                    type: 'line', data: ihRsi, smooth: true,
+                    lineStyle: {{ color: '#bc8cff', width: 2 }},
+                    areaStyle: {{ color: {{ type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{{ offset: 0, color: 'rgba(188,140,255,0.12)' }}, {{ offset: 1, color: 'rgba(188,140,255,0.01)' }}] }} }},
+                    itemStyle: {{ color: '#bc8cff' }},
+                    markLine: {{ data: [{{ yAxis: 30, lineStyle: {{ color: '#3fb95080', type: 'dashed' }} }}, {{ yAxis: 70, lineStyle: {{ color: '#f8514980', type: 'dashed' }}}] }}
+                }}]
+            }}));
+            window.addEventListener('resize', function() {{ rsiChart.resize(); }});
+
+            // SOPR Chart
+            var soprChart = echarts.init(document.getElementById('ihChartSopr'));
+            soprChart.setOption(Object.assign({{}}, gridBase, {{
+                tooltip: tooltipBase,
+                title: {{ text: 'SOPR', left: 'center', top: 2, textStyle: {{ color: '#8b949e', fontSize: 11 }} }},
+                xAxis: {{ type: 'category', data: ihDates, axisLabel: Object.assign({{}}, axisLabel, {{ showMaxLabel: false }}), axisLine }},
+                yAxis: {{ type: 'value', axisLabel, splitLine: {{ lineStyle: {{ color: '#21262d' }} } }},
+                series: [{{
+                    type: 'line', data: ihSopr, smooth: true,
+                    lineStyle: {{ color: '#d29922', width: 2 }},
+                    areaStyle: {{ color: {{ type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{{ offset: 0, color: 'rgba(210,153,34,0.12)' }}, {{ offset: 1, color: 'rgba(210,153,34,0.01)' }}] }} }},
+                    itemStyle: {{ color: '#d29922' }},
+                    markLine: {{ data: [{{ yAxis: 1.0, lineStyle: {{ color: '#f8514980', type: 'dashed' }}, label: {{ show: true, formatter: 'SOPR=1', color: '#f8514980', fontSize: 9 }} }}] }}
+                }}]
+            }}));
+            window.addEventListener('resize', function() {{ soprChart.resize(); }});
         }})();
     </script>
 </body>

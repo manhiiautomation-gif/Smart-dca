@@ -40,6 +40,237 @@ def _fetch_price_history_with_dates(exchange) -> list:
     return exchange.get_klines(days=500)
 
 
+# ── B22: Shared on-chain metric resolution ────────────────────────────
+# These functions replace 4 duplicated fallback chains
+# (run_daily, refresh_dashboard, run_demo, idempotency-skip).
+
+def _sopr_proxy(price, sma14, sma30):
+    """Estimate SOPR from price vs short-term moving average.
+
+    SOPR = price / avg_cost_basis_of_STH.
+    SMA14 approximates short-term holder average buy price.
+    price > SMA14 -> recent buyers in profit -> SOPR > 1
+    """
+    if sma14 > 0 and not math.isnan(sma14):
+        return price / sma14
+    if sma30 > 0 and not math.isnan(sma30):
+        return price / sma30
+    return 1.0
+
+
+def _lth_rp_proxy(realized_price_val, price, mvrv_val, in_bear=False):
+    """Estimate LTH Realized Price from Realized Price.
+
+    B23: Dynamic multiplier based on market regime.
+    LTH holders have higher cost basis than overall realized price.
+    """
+    if not math.isnan(realized_price_val) and realized_price_val > 0:
+        multiplier = 1.25 if in_bear else (1.10 if mvrv_val > 2.5 else 1.15)
+        return realized_price_val * multiplier
+    # Derive from MVRV if no realized price
+    if mvrv_val > 0 and not math.isnan(mvrv_val) and price > 0:
+        est_rp = price / mvrv_val
+        multiplier = 1.25 if in_bear else (1.10 if mvrv_val > 2.5 else 1.15)
+        return est_rp * multiplier
+    return float('nan')
+
+
+def _resolve_onchain_metrics(price, closes, today,
+                              log_prefix='[BOT]',
+                              allow_web_fallback=True,
+                              notify_on_fail=True):
+    """Resolve all technical + on-chain indicators with unified fallback chain.
+
+    B22: Replaces duplicated code in run_daily(), refresh_dashboard(),
+    run_demo(), and idempotency-skip path.
+
+    Steps:
+        1. Compute technical indicators from price closes
+        2. Resolve MVRV (BG cache -> embedded -> web)
+        3. Call BG batch for on-chain metrics
+        4. Apply proxy fallbacks for SOPR/LTH-RP
+
+    Args:
+        price: current BTC price
+        closes: list of daily close prices
+        today: date object (Thai TZ)
+        log_prefix: prefix for log messages (e.g. '[BOT]', '[REFRESH]', '[DEMO]')
+        allow_web_fallback: try CoinMetrics/ahasignals when embedded MVRV is missing
+        notify_on_fail: send Telegram when all MVRV sources fail
+
+    Returns:
+        dict with all resolved metrics. Key differences from callers:
+        - run_daily uses allow_web=True, notify_on_fail=True
+        - refresh uses allow_web=False, notify_on_fail=False
+        - demo uses allow_web=True, notify_on_fail=False
+    """
+    # ── 1. Technical indicators ──
+    sma_200 = ind.sma(closes, 200)
+    sma_365 = ind.sma(closes, 365)
+    rsi_val = ind.rsi(closes, 14)
+    macd_line, macd_sig, macd_h = ind.macd(closes)
+    macd_hist_series = ind.compute_all_macd_hist(closes)
+    rsi_series = ind.compute_all_rsi(closes, 14)
+    macd_bear = ind.macd_cross_bear(macd_hist_series)
+    macd_declining = ind.macd_hist_declining(macd_hist_series, 4)
+    rsi_div = ind.rsi_divergence(closes, rsi_series, 40)
+    ath = max(closes) if closes else 0
+    sma14 = ind.sma(closes, 14)
+    sma30 = ind.sma(closes, 30)
+
+    print(f'{log_prefix} SMA200={sma_200:,.2f} RSI={rsi_val:.1f} MACD_H={macd_h:.4f}')
+    print(f'{log_prefix} MACD_bear={macd_bear} MACD_declining={macd_declining} RSI_div={rsi_div}')
+
+    in_bear = not math.isnan(sma_200) and price < sma_200
+
+    # ── 2. MVRV — try BG cache first, then embedded, then web ──
+    mvrv_val = float('nan')
+    mvrv_z = float('nan')
+    mvrv_z_source = 'N/A'
+    mvrv_source = 'N/A'
+
+    try:
+        from . import bg_metrics
+        bg_mvrv = bg_metrics.get_cached_value('mvrv', today)
+        if not math.isnan(bg_mvrv):
+            mvrv_val = bg_mvrv
+            if mvrv_val is not None and mvrv_val <= 0:
+                mvrv_val = float('nan')
+            mvrv_source = 'BG-cache'
+            print(f'{log_prefix} MVRV from BG cache: {mvrv_val:.4f}')
+        bg_z = bg_metrics.get_cached_value('mvrv_zscore', today)
+        if not math.isnan(bg_z):
+            mvrv_z = bg_z
+            mvrv_z_source = 'BG-cache'
+    except ImportError:
+        pass
+
+    if math.isnan(mvrv_val):
+        mvrv_val = strategy.get_mvrv_for_date(today)
+        if mvrv_val is not None and mvrv_val <= 0:
+            mvrv_val = float('nan')
+        if not math.isnan(mvrv_val):
+            mvrv_source = 'embedded'
+            if allow_web_fallback:
+                from datetime import timedelta as td
+                if today - strategy._MVRV_HISTORY_MAX > td(days=1):
+                    print(f'{log_prefix} MVRV embedded stale (ends {strategy._MVRV_HISTORY_MAX}), '
+                          f'updating in background...')
+                    try:
+                        from . import mvrv_fetcher
+                        ok, msg = mvrv_fetcher.try_update_mvrv()
+                        print(f'{log_prefix} MVRV update: {msg}')
+                    except Exception as e:
+                        print(f'{log_prefix} MVRV background update failed: {e}')
+        elif allow_web_fallback:
+            print(f'{log_prefix} No embedded MVRV for {today}, trying web fallback...')
+            from . import mvrv_fetcher
+            web_mvrv, web_date, web_source = mvrv_fetcher.fetch_mvrv_from_web()
+            if web_mvrv is not None:
+                mvrv_val = web_mvrv
+                if mvrv_val is not None and mvrv_val <= 0:
+                    mvrv_val = float('nan')
+                mvrv_source = web_source
+                print(f'{log_prefix} Web MVRV: {mvrv_val:.4f}')
+            else:
+                print(f'{log_prefix} WARNING: All MVRV sources failed: {web_source}')
+                if notify_on_fail:
+                    notifier.send_telegram(
+                        f'Phoenix v5.1 WARNING: No MVRV data for {today}. '
+                        'All sources failed. Skipping trade.'
+                    )
+                return {'_mvrv_all_failed': True}
+        else:
+            mvrv_source = 'N/A'
+
+    mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val) if not math.isnan(mvrv_val) else 0
+    if math.isnan(mvrv_z):
+        mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val) if not math.isnan(mvrv_val) else 0
+        mvrv_z_source = 'embedded-365d'
+    nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 and not math.isnan(mvrv_val) else 0
+    realized_price = price / mvrv_val if mvrv_val > 0 and not math.isnan(mvrv_val) else float('nan')
+
+    # ── 3. BG batch fetch + on-chain metric resolution ──
+    sopr = float('nan')
+    lth_rp = float('nan')
+    sopr_source = 'N/A'
+    lth_source = 'N/A'
+    rp_source = 'mvrv-derived' if not math.isnan(realized_price) else 'N/A'
+
+    try:
+        from . import bg_metrics
+        bg = bg_metrics.get_all_metrics_today(target_date=today)
+
+        # MVRV upgrade from BG batch
+        if not math.isnan(bg.get('mvrv', float('nan'))):
+            bg_mvrv_val = bg['mvrv']
+            if bg_mvrv_val > 0 and mvrv_source != 'BG':
+                mvrv_val = bg_mvrv_val
+                mvrv_source = 'BG'
+                nupl = 1.0 - 1.0 / mvrv_val
+                realized_price = price / mvrv_val
+                rp_source = 'BG'
+                print(f'{log_prefix} MVRV upgraded from BG: {mvrv_val:.4f}')
+
+        # MVRV Z-Score from BG
+        if not math.isnan(bg.get('mvrv_zscore', float('nan'))):
+            mvrv_z = bg['mvrv_zscore']
+            mvrv_z_source = 'BG'
+            print(f'{log_prefix} MVRV Z-Score from BG: {mvrv_z:.3f}')
+
+        # SOPR
+        if not math.isnan(bg.get('sth_sopr', float('nan'))):
+            sopr = bg['sth_sopr']
+            sopr_source = 'BG'
+        else:
+            sopr = _sopr_proxy(price, sma14, sma30)
+            sopr_source = 'proxy-sma14'
+
+        # Realized Price
+        if not math.isnan(bg.get('realized_price', float('nan'))):
+            realized_price = bg['realized_price']
+            rp_source = 'BG'
+
+        # LTH Realized Price
+        if not math.isnan(bg.get('lth_realized_price', float('nan'))):
+            lth_rp = bg['lth_realized_price']
+            lth_source = 'BG'
+        else:
+            lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val, in_bear=in_bear)
+            lth_source = 'proxy-rp*dynamic' if not math.isnan(lth_rp) else 'N/A'
+
+        # B20: Proxy accuracy logging (when BG has actual SOPR)
+        _proxy_sopr = _sopr_proxy(price, sma14, sma30)
+        if not math.isnan(sopr) and not math.isnan(_proxy_sopr) and sopr_source == 'BG':
+            proxy_err = abs(sopr - _proxy_sopr) / max(abs(sopr), 0.001) * 100
+            print(f'{log_prefix} SOPR proxy accuracy: actual={sopr:.4f} proxy={_proxy_sopr:.4f} err={proxy_err:.1f}%')
+
+    except Exception as e:
+        print(f'{log_prefix} BG metrics failed: {e}. Using all-proxy mode')
+        sopr = _sopr_proxy(price, sma14, sma30)
+        lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val, in_bear=in_bear)
+        sopr_source = 'proxy-sma14'
+        lth_source = 'proxy-rp*dynamic'
+
+    print(f'{log_prefix} STH-SOPR={sopr:.4f} ({sopr_source}) '
+          f'LTH-RP={lth_rp:,.2f} ({lth_source}) '
+          f'RP={realized_price:,.2f} ({rp_source})')
+    print(f'{log_prefix} MVRV={mvrv_val:.3f} ({mvrv_source}) Pct={mvrv_pct:.3f} Z={mvrv_z:.2f} ({mvrv_z_source}) NUPL={nupl:.3f}')
+
+    return {
+        'sma_200': sma_200, 'sma_365': sma_365,
+        'rsi': rsi_val, 'macd_line': macd_line, 'macd_sig': macd_sig, 'macd_h': macd_h,
+        'macd_hist_series': macd_hist_series, 'rsi_series': rsi_series,
+        'macd_bear': macd_bear, 'macd_declining': macd_declining, 'rsi_div': rsi_div,
+        'ath': ath, 'sma14': sma14, 'sma30': sma30, 'in_bear': in_bear,
+        'mvrv': mvrv_val, 'mvrv_source': mvrv_source,
+        'mvrv_pct': mvrv_pct, 'mvrv_z': mvrv_z, 'mvrv_z_source': mvrv_z_source,
+        'nupl': nupl, 'realized_price': realized_price, 'rp_source': rp_source,
+        'sopr': sopr, 'sopr_source': sopr_source,
+        'lth_realized_price': lth_rp, 'lth_source': lth_source,
+    }
+
+
 def _get_cash_balance(exchange) -> float:
     '''Get available cash in exchange currency.'''
     try:
@@ -117,91 +348,63 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         print(f'[BOT] Already ran today ({today} THB). Skipping TRADE but refreshing dashboard data.')
         print(f'[BOT] Use --force to override (e.g. for testing).')
         # Still fetch indicators + balances for dashboard (no trading)
+        # B22: Use shared _resolve_onchain_metrics instead of duplicated inline code
         try:
             refresh_price = exchange.get_price()
             refresh_klines = _fetch_price_history_with_dates(exchange)
             refresh_closes = [k['close'] for k in refresh_klines]
             if len(refresh_closes) >= 50:
-                r_sma200 = ind.sma(refresh_closes, 200)
-                r_sma365 = ind.sma(refresh_closes, 365)
-                r_rsi = ind.rsi(refresh_closes, 14)
-                _, _, r_macd_h = ind.macd(refresh_closes)
-                r_ath = max(refresh_closes) if refresh_closes else 0
-                r_sma14 = ind.sma(refresh_closes, 14)
-                r_sma30 = ind.sma(refresh_closes, 30)
-                r_macd_bear = ind.macd_cross_bear(ind.compute_all_macd_hist(refresh_closes))
-                r_macd_declining = ind.macd_hist_declining(ind.compute_all_macd_hist(refresh_closes), 4)
-                r_rsi_div = ind.rsi_divergence(refresh_closes, ind.compute_all_rsi(refresh_closes, 14), 40)
+                rm = _resolve_onchain_metrics(refresh_price, refresh_closes, today,
+                                                log_prefix='[BOT/idem]',
+                                                allow_web_fallback=False,
+                                                notify_on_fail=False)
+                if not rm.get('_mvrv_all_failed'):
+                    # Balances
+                    if dry_run:
+                        r_btc = bot_state.get('dry_run_btc', 0.0)
+                        r_cash = bot_state.get('dry_run_cash', config.DRY_RUN_INITIAL_CASH)
+                    else:
+                        r_btc = _get_btc_balance(exchange)
+                        r_cash = _get_cash_balance(exchange)
+                    r_portfolio = r_btc * refresh_price + r_cash
 
-                # MVRV
-                r_mvrv = float('nan'); r_mvrv_src = 'N/A'
-                try:
-                    from . import bg_metrics as bg_r
-                    r_bg_mvrv = bg_r.get_cached_value('mvrv', today)
-                    if not math.isnan(r_bg_mvrv):
-                        r_mvrv = r_bg_mvrv; r_mvrv_src = 'BG-cache'
-                except ImportError: pass
-                if math.isnan(r_mvrv):
-                    r_mvrv = strategy.get_mvrv_for_date(today)
-                    r_mvrv_src = 'embedded' if not math.isnan(r_mvrv) else 'N/A'
-                r_mvrv_pct = strategy.compute_mvrv_percentile(today, r_mvrv) if not math.isnan(r_mvrv) else 0
-                r_mvrv_z = strategy.compute_mvrv_zscore(today, r_mvrv) if not math.isnan(r_mvrv) else 0
-                r_nupl = 1.0 - 1.0 / r_mvrv if r_mvrv > 0 and not math.isnan(r_mvrv) else 0
-                r_sopr = refresh_price / r_sma14 if r_sma14 > 0 else 1.0
-                r_rp = refresh_price / r_mvrv if r_mvrv > 0 and not math.isnan(r_mvrv) else float('nan')
-                # B23: Dynamic LTH-RP proxy in idempotency-skip path
-                _idem_bear = not math.isnan(r_sma200) and refresh_price < r_sma200
-                _lth_mult = 1.25 if _idem_bear else (1.10 if r_mvrv > 2.5 else 1.15)
-                r_lth_rp = r_rp * _lth_mult if not math.isnan(r_rp) else float('nan')
-
-                # Balances
-                if dry_run:
-                    r_btc = bot_state.get('dry_run_btc', 0.0)
-                    r_cash = bot_state.get('dry_run_cash', config.DRY_RUN_INITIAL_CASH)
-                else:
-                    r_btc = _get_btc_balance(exchange)
-                    r_cash = _get_cash_balance(exchange)
-                r_portfolio = r_btc * refresh_price + r_cash
-
-                bot_state['last_indicators'] = {
-                    'price': round(refresh_price, 2),
-                    'mvrv': round(r_mvrv, 3) if not math.isnan(r_mvrv) else None,
-                    'mvrv_source': r_mvrv_src,
-                    'mvrv_pct': round(r_mvrv_pct, 3),
-                    'mvrv_z': round(r_mvrv_z, 2),
-                    'mvrv_z_source': 'embedded-365d',
-                    'rsi': round(r_rsi, 1),
-                    'macd_h': round(r_macd_h, 4),
-                    'nupl': round(r_nupl, 3),
-                    'sopr': round(r_sopr, 3),
-                    'sopr_source': 'proxy-sma14',
-                    'sma_200': round(r_sma200, 2) if not math.isnan(r_sma200) else None,
-                    'sma_365': round(r_sma365, 2) if not math.isnan(r_sma365) else None,
-                    'macd_bear': r_macd_bear,
-                    'macd_declining': r_macd_declining,
-                    'rsi_divergence': r_rsi_div,
-                    'ath': round(r_ath, 2),
-                    'sell_score': bot_state.get('last_indicators', {}).get('sell_score', 0),
-                    'path_taken': bot_state.get('last_indicators', {}).get('path_taken', 'none'),
-                    'in_bear': refresh_price < r_sma200 if not math.isnan(r_sma200) else False,
-                    'cooldown': bot_state.get('cooldown', 0),
-                    'realized_price': round(r_rp, 2) if not math.isnan(r_rp) else None,
-                    'lth_realized_price': round(r_lth_rp, 2) if not math.isnan(r_lth_rp) else None,
-                    'lth_source': 'proxy-rp*dynamic',
-                    'rp_source': 'mvrv-derived',
-                }
-                bot_state['last_btc_balance'] = round(r_btc, 8)
-                bot_state['last_cash_balance'] = round(r_cash, 2)
-                bot_state['last_portfolio_value'] = round(r_portfolio, 2)
-                bot_state['last_price'] = round(refresh_price, 2)
-                bot_state['last_exchange_currency'] = currency
-                bot_state['last_exchange_name'] = exchange.__class__.__name__.replace('Client', '').upper()
-                # D2: Do NOT overwrite last_dry_run in refresh-only paths.
-                # This path only refreshes dashboard data without trading,
-                # so it should not change the provenance of existing trade data.
-                if r_portfolio > bot_state.get('peak_value', 0):
-                    bot_state['peak_value'] = r_portfolio
-                print(f'[BOT] Dashboard data refreshed (skipped trade). Portfolio: {r_portfolio:,.2f} {currency}')
+                    bot_state['last_indicators'] = {
+                        'price': round(refresh_price, 2),
+                        'mvrv': round(rm['mvrv'], 3) if not math.isnan(rm['mvrv']) else None,
+                        'mvrv_source': rm['mvrv_source'],
+                        'mvrv_pct': round(rm['mvrv_pct'], 3),
+                        'mvrv_z': round(rm['mvrv_z'], 2),
+                        'mvrv_z_source': rm['mvrv_z_source'],
+                        'rsi': round(rm['rsi'], 1),
+                        'macd_h': round(rm['macd_h'], 4),
+                        'nupl': round(rm['nupl'], 3),
+                        'sopr': round(rm['sopr'], 3) if not math.isnan(rm['sopr']) else None,
+                        'sopr_source': rm['sopr_source'],
+                        'sma_200': round(rm['sma_200'], 2) if not math.isnan(rm['sma_200']) else None,
+                        'sma_365': round(rm['sma_365'], 2) if not math.isnan(rm['sma_365']) else None,
+                        'macd_bear': rm['macd_bear'],
+                        'macd_declining': rm['macd_declining'],
+                        'rsi_divergence': rm['rsi_div'],
+                        'ath': round(rm['ath'], 2),
+                        'sell_score': bot_state.get('last_indicators', {}).get('sell_score', 0),
+                        'path_taken': bot_state.get('last_indicators', {}).get('path_taken', 'none'),
+                        'in_bear': rm['in_bear'],
+                        'cooldown': bot_state.get('cooldown', 0),
+                        'realized_price': round(rm['realized_price'], 2) if not math.isnan(rm['realized_price']) else None,
+                        'lth_realized_price': round(rm['lth_realized_price'], 2) if not math.isnan(rm['lth_realized_price']) else None,
+                        'lth_source': rm['lth_source'],
+                        'rp_source': rm['rp_source'],
+                    }
+                    bot_state['last_btc_balance'] = round(r_btc, 8)
+                    bot_state['last_cash_balance'] = round(r_cash, 2)
+                    bot_state['last_portfolio_value'] = round(r_portfolio, 2)
+                    bot_state['last_price'] = round(refresh_price, 2)
+                    bot_state['last_exchange_currency'] = currency
+                    bot_state['last_exchange_name'] = exchange.__class__.__name__.replace('Client', '').upper()
+                    # D2: Do NOT overwrite last_dry_run in refresh-only paths.
+                    if r_portfolio > bot_state.get('peak_value', 0):
+                        bot_state['peak_value'] = r_portfolio
+                    print(f'[BOT] Dashboard data refreshed (skipped trade). Portfolio: {r_portfolio:,.2f} {currency}')
         except Exception as e:
             print(f'[BOT] Dashboard refresh failed: {e}')
         return bot_state
@@ -306,243 +509,41 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         )
         return bot_state
 
-    # ── 3. Compute technical indicators ──
-    print('[BOT] Computing indicators...')
-    sma_200 = ind.sma(closes, 200)
-    sma_365 = ind.sma(closes, 365)
-    rsi_val = ind.rsi(closes, 14)
-    macd_line, macd_sig, macd_h = ind.macd(closes)
+    # ── 3+4+4b. Resolve all indicators + on-chain metrics (B22: shared function) ──
+    print('[BOT] Computing indicators + resolving on-chain metrics...')
+    m = _resolve_onchain_metrics(price, closes, today,
+                                  log_prefix='[BOT]',
+                                  allow_web_fallback=True,
+                                  notify_on_fail=True)
+    if m.get('_mvrv_all_failed'):
+        return bot_state
 
-    # Series-based indicators
-    macd_hist_series = ind.compute_all_macd_hist(closes)
-    rsi_series = ind.compute_all_rsi(closes, 14)
-
-    macd_bear = ind.macd_cross_bear(macd_hist_series)
-    macd_declining = ind.macd_hist_declining(macd_hist_series, 4)
-    rsi_div = ind.rsi_divergence(closes, rsi_series, 40)
-
-    ath = max(closes) if closes else 0
-
-    print(f'[BOT] SMA200={sma_200:,.2f} RSI={rsi_val:.1f} MACD_H={macd_h:.4f}')
-    print(f'[BOT] MACD_bear={macd_bear} MACD_declining={macd_declining} RSI_div={rsi_div}')
-
-    # ── 4. Get MVRV + Z-Score — try BG cache first, then embedded, then web ──
-    # Priority: BG cache → embedded history → CoinMetrics → ahasignals
-    # NUPL is always derived: 1 - 1/mvrv (no separate fetch needed)
-    # MVRV Z-Score: BG API (mvrv-zscore) → embedded 365d calculation
-    mvrv_val = float('nan')
-    mvrv_z = float('nan')
-    mvrv_z_source = 'N/A'
-    mvrv_source = 'N/A'
-
-    # Try BG cache ONLY (no API calls) for early MVRV preview.
-    # The actual batch fetch happens later in section 4b.
-    try:
-        from . import bg_metrics
-        bg_mvrv = bg_metrics.get_cached_value('mvrv', today)
-        if not math.isnan(bg_mvrv):
-            mvrv_val = bg_mvrv
-            if mvrv_val is not None and mvrv_val <= 0:
-                mvrv_val = float('nan')
-            mvrv_source = 'BG-cache'
-            print(f'[BOT] MVRV from BG cache: {mvrv_val:.4f}')
-        # MVRV Z-Score from BG cache
-        bg_z = bg_metrics.get_cached_value('mvrv_zscore', today)
-        if not math.isnan(bg_z):
-            mvrv_z = bg_z
-            mvrv_z_source = 'BG-cache'
-            print(f'[BOT] MVRV Z-Score from BG cache: {mvrv_z:.3f}')
-    except ImportError:
-        pass
-
-    # Fallback: embedded history + web
-    if math.isnan(mvrv_val):
-        mvrv_val = strategy.get_mvrv_for_date(today)
-        if mvrv_val is not None and mvrv_val <= 0:
-            mvrv_val = float('nan')
-        if not math.isnan(mvrv_val):
-            mvrv_source = 'embedded'
-            # Check if embedded data is stale, try web update in background
-            from datetime import timedelta as td
-            if today - strategy._MVRV_HISTORY_MAX > td(days=1):
-                print(f'[BOT] MVRV embedded stale (ends {strategy._MVRV_HISTORY_MAX}), '
-                      f'updating in background...')
-                try:
-                    from . import mvrv_fetcher
-                    ok, msg = mvrv_fetcher.try_update_mvrv()
-                    print(f'[BOT] MVRV update: {msg}')
-                except Exception as e:
-                    print(f'[BOT] MVRV background update failed: {e}')
-        else:
-            # Embedded also missing — try web fetch
-            print(f'[BOT] No embedded MVRV for {today}, trying web fallback...')
-            from . import mvrv_fetcher
-            web_mvrv, web_date, web_source = mvrv_fetcher.fetch_mvrv_from_web()
-            if web_mvrv is not None:
-                print(f'[BOT] Web MVRV: {web_mvrv:.4f} ({web_date}, {web_source})')
-                if web_date and web_date > strategy._MVRV_HISTORY_MAX:
-                    mvrv_fetcher.append_mvrv_to_history(web_mvrv, web_date)
-                mvrv_val = web_mvrv
-                if mvrv_val is not None and mvrv_val <= 0:
-                    mvrv_val = float('nan')
-                mvrv_source = web_source
-            else:
-                print(f'[BOT] WARNING: All MVRV sources failed: {web_source}')
-                notifier.send_telegram(
-                    f'Phoenix v5.1 WARNING: No MVRV data for {today}. '
-                    'All sources failed. Skipping trade.'
-                )
-                return bot_state
-
-    mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val)
-    if math.isnan(mvrv_z):
-        mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val)
-        mvrv_z_source = 'embedded-365d'
-    nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 else 0
-    realized_price = price / mvrv_val if mvrv_val > 0 else float('nan')
-
-    # ── 4b. Fetch remaining on-chain metrics from BGeometrics (BATCH) ──
-    # Uses get_all_metrics_today() which:
-    #   - Fetches ALL 5 metrics in one pass (1 cache load/save cycle)
-    #   - Daily guard: if already fetched today, returns snapshot (0 API calls)
-    #   - Typical: 5 API calls on first run/day, 0 on subsequent runs
-    #
-    # MVRV already obtained above from BG (section 4), but batch ensures
-    # all other metrics (SOPR, RP, LTH-RP) are also fetched.
-    #
-    # Fallback chain for EACH indicator when API/cache fails:
-    #   MVRV:            BG cache → embedded history → CoinMetrics → ahasignals
-    #   MVRV Z-Score:    BG API (mvrv-zscore) → embedded 365d calculation
-    #   NUPL:            1 - 1/mvrv (always computable if MVRV available)
-    #   SOPR:            BG cache → price/SMA14 → price/SMA30
-    #   Realized Price:  BG cache → price/mvrv
-    #   LTH Realized P:  BG cache → realized_price * 1.15 (LTH holders cost basis)
-    #
-    # SOPR proxy rationale: SOPR = price / avg_cost_basis_of_STH
-    #   SMA14 approximates short-term holder average buy price.
-    #   price > SMA14 → recent buyers in profit → SOPR > 1
-    #   price < SMA14 → recent buyers in loss  → SOPR < 1
-    #   This is far more accurate than mvrv^0.85 which can't produce
-    #   SOPR < 1 when MVRV > 1 (common divergence scenario).
-    sma14 = ind.sma(closes, 14)
-    sma30 = ind.sma(closes, 30)
-
-    def _sopr_proxy(price_val, sma14_val, sma30_val):
-        """Estimate SOPR from price vs short-term moving average.
-
-        SOPR measures short-term holder P/L ratio.
-        price / SMA(N) approximates this: if price > recent avg,
-        recent buyers are in profit (SOPR > 1) and vice versa.
-        """
-        if sma14_val > 0 and not math.isnan(sma14_val):
-            return price_val / sma14_val
-        if sma30_val > 0 and not math.isnan(sma30_val):
-            return price_val / sma30_val
-        return 1.0
-
-    def _lth_rp_proxy(realized_price_val, price, mvrv_val, in_bear=False):
-        """Estimate LTH Realized Price from Realized Price.
-
-        B23: Dynamic multiplier based on market regime.
-        LTH holders have higher cost basis than overall realized price.
-        Historically LTH-RP/RP varies:
-          - Bear market: 1.20-1.30 (LTH cost basis much higher)
-          - Bull market: 1.05-1.15 (closer to overall RP)
-          - Neutral: ~1.15 (historical average)
-        """
-        if not math.isnan(realized_price_val) and realized_price_val > 0:
-            if in_bear:
-                multiplier = 1.25
-            elif mvrv_val > 2.5:
-                multiplier = 1.10  # bull territory
-            else:
-                multiplier = 1.15
-            return realized_price_val * multiplier
-        # Derive from MVRV if no realized price
-        if mvrv_val > 0 and not math.isnan(mvrv_val) and price > 0:
-            est_rp = price / mvrv_val
-            if in_bear:
-                multiplier = 1.25
-            elif mvrv_val > 2.5:
-                multiplier = 1.10
-            else:
-                multiplier = 1.15
-            return est_rp * multiplier
-        return float('nan')
-
-    # B20: Determine bear flag early for LTH-RP proxy accuracy
-    _early_in_bear = not math.isnan(sma_200) and price < sma_200
-
-    # Initialize with NaN
-    sopr = float('nan')
-    lth_rp = float('nan')
-    sopr_source = 'N/A'
-    lth_source = 'N/A'
-    rp_source = 'N/A'
-
-    try:
-        from . import bg_metrics
-        # BATCH fetch — one call for all metrics, daily guard active
-        bg = bg_metrics.get_all_metrics_today(target_date=today)
-
-        # --- MVRV (if BG has valid value, override lower-priority source) ---
-        if not math.isnan(bg.get('mvrv', float('nan'))):
-            bg_mvrv_val = bg['mvrv']
-            # Only override if BG value is valid (>0) and current source is lower priority
-            if bg_mvrv_val > 0 and mvrv_source != 'BG':
-                mvrv_val = bg_mvrv_val
-                mvrv_source = 'BG'
-                # Recompute derived values with BG MVRV
-                nupl = 1.0 - 1.0 / mvrv_val
-                realized_price = price / mvrv_val
-                print(f'[BOT] MVRV upgraded from BG: {mvrv_val:.4f}')
-
-        # --- MVRV Z-Score from BG ---
-        if not math.isnan(bg.get('mvrv_zscore', float('nan'))):
-            mvrv_z = bg['mvrv_zscore']
-            mvrv_z_source = 'BG'
-            print(f'[BOT] MVRV Z-Score from BG batch: {mvrv_z:.3f}')
-
-        # --- SOPR ---
-        if not math.isnan(bg.get('sth_sopr', float('nan'))):
-            sopr = bg['sth_sopr']
-            sopr_source = 'BG'
-        else:
-            sopr = _sopr_proxy(price, sma14, sma30)
-            sopr_source = 'proxy-sma14'
-
-        # --- Realized Price ---
-        if not math.isnan(bg.get('realized_price', float('nan'))):
-            realized_price = bg['realized_price']
-            rp_source = 'BG'
-        # else: keep the MVRV-derived realized_price from section 4 above
-
-        # --- LTH Realized Price ---
-        if not math.isnan(bg.get('lth_realized_price', float('nan'))):
-            lth_rp = bg['lth_realized_price']
-            lth_source = 'BG'
-        else:
-            lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val, in_bear=_early_in_bear)
-            lth_source = 'proxy-rp*dynamic' if not math.isnan(lth_rp) else 'N/A'
-
-        # B20: When BG returns both SOPR and proxy was also computed,
-        # log the proxy accuracy for analysis
-        _proxy_sopr = _sopr_proxy(price, sma14, sma30)
-        if not math.isnan(sopr) and not math.isnan(_proxy_sopr):
-            proxy_err = abs(sopr - _proxy_sopr) / max(abs(sopr), 0.001) * 100
-            print(f'[BOT] SOPR proxy accuracy: actual={sopr:.4f} proxy={_proxy_sopr:.4f} err={proxy_err:.1f}%')
-
-        print(f'[BOT] STH-SOPR={sopr:.4f} ({sopr_source}) '
-              f'LTH-RP={lth_rp:,.2f} ({lth_source}) '
-              f'RP={realized_price:,.2f} ({rp_source})')
-    except Exception as e:
-        print(f'[BOT] BG metrics failed: {e}. Using all-proxy mode')
-        sopr = _sopr_proxy(price, sma14, sma30)
-        lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val, in_bear=_early_in_bear)
-        sopr_source = 'proxy-sma14'
-        lth_source = 'proxy-rp*dynamic'
-
-    print(f'[BOT] MVRV={mvrv_val:.3f} ({mvrv_source}) Pct={mvrv_pct:.3f} Z={mvrv_z:.2f} ({mvrv_z_source}) NUPL={nupl:.3f}')
+    # Unpack resolved metrics
+    sma_200 = m['sma_200']
+    sma_365 = m['sma_365']
+    rsi_val = m['rsi']
+    macd_line = m['macd_line']
+    macd_sig = m['macd_sig']
+    macd_h = m['macd_h']
+    macd_hist_series = m['macd_hist_series']
+    rsi_series = m['rsi_series']
+    macd_bear = m['macd_bear']
+    macd_declining = m['macd_declining']
+    rsi_div = m['rsi_div']
+    ath = m['ath']
+    mvrv_val = m['mvrv']
+    mvrv_source = m['mvrv_source']
+    mvrv_pct = m['mvrv_pct']
+    mvrv_z = m['mvrv_z']
+    mvrv_z_source = m['mvrv_z_source']
+    nupl = m['nupl']
+    realized_price = m['realized_price']
+    rp_source = m['rp_source']
+    sopr = m['sopr']
+    sopr_source = m['sopr_source']
+    lth_rp = m['lth_realized_price']
+    lth_source = m['lth_source']
+    in_bear = m['in_bear']
 
     # ── 5. Get exchange balances ──
     # ╔═══════════════════════════════════════════════════════════════╗
@@ -929,101 +930,39 @@ def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
         print('[REFRESH] ERROR: Not enough price history')
         return bot_state
 
-    # ── 3. Compute technical indicators ──
-    print('[REFRESH] Computing indicators...')
-    sma_200 = ind.sma(closes, 200)
-    sma_365 = ind.sma(closes, 365)
-    rsi_val = ind.rsi(closes, 14)
-    macd_line, macd_sig, macd_h = ind.macd(closes)
-    macd_hist_series = ind.compute_all_macd_hist(closes)
-    rsi_series = ind.compute_all_rsi(closes, 14)
-    macd_bear = ind.macd_cross_bear(macd_hist_series)
-    macd_declining = ind.macd_hist_declining(macd_hist_series, 4)
-    rsi_div = ind.rsi_divergence(closes, rsi_series, 40)
-    ath = max(closes) if closes else 0
-    sma14 = ind.sma(closes, 14)
-    sma30 = ind.sma(closes, 30)
-    print(f'[REFRESH] SMA200={sma_200:,.2f} RSI={rsi_val:.1f} MACD_H={macd_h:.4f}')
+    # ── 3+4+4b. Resolve all indicators + on-chain metrics (B22: shared function) ──
+    print('[REFRESH] Computing indicators + resolving on-chain metrics...')
+    rm = _resolve_onchain_metrics(price, closes, today,
+                                      log_prefix='[REFRESH]',
+                                      allow_web_fallback=False,
+                                      notify_on_fail=False)
 
-    # ── 4. Get MVRV ──
-    mvrv_val = float('nan')
-    mvrv_z = float('nan')
-    mvrv_z_source = 'N/A'
-    mvrv_source = 'N/A'
-    try:
-        from . import bg_metrics
-        bg_mvrv = bg_metrics.get_cached_value('mvrv', today)
-        if not math.isnan(bg_mvrv):
-            mvrv_val = bg_mvrv
-            if mvrv_val is not None and mvrv_val <= 0:
-                mvrv_val = float('nan')
-            mvrv_source = 'BG-cache'
-        bg_z = bg_metrics.get_cached_value('mvrv_zscore', today)
-        if not math.isnan(bg_z):
-            mvrv_z = bg_z
-            mvrv_z_source = 'BG-cache'
-    except ImportError:
-        pass
-    if math.isnan(mvrv_val):
-        mvrv_val = strategy.get_mvrv_for_date(today)
-        if mvrv_val is not None and mvrv_val <= 0:
-            mvrv_val = float('nan')
-        mvrv_source = 'embedded' if not math.isnan(mvrv_val) else 'N/A'
-    mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val) if not math.isnan(mvrv_val) else 0
-    if math.isnan(mvrv_z):
-        mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val) if not math.isnan(mvrv_val) else 0
-        mvrv_z_source = 'embedded-365d'
-    nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 and not math.isnan(mvrv_val) else 0
-    realized_price = price / mvrv_val if mvrv_val > 0 and not math.isnan(mvrv_val) else float('nan')
-
-    # ── 4b. Batch on-chain metrics ──
-    def _sopr_proxy(price_val, sma14_val, sma30_val):
-        if sma14_val > 0 and not math.isnan(sma14_val): return price_val / sma14_val
-        if sma30_val > 0 and not math.isnan(sma30_val): return price_val / sma30_val
-        return 1.0
-    # B23: Dynamic LTH-RP proxy for refresh_dashboard
-    _refresh_bear = not math.isnan(sma_200) and price < sma_200
-    def _lth_rp_proxy(rp_val, price, mv):
-        if not math.isnan(rp_val) and rp_val > 0:
-            mult = 1.25 if _refresh_bear else (1.10 if mv > 2.5 else 1.15)
-            return rp_val * mult
-        if mv > 0 and not math.isnan(mv) and price > 0:
-            est = price / mv
-            mult = 1.25 if _refresh_bear else (1.10 if mv > 2.5 else 1.15)
-            return est * mult
-        return float('nan')
-    rp_source = 'mvrv-derived'
-    sopr = float('nan'); lth_rp = float('nan')
-    sopr_source = 'N/A'; lth_source = 'N/A'
-    try:
-        from . import bg_metrics as bg_m
-        bg = bg_m.get_all_metrics_today(target_date=today)
-        if not math.isnan(bg.get('mvrv', float('nan'))):
-            bg_mvrv_val = bg['mvrv']
-            if bg_mvrv_val > 0:
-                mvrv_val = bg_mvrv_val; mvrv_source = 'BG'
-                nupl = 1.0 - 1.0 / mvrv_val
-                realized_price = price / mvrv_val
-        if not math.isnan(bg.get('mvrv_zscore', float('nan'))):
-            mvrv_z = bg['mvrv_zscore']; mvrv_z_source = 'BG'
-        if not math.isnan(bg.get('sth_sopr', float('nan'))):
-            sopr = bg['sth_sopr']; sopr_source = 'BG'
-        else:
-            sopr = _sopr_proxy(price, sma14, sma30); sopr_source = 'proxy-sma14'
-        if not math.isnan(bg.get('realized_price', float('nan'))):
-            realized_price = bg['realized_price']; rp_source = 'BG'
-        if not math.isnan(bg.get('lth_realized_price', float('nan'))):
-            lth_rp = bg['lth_realized_price']; lth_source = 'BG'
-        else:
-            lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val)
-            lth_source = 'proxy-rp*dynamic'
-    except Exception as e:
-        print(f'[REFRESH] BG metrics failed: {e}. Using proxy.')
-        sopr = _sopr_proxy(price, sma14, sma30); sopr_source = 'proxy-sma14'
-        lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val)
-        lth_source = 'proxy-rp*dynamic'
-
-    print(f'[REFRESH] MVRV={mvrv_val:.3f} ({mvrv_source}) NUPL={nupl:.3f} SOPR={sopr:.4f} ({sopr_source})')
+    # Unpack resolved metrics
+    sma_200 = rm['sma_200']
+    sma_365 = rm['sma_365']
+    rsi_val = rm['rsi']
+    macd_line = rm['macd_line']
+    macd_sig = rm['macd_sig']
+    macd_h = rm['macd_h']
+    macd_hist_series = rm['macd_hist_series']
+    rsi_series = rm['rsi_series']
+    macd_bear = rm['macd_bear']
+    macd_declining = rm['macd_declining']
+    rsi_div = rm['rsi_div']
+    ath = rm['ath']
+    mvrv_val = rm['mvrv']
+    mvrv_source = rm['mvrv_source']
+    mvrv_pct = rm['mvrv_pct']
+    mvrv_z = rm['mvrv_z']
+    mvrv_z_source = rm['mvrv_z_source']
+    nupl = rm['nupl']
+    realized_price = rm['realized_price']
+    rp_source = rm['rp_source']
+    sopr = rm['sopr']
+    sopr_source = rm['sopr_source']
+    lth_rp = rm['lth_realized_price']
+    lth_source = rm['lth_source']
+    in_bear = rm['in_bear']
 
     # ── 5. Get balances ──
     if dry_run:
@@ -1057,7 +996,7 @@ def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
         'ath': round(ath, 2),
         'sell_score': bot_state.get('last_indicators', {}).get('sell_score', 0),
         'path_taken': bot_state.get('last_indicators', {}).get('path_taken', 'none'),
-        'in_bear': price < sma_200 if not math.isnan(sma_200) else False,
+        'in_bear': in_bear,
         'cooldown': bot_state.get('cooldown', 0),
         'realized_price': round(realized_price, 2) if not math.isnan(realized_price) else None,
         'lth_realized_price': round(lth_rp, 2) if not math.isnan(lth_rp) else None,
@@ -1200,140 +1139,42 @@ def run_demo(exchange, demo_state: dict, project_root: str,
         print('[DEMO] ERROR: Not enough price history')
         return demo_state
 
-    # ── 3. Compute technical indicators (same as live) ──
-    print('[DEMO] Computing indicators...')
-    sma_200 = ind.sma(closes, 200)
-    sma_365 = ind.sma(closes, 365)
-    rsi_val = ind.rsi(closes, 14)
-    macd_line, macd_sig, macd_h = ind.macd(closes)
-    macd_hist_series = ind.compute_all_macd_hist(closes)
-    rsi_series = ind.compute_all_rsi(closes, 14)
-    macd_bear = ind.macd_cross_bear(macd_hist_series)
-    macd_declining = ind.macd_hist_declining(macd_hist_series, 4)
-    rsi_div = ind.rsi_divergence(closes, rsi_series, 40)
-    ath = max(closes) if closes else 0
+    # ── 3+4+4b. Resolve all indicators + on-chain metrics (B22: shared function) ──
+    print('[DEMO] Computing indicators + resolving on-chain metrics...')
+    dm = _resolve_onchain_metrics(price, closes, today,
+                                      log_prefix='[DEMO]',
+                                      allow_web_fallback=True,
+                                      notify_on_fail=False)
+    if dm.get('_mvrv_all_failed'):
+        print('[DEMO] WARNING: No MVRV data. Skipping.')
+        return demo_state
 
-    print(f'[DEMO] SMA200={sma_200:,.2f} RSI={rsi_val:.1f} MACD_H={macd_h:.4f}')
-
-    # ── 4. Get MVRV — try BG cache first, then embedded, then web ──
-    mvrv_val = float('nan')
-    mvrv_source = 'N/A'
-
-    try:
-        from . import bg_metrics
-        bg_mvrv = bg_metrics.get_cached_value('mvrv', today)
-        if not math.isnan(bg_mvrv):
-            mvrv_val = bg_mvrv
-            if mvrv_val is not None and mvrv_val <= 0:
-                mvrv_val = float('nan')
-            mvrv_source = 'BG-cache'
-            print(f'[DEMO] MVRV from BG cache: {mvrv_val:.4f}')
-    except ImportError:
-        pass
-
-    if math.isnan(mvrv_val):
-        mvrv_val = strategy.get_mvrv_for_date(today)
-        if mvrv_val is not None and mvrv_val <= 0:
-            mvrv_val = float('nan')
-        if not math.isnan(mvrv_val):
-            mvrv_source = 'embedded'
-        else:
-            print(f'[DEMO] No embedded MVRV for {today}, trying web fallback...')
-            from . import mvrv_fetcher
-            web_mvrv, web_date, web_source = mvrv_fetcher.fetch_mvrv_from_web()
-            if web_mvrv is not None:
-                mvrv_val = web_mvrv
-                if mvrv_val is not None and mvrv_val <= 0:
-                    mvrv_val = float('nan')
-                mvrv_source = web_source
-                print(f'[DEMO] Web MVRV: {web_mvrv:.4f}')
-            else:
-                print(f'[DEMO] WARNING: No MVRV data. Skipping.')
-                return demo_state
-
-    mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val)
-    mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val)
-    mvrv_z_source = 'embedded-365d'
-    nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 else 0
-    realized_price = price / mvrv_val if mvrv_val > 0 else float('nan')
-
-    # ── 4b. BGeometrics metrics (BATCH + fallbacks) ──
-    sma14 = ind.sma(closes, 14)
-    sma30 = ind.sma(closes, 30)
-    def _sopr_proxy_demo(price_val, sma14_val, sma30_val):
-        if sma14_val > 0 and not math.isnan(sma14_val):
-            return price_val / sma14_val
-        if sma30_val > 0 and not math.isnan(sma30_val):
-            return price_val / sma30_val
-        return 1.0
-
-    # B23: Dynamic LTH-RP proxy for demo
-    _demo_bear = not math.isnan(sma_200) and price < sma_200
-    def _lth_rp_proxy_demo(realized_price_val, price, mvrv_val):
-        if not math.isnan(realized_price_val) and realized_price_val > 0:
-            mult = 1.25 if _demo_bear else (1.10 if mvrv_val > 2.5 else 1.15)
-            return realized_price_val * mult
-        if mvrv_val > 0 and not math.isnan(mvrv_val) and price > 0:
-            est = price / mvrv_val
-            mult = 1.25 if _demo_bear else (1.10 if mvrv_val > 2.5 else 1.15)
-            return est * mult
-        return float('nan')
-
-    sopr = float('nan')
-    lth_rp = float('nan')
-    sopr_source = 'N/A'
-    lth_source = 'N/A'
-    rp_source = 'N/A'
-
-    try:
-        from . import bg_metrics
-        bg = bg_metrics.get_all_metrics_today(target_date=today)
-
-        # MVRV Z-Score from BG (override embedded if available)
-        if not math.isnan(bg.get('mvrv_zscore', float('nan'))):
-            mvrv_z = bg['mvrv_zscore']
-            mvrv_z_source = bg.get('mvrv_z_source', 'BG')
-            print(f'[DEMO] MVRV Z-Score from BG: {mvrv_z:.3f}')
-
-        # MVRV upgrade from BG if applicable
-        if not math.isnan(bg.get('mvrv', float('nan'))):
-            bg_mvrv_val = bg['mvrv']
-            bg_mvrv_src = bg.get('mvrv_source', 'BG')
-            if mvrv_source != 'BG' and bg_mvrv_src == 'BG':
-                mvrv_val = bg_mvrv_val
-                if mvrv_val is not None and mvrv_val <= 0:
-                    mvrv_val = float('nan')
-                mvrv_source = 'BG'
-                nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 else 0
-                realized_price = price / mvrv_val if mvrv_val > 0 else realized_price
-
-        if not math.isnan(bg.get('sth_sopr', float('nan'))):
-            sopr = bg['sth_sopr']
-            sopr_source = 'BG'
-        else:
-            sopr = _sopr_proxy_demo(price, sma14, sma30)
-            sopr_source = 'proxy-sma14'
-
-        if not math.isnan(bg.get('realized_price', float('nan'))):
-            realized_price = bg['realized_price']
-            rp_source = 'BG'
-
-        if not math.isnan(bg.get('lth_realized_price', float('nan'))):
-            lth_rp = bg['lth_realized_price']
-            lth_source = 'BG'
-        else:
-            lth_rp = _lth_rp_proxy_demo(realized_price, price, mvrv_val)
-            lth_source = 'proxy-rp*dynamic' if not math.isnan(lth_rp) else 'N/A'
-    except ImportError:
-        sopr = _sopr_proxy_demo(price, sma14, sma30)
-        lth_rp = _lth_rp_proxy_demo(realized_price, price, mvrv_val)
-        sopr_source = 'proxy-sma14'
-        lth_source = 'proxy-rp*dynamic'
-
-    print(f'[DEMO] STH-SOPR={sopr:.4f} ({sopr_source}) '
-          f'LTH-RP={lth_rp:,.2f} ({lth_source}) '
-          f'RP={realized_price:,.2f} ({rp_source})')
-    print(f'[DEMO] MVRV={mvrv_val:.3f} ({mvrv_source}) Pct={mvrv_pct:.3f} Z={mvrv_z:.2f} NUPL={nupl:.3f}')
+    # Unpack resolved metrics
+    sma_200 = dm['sma_200']
+    sma_365 = dm['sma_365']
+    rsi_val = dm['rsi']
+    macd_line = dm['macd_line']
+    macd_sig = dm['macd_sig']
+    macd_h = dm['macd_h']
+    macd_hist_series = dm['macd_hist_series']
+    rsi_series = dm['rsi_series']
+    macd_bear = dm['macd_bear']
+    macd_declining = dm['macd_declining']
+    rsi_div = dm['rsi_div']
+    ath = dm['ath']
+    mvrv_val = dm['mvrv']
+    mvrv_source = dm['mvrv_source']
+    mvrv_pct = dm['mvrv_pct']
+    mvrv_z = dm['mvrv_z']
+    mvrv_z_source = dm['mvrv_z_source']
+    nupl = dm['nupl']
+    realized_price = dm['realized_price']
+    rp_source = dm['rp_source']
+    sopr = dm['sopr']
+    sopr_source = dm['sopr_source']
+    lth_rp = dm['lth_realized_price']
+    lth_source = dm['lth_source']
+    in_bear = dm['in_bear']
 
     # ── 5. Convert budget ──
     base_budget = config.get_daily_budget()
@@ -1354,10 +1195,9 @@ def run_demo(exchange, demo_state: dict, project_root: str,
         macd_cross_bear=macd_bear, macd_hist_declining=macd_declining,
         rsi_divergence_flag=rsi_div, ath=ath,
         btc_balance=demo_state['btc'],
-        cash_reserve=demo_reserve,  # Only BTC sale profits, not DCA cash
+        cash_reserve=demo_reserve,
         cooldown=demo_state['cooldown'],
         base_budget=base_budget, max_buy=max_buy,
-        # Reserve deployment config (all in exchange currency)
         reserve_floor=config.get_reserve_floor(),
         max_reserve_injection=config.get_max_reserve_injection(),
         max_reserve_boosted=config.get_max_reserve_boosted(),
