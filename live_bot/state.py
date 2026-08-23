@@ -307,3 +307,83 @@ def clear_trade_log(log_path: str):
             raise
         finally:
             fcntl.flock(lf, fcntl.LOCK_UN)
+
+
+# ── B18: Indicator History ─────────────────────────────────────────────
+# Stores daily indicator snapshots as a time-series for retrospective analysis.
+# Unlike last_indicators (overwritten each run), this APPENDS every run.
+# Stored in a separate file (indicator_history.json) to keep state.json small.
+
+_MAX_INDICATOR_HISTORY = 730  # ~2 years of daily data
+
+
+def append_indicator_history(history_path: str, indicators: dict,
+                               decision: dict = None):
+    """Append an indicator snapshot to the indicator history log.
+
+    B18: Stores daily indicator values as a time-series for
+    retrospective analysis and dashboard charting.
+
+    Each entry is a dict with 'date' (Thai TZ ISO) and all indicator
+    values. Retention: last 730 entries (~2 years).
+
+    Args:
+        history_path: path to indicator_history.json
+        indicators: dict of indicator values (from bot_state['last_indicators'])
+        decision: optional dict of decision values (from bot_state['last_decision'])
+    """
+    import tempfile
+    dir_name = os.path.dirname(history_path) or '.'
+    os.makedirs(dir_name, exist_ok=True)
+    lock = history_path + '.lock'
+
+    now_str = datetime.now(_THAI_TZ).strftime('%Y-%m-%d %H:%M')
+    entry = {'date': now_str}
+    entry.update(indicators)
+    if decision:
+        entry['decision'] = decision
+
+    tmp_path = None
+    with open(lock, 'w') as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            if os.path.exists(history_path):
+                with open(history_path, 'r') as f:
+                    history = json.load(f)
+            else:
+                history = []
+
+            history.append(_sanitize_for_json(entry))
+            if len(history) > _MAX_INDICATOR_HISTORY:
+                history = history[-_MAX_INDICATOR_HISTORY:]
+
+            fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
+            with os.fdopen(fd, 'w') as f:
+                json.dump(history, f, indent=2)
+            os.replace(tmp_path, history_path)
+        except Exception:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            raise
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
+
+
+def load_indicator_history(history_path: str) -> list:
+    """Load indicator history. Returns list of snapshot dicts.
+
+    Returns empty list if file doesn't exist or is corrupted.
+    """
+    if os.path.exists(history_path):
+        lock = history_path + '.lock'
+        with open(lock, 'w') as lf:
+            fcntl.flock(lf, fcntl.LOCK_SH)
+            try:
+                with open(history_path, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, OSError):
+                print(f'[STATE] WARNING: corrupted indicator history at {history_path}')
+                return []
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
+    return []

@@ -128,6 +128,12 @@ def phoenix_v5_1_decision(
     if np.isnan(mvrv):
         return _no_trade('MVRV unavailable', cooldown=cooldown)
 
+    # B24: Explicit NaN guard for SOPR. When SOPR is unavailable,
+    # treat as 'not confirming' and use the conservative 3.0x multiplier
+    # (NaN < 0.95 evaluates to False in NumPy, which gives 3.0x anyway,
+    #  but making it explicit avoids silent reliance on NaN comparison behavior).
+    sopr_valid = not np.isnan(sopr)
+
     # ── BEAR BLOCK CHECK ──
     in_bear = not np.isnan(sma_200) and price < sma_200
 
@@ -136,7 +142,9 @@ def phoenix_v5_1_decision(
     reserve_injection = 0.0
 
     if mvrv < 1.0:
-        multiplier = 4.5 if sopr < 0.95 else 3.0
+        # B24: Only use SOPR<0.95 condition when SOPR is valid.
+        # Without SOPR data, conservatively use 3.0x (not 4.5x).
+        multiplier = 4.5 if (sopr_valid and sopr < 0.95) else 3.0
     elif mvrv < 1.5:
         multiplier = 3.0 if nupl < 0.25 else 2.0
     elif mvrv < 2.0:

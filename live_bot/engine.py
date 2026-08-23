@@ -149,7 +149,10 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
                 r_nupl = 1.0 - 1.0 / r_mvrv if r_mvrv > 0 and not math.isnan(r_mvrv) else 0
                 r_sopr = refresh_price / r_sma14 if r_sma14 > 0 else 1.0
                 r_rp = refresh_price / r_mvrv if r_mvrv > 0 and not math.isnan(r_mvrv) else float('nan')
-                r_lth_rp = r_rp * 1.15 if not math.isnan(r_rp) else float('nan')
+                # B23: Dynamic LTH-RP proxy in idempotency-skip path
+                _idem_bear = not math.isnan(r_sma200) and refresh_price < r_sma200
+                _lth_mult = 1.25 if _idem_bear else (1.10 if r_mvrv > 2.5 else 1.15)
+                r_lth_rp = r_rp * _lth_mult if not math.isnan(r_rp) else float('nan')
 
                 # Balances
                 if dry_run:
@@ -184,7 +187,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
                     'cooldown': bot_state.get('cooldown', 0),
                     'realized_price': round(r_rp, 2) if not math.isnan(r_rp) else None,
                     'lth_realized_price': round(r_lth_rp, 2) if not math.isnan(r_lth_rp) else None,
-                    'lth_source': 'proxy-rp*1.15',
+                    'lth_source': 'proxy-rp*dynamic',
                     'rp_source': 'mvrv-derived',
                 }
                 bot_state['last_btc_balance'] = round(r_btc, 8)
@@ -437,19 +440,38 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             return price_val / sma30_val
         return 1.0
 
-    def _lth_rp_proxy(realized_price_val, price, mvrv_val):
+    def _lth_rp_proxy(realized_price_val, price, mvrv_val, in_bear=False):
         """Estimate LTH Realized Price from Realized Price.
 
+        B23: Dynamic multiplier based on market regime.
         LTH holders have higher cost basis than overall realized price.
-        Historically LTH-RP ≈ Realized Price * 1.10-1.20.
+        Historically LTH-RP/RP varies:
+          - Bear market: 1.20-1.30 (LTH cost basis much higher)
+          - Bull market: 1.05-1.15 (closer to overall RP)
+          - Neutral: ~1.15 (historical average)
         """
         if not math.isnan(realized_price_val) and realized_price_val > 0:
-            return realized_price_val * 1.15
+            if in_bear:
+                multiplier = 1.25
+            elif mvrv_val > 2.5:
+                multiplier = 1.10  # bull territory
+            else:
+                multiplier = 1.15
+            return realized_price_val * multiplier
         # Derive from MVRV if no realized price
         if mvrv_val > 0 and not math.isnan(mvrv_val) and price > 0:
             est_rp = price / mvrv_val
-            return est_rp * 1.15
+            if in_bear:
+                multiplier = 1.25
+            elif mvrv_val > 2.5:
+                multiplier = 1.10
+            else:
+                multiplier = 1.15
+            return est_rp * multiplier
         return float('nan')
+
+    # B20: Determine bear flag early for LTH-RP proxy accuracy
+    _early_in_bear = not math.isnan(sma_200) and price < sma_200
 
     # Initialize with NaN
     sopr = float('nan')
@@ -500,8 +522,15 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             lth_rp = bg['lth_realized_price']
             lth_source = 'BG'
         else:
-            lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val)
-            lth_source = 'proxy-rp*1.15' if not math.isnan(lth_rp) else 'N/A'
+            lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val, in_bear=_early_in_bear)
+            lth_source = 'proxy-rp*dynamic' if not math.isnan(lth_rp) else 'N/A'
+
+        # B20: When BG returns both SOPR and proxy was also computed,
+        # log the proxy accuracy for analysis
+        _proxy_sopr = _sopr_proxy(price, sma14, sma30)
+        if not math.isnan(sopr) and not math.isnan(_proxy_sopr):
+            proxy_err = abs(sopr - _proxy_sopr) / max(abs(sopr), 0.001) * 100
+            print(f'[BOT] SOPR proxy accuracy: actual={sopr:.4f} proxy={_proxy_sopr:.4f} err={proxy_err:.1f}%')
 
         print(f'[BOT] STH-SOPR={sopr:.4f} ({sopr_source}) '
               f'LTH-RP={lth_rp:,.2f} ({lth_source}) '
@@ -509,9 +538,9 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     except Exception as e:
         print(f'[BOT] BG metrics failed: {e}. Using all-proxy mode')
         sopr = _sopr_proxy(price, sma14, sma30)
-        lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val)
+        lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val, in_bear=_early_in_bear)
         sopr_source = 'proxy-sma14'
-        lth_source = 'proxy-rp*1.15'
+        lth_source = 'proxy-rp*dynamic'
 
     print(f'[BOT] MVRV={mvrv_val:.3f} ({mvrv_source}) Pct={mvrv_pct:.3f} Z={mvrv_z:.2f} ({mvrv_z_source}) NUPL={nupl:.3f}')
 
@@ -820,6 +849,19 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     bot_state['last_exchange_name'] = exchange.__class__.__name__.replace('Client', '').upper()
     bot_state['last_dry_run'] = dry_run
 
+    # ── 11b. B18: Append indicator history for retrospective analysis ──
+    try:
+        import os
+        ih_path = os.path.join(os.path.dirname(trade_log_path), 'indicator_history.json')
+        state_mod.append_indicator_history(
+            ih_path,
+            bot_state.get('last_indicators', {}),
+            bot_state.get('last_decision', {}),
+        )
+        print(f'[BOT] Indicator history appended')
+    except Exception as e:
+        print(f'[BOT] Indicator history append failed (non-critical): {e}')
+
     # ── 12. Low balance warning ──
     daily_budget = config.get_daily_budget()
     if current_cash > 0 and daily_budget > 0:
@@ -939,9 +981,16 @@ def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
         if sma14_val > 0 and not math.isnan(sma14_val): return price_val / sma14_val
         if sma30_val > 0 and not math.isnan(sma30_val): return price_val / sma30_val
         return 1.0
+    # B23: Dynamic LTH-RP proxy for refresh_dashboard
+    _refresh_bear = not math.isnan(sma_200) and price < sma_200
     def _lth_rp_proxy(rp_val, price, mv):
-        if not math.isnan(rp_val) and rp_val > 0: return rp_val * 1.15
-        if mv > 0 and not math.isnan(mv) and price > 0: return (price / mv) * 1.15
+        if not math.isnan(rp_val) and rp_val > 0:
+            mult = 1.25 if _refresh_bear else (1.10 if mv > 2.5 else 1.15)
+            return rp_val * mult
+        if mv > 0 and not math.isnan(mv) and price > 0:
+            est = price / mv
+            mult = 1.25 if _refresh_bear else (1.10 if mv > 2.5 else 1.15)
+            return est * mult
         return float('nan')
     rp_source = 'mvrv-derived'
     sopr = float('nan'); lth_rp = float('nan')
@@ -967,12 +1016,12 @@ def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
             lth_rp = bg['lth_realized_price']; lth_source = 'BG'
         else:
             lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val)
-            lth_source = 'proxy-rp*1.15'
+            lth_source = 'proxy-rp*dynamic'
     except Exception as e:
         print(f'[REFRESH] BG metrics failed: {e}. Using proxy.')
         sopr = _sopr_proxy(price, sma14, sma30); sopr_source = 'proxy-sma14'
         lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val)
-        lth_source = 'proxy-rp*1.15'
+        lth_source = 'proxy-rp*dynamic'
 
     print(f'[REFRESH] MVRV={mvrv_val:.3f} ({mvrv_source}) NUPL={nupl:.3f} SOPR={sopr:.4f} ({sopr_source})')
 
@@ -1025,6 +1074,17 @@ def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
     # D2: Do NOT overwrite last_dry_run in refresh-only paths.
     # refresh_dashboard() only fetches data for the dashboard, it doesn't trade,
     # so it must not change the provenance flag of existing trade data.
+
+    # B18: Also append indicator history on refresh
+    try:
+        ih_path = os.path.join(os.path.dirname(trade_log_path), 'indicator_history.json')
+        state_mod.append_indicator_history(
+            ih_path,
+            bot_state.get('last_indicators', {}),
+        )
+        print(f'[REFRESH] Indicator history appended')
+    except Exception as e:
+        print(f'[REFRESH] Indicator history append failed (non-critical): {e}')
 
     # Track peak and drawdown
     if portfolio > bot_state.get('peak_value', 0):
@@ -1207,11 +1267,16 @@ def run_demo(exchange, demo_state: dict, project_root: str,
             return price_val / sma30_val
         return 1.0
 
+    # B23: Dynamic LTH-RP proxy for demo
+    _demo_bear = not math.isnan(sma_200) and price < sma_200
     def _lth_rp_proxy_demo(realized_price_val, price, mvrv_val):
         if not math.isnan(realized_price_val) and realized_price_val > 0:
-            return realized_price_val * 1.15
+            mult = 1.25 if _demo_bear else (1.10 if mvrv_val > 2.5 else 1.15)
+            return realized_price_val * mult
         if mvrv_val > 0 and not math.isnan(mvrv_val) and price > 0:
-            return (price / mvrv_val) * 1.15
+            est = price / mvrv_val
+            mult = 1.25 if _demo_bear else (1.10 if mvrv_val > 2.5 else 1.15)
+            return est * mult
         return float('nan')
 
     sopr = float('nan')
@@ -1258,12 +1323,12 @@ def run_demo(exchange, demo_state: dict, project_root: str,
             lth_source = 'BG'
         else:
             lth_rp = _lth_rp_proxy_demo(realized_price, price, mvrv_val)
-            lth_source = 'proxy-rp*1.15' if not math.isnan(lth_rp) else 'N/A'
+            lth_source = 'proxy-rp*dynamic' if not math.isnan(lth_rp) else 'N/A'
     except ImportError:
         sopr = _sopr_proxy_demo(price, sma14, sma30)
         lth_rp = _lth_rp_proxy_demo(realized_price, price, mvrv_val)
         sopr_source = 'proxy-sma14'
-        lth_source = 'proxy-rp*1.15'
+        lth_source = 'proxy-rp*dynamic'
 
     print(f'[DEMO] STH-SOPR={sopr:.4f} ({sopr_source}) '
           f'LTH-RP={lth_rp:,.2f} ({lth_source}) '

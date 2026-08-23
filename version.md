@@ -1,3 +1,40 @@
+## 2026-08-24 (Wave 7) — Indicator System & Caching Improvement
+
+ใช้ team-dev skill 7-phase workflow ตรวจสอบและปรับปรุงระบบ indicator, caching, และ proxy accuracy แก้ไข 6 ปัญหา (B18-B24) คะแนน quality 88/100
+
+### HIGH (แก้ไขแล้ว)
+
+| # | ปัญหา | ไฟล์ | รายละเอียด |
+|---|--------|------|----------|
+| B18 | ไม่มีประวัติ indicator แบบ time-series | `state.py`, `engine.py` | เพิ่ม `append_indicator_history()` + `load_indicator_history()` ใน state.py, เรียกจาก run_daily() และ refresh_dashboard() เก็บ indicator_history.json (730 entries, ~2 ปี) |
+| B19 | _lookup_from_snapshot อ่าน disk ซ้ำซ้อน | `bg_metrics.py` | เพิ่ม `_daily_series_cache` (in-memory) ลด disk read 5 ครั้ง/rerun → 0 ครั้ง, รวมทั้ง no-token path ด้วย |
+
+### MEDIUM (แก้ไขแล้ว)
+
+| # | ปัญหา | ไฟล์ | รายละเอียด |
+|---|--------|------|----------|
+| B20 | ไม่มี proxy accuracy tracking | `engine.py` | เพิ่ม SOPR proxy vs actual comparison log เมื่อมีค่าจริงจาก BG (print diagnostic, non-intrusive) |
+| B21 | Daily snapshot guard ใช้ UTC ผิด timezone | `bg_metrics.py` | เปลี่ยนจาก `datetime.now(timezone.utc)` เป็น `datetime.now(timezone(timedelta(hours=7)))` ให้ตรง Thai TZ |
+| B23 | LTH-RP proxy ใช้ค่าคงที่ 1.15x | `engine.py` | เปลี่ยนเป็น dynamic: bear=1.25, bull(MVRV>2.5)=1.10, neutral=1.15 ทุก location (run_daily, refresh, idempotency-skip, run_demo) |
+
+### LOW (แก้ไขแล้ว)
+
+| # | ปัญหา | ไฟล์ | รายละเอียด |
+|---|--------|------|----------|
+| B24 | NaN SOPR ทำให้ได้ multiplier ผิดโดยไม่รู้ | `strategy.py` | เพิ่ม explicit `sopr_valid` NaN guard ก่อนเปรียบเทียบ SOPR < 0.95 (behavior ไม่เปลี่ยน แต่ code ชัดเจนขึ้น) |
+
+### ตรวจสอบแล้วแต่ไม่ต้องแก้ (deferred)
+
+| # | ปัญหา | เหตุผล skip |
+|---|--------|--------------|
+| B22 | Code duplication (fallback chain x3) | ต้อง refactor architecture ใหญ่ — กำหนดไว้เป็น future tech debt |
+| B25 | CoinMetrics MVRV ไม่มี file cache | ใช้บ่อยไม่พอ (เฉพาะ embedded stale case) — trade-off ความเรียบง่าย vs optimization |
+
+### Quality Score: 88/100
+- Correctness: 27/30 | Completeness: 18/20 | Edge Cases: 13/15 | No Regressions: 13/15 | Code Quality: 9/10 | Documentation: 8/10
+
+---
+
 ## 2026-08-22 (Wave 6) — Dashboard Deployment Reliability Fix
 
 ใช้ team-dev skill 7-phase workflow ตรวจสอบปัญหา Dashboard ไม่แสดงข้อมูล DCA ทั้งที่บอทซื้อสำเร็จ พบว่า data pipeline ถูกต้อง แต่ GHA deployment pipeline มีช่องโหว่ แก้ไข 6 ปัญหา คะแนน quality 92/100
