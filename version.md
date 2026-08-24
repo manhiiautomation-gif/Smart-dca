@@ -1,8 +1,18 @@
-## 2026-08-24 (Wave 7) — Indicator System & Caching Improvement
+## 2026-08-24 (Wave 8) — Dashboard Indicator Charts & f-string Fix
 
-ใช้ team-dev skill 7-phase workflow ตรวจสอบและปรับปรุงระบบ indicator, caching, และ proxy accuracy แก้ไข 6 ปัญหา (B18-B24) คะแนน quality 88/100
+แก้ไขปัญหา dashboard จากการตรวจสอบ session ก่อน
 
-### HIGH (แก้ไขแล้ว)
+### CRITICAL (แก้ไขแล้ว)
+
+| # | ปัญหา | ไฟล์ | รายละเอียด |
+|---|--------|------|----------|
+| D6 | generate_dashboard.py SyntaxError | `scripts/generate_dashboard.py` | commit 6d4543b แนะนำ IIFE indicator charts ด้วย f-string มี {{/}} จัดสมดุลผิด 5 จุด (gridBase, MVRV/RSI/SOPR yAxis, MVRV markLine) ทำให้ไฟล์ compile ไม่ได้เลย — แยกเป็น `_build_indicator_charts_js()` ใช้ regular string + `.replace()` |
+
+### MEDIUM (แก้ไขแล้ว)
+
+| # | ปัญหา | ไฟล์ | รายละเอียด |
+|---|--------|------|----------|
+| D7 | Indicator charts มีเพียง 3 กราฟ | `scripts/generate_dashboard.py` | เพิ่มกราฟ Price (สีเขียว) และ NUPL (สีตามค่า) รวมเป็น 5 กราฟ, เพิ่ม responsive grid 2 columns ที่ 900px |
 
 | # | ปัญหา | ไฟล์ | รายละเอียด |
 |---|--------|------|----------|
@@ -27,7 +37,7 @@
 
 | # | ปัญหา | เหตุผล skip |
 |---|--------|--------------|
-| B22 | Code duplication (fallback chain x3) | ต้อง refactor architecture ใหญ่ — กำหนดไว้เป็น future tech debt |
+| B22 | Code duplication (fallback chain x3) | `engine.py` | ✅ แก้แล้วใน Wave 7 — สร้าง `_resolve_onchain_metrics()` + `_sopr_proxy()` + `_lth_rp_proxy()` เรียกจาก 4 ที่ (run_daily, idempotency-skip, refresh_dashboard, run_demo) |
 | B25 | CoinMetrics MVRV ไม่มี file cache | ใช้บ่อยไม่พอ (เฉพาะ embedded stale case) — trade-off ความเรียบง่าย vs optimization |
 
 ### Quality Score: 88/100

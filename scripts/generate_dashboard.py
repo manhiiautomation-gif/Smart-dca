@@ -540,6 +540,141 @@ def generate_dashboard(state_path='live_bot/state.json',
     return output_path
 
 
+def _build_indicator_charts_js(ih_dates, ih_price, ih_mvrv, ih_rsi, ih_sopr, ih_nupl, currency):
+    """Build JS code for indicator history charts.
+
+    Uses a regular (non-f) string to avoid {{/}} escaping bugs that
+    plagued the original f-string approach (commit 6d4543b).
+    Dynamic values are injected via str.replace().
+    """
+    dates_json = json.dumps(ih_dates)
+    price_json = json.dumps(ih_price)
+    mvrv_json = json.dumps(ih_mvrv)
+    rsi_json = json.dumps(ih_rsi)
+    sopr_json = json.dumps(ih_sopr)
+    nupl_json = json.dumps(ih_nupl)
+
+    return '''\
+        // B22: Indicator History Charts
+        (function() {
+            var ihDates = __IH_DATES__;
+            var ihPrice = __IH_PRICE__;
+            var ihMvrv = __IH_MVRV__;
+            var ihRsi = __IH_RSI__;
+            var ihSopr = __IH_SOPR__;
+            var ihNupl = __IH_NUPL__;
+
+            if (ihDates.length < 2) {
+                var box = document.getElementById('ihCharts');
+                if (box) box.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:40px 20px;"><div style="font-size:0.85rem;">กราฟ indicator จะปรากฏหลัง bot ทำงาน 2 วันขึ้นไป</div></div>';
+                return;
+            }
+
+            var gridBase = { backgroundColor: 'transparent', grid: { left: 50, right: 15, top: 25, bottom: 35 } };
+            var axisLabel = { color: '#8b949e', fontSize: 9 };
+            var axisLine = { lineStyle: { color: '#30363d' } };
+            var tooltipBase = { trigger: 'axis', backgroundColor: '#1c2128', borderColor: '#30363d', textStyle: { color: '#e6edf3', fontSize: 11 } };
+
+            // Price Chart
+            var priceChart = echarts.init(document.getElementById('ihChartPrice'));
+            priceChart.setOption(Object.assign({}, gridBase, {
+                tooltip: tooltipBase,
+                title: { text: '__IH_CURRENCY__', left: 'center', top: 2, textStyle: { color: '#8b949e', fontSize: 11 } },
+                xAxis: { type: 'category', data: ihDates, axisLabel: Object.assign({}, axisLabel, { showMaxLabel: false }), axisLine },
+                yAxis: { type: 'value', axisLabel, splitLine: { lineStyle: { color: '#21262d' } } },
+                series: [{
+                    type: 'line', data: ihPrice, smooth: true,
+                    lineStyle: { color: '#3fb950', width: 2 },
+                    areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(63,185,80,0.15)' }, { offset: 1, color: 'rgba(63,185,80,0.01)' }] } },
+                    itemStyle: { color: '#3fb950' }
+                }]
+            }));
+            window.addEventListener('resize', function() { priceChart.resize(); });
+
+            // MVRV Chart
+            var mvrvChart = echarts.init(document.getElementById('ihChartMvrv'));
+            mvrvChart.setOption(Object.assign({}, gridBase, {
+                tooltip: tooltipBase,
+                title: { text: 'MVRV', left: 'center', top: 2, textStyle: { color: '#8b949e', fontSize: 11 } },
+                xAxis: { type: 'category', data: ihDates, axisLabel: Object.assign({}, axisLabel, { showMaxLabel: false }), axisLine },
+                yAxis: { type: 'value', axisLabel, splitLine: { lineStyle: { color: '#21262d' } } },
+                series: [{
+                    type: 'line', data: ihMvrv, smooth: true,
+                    lineStyle: { color: '#58a6ff', width: 2 },
+                    areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(88,166,255,0.15)' }, { offset: 1, color: 'rgba(88,166,255,0.01)' }] } },
+                    itemStyle: { color: '#58a6ff' },
+                    markLine: { data: [{ yAxis: 1.0, lineStyle: { color: '#f8514980', type: 'dashed' }, label: { show: true, formatter: 'MVRV=1', color: '#f8514980', fontSize: 9 } }], [{ yAxis: 2.0, lineStyle: { color: '#d2992280', type: 'dashed' }, label: { show: true, formatter: 'MVRV=2', color: '#d2992280', fontSize: 9 } }] }
+                }]
+            }));
+            window.addEventListener('resize', function() { mvrvChart.resize(); });
+
+            // RSI Chart
+            var rsiChart = echarts.init(document.getElementById('ihChartRsi'));
+            rsiChart.setOption(Object.assign({}, gridBase, {
+                tooltip: tooltipBase,
+                title: { text: 'RSI', left: 'center', top: 2, textStyle: { color: '#8b949e', fontSize: 11 } },
+                xAxis: { type: 'category', data: ihDates, axisLabel: Object.assign({}, axisLabel, { showMaxLabel: false }), axisLine },
+                yAxis: { type: 'value', min: 0, max: 100, axisLabel, splitLine: { lineStyle: { color: '#21262d' } } },
+                series: [{
+                    type: 'line', data: ihRsi, smooth: true,
+                    lineStyle: { color: '#bc8cff', width: 2 },
+                    areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(188,140,255,0.12)' }, { offset: 1, color: 'rgba(188,140,255,0.01)' }] } },
+                    itemStyle: { color: '#bc8cff' },
+                    markLine: { data: [{ yAxis: 30, lineStyle: { color: '#3fb95080', type: 'dashed' } }, { yAxis: 70, lineStyle: { color: '#f8514980', type: 'dashed' } }] }
+                }]
+            }));
+            window.addEventListener('resize', function() { rsiChart.resize(); });
+
+            // SOPR Chart
+            var soprChart = echarts.init(document.getElementById('ihChartSopr'));
+            soprChart.setOption(Object.assign({}, gridBase, {
+                tooltip: tooltipBase,
+                title: { text: 'SOPR', left: 'center', top: 2, textStyle: { color: '#8b949e', fontSize: 11 } },
+                xAxis: { type: 'category', data: ihDates, axisLabel: Object.assign({}, axisLabel, { showMaxLabel: false }), axisLine },
+                yAxis: { type: 'value', axisLabel, splitLine: { lineStyle: { color: '#21262d' } } },
+                series: [{
+                    type: 'line', data: ihSopr, smooth: true,
+                    lineStyle: { color: '#d29922', width: 2 },
+                    areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(210,153,34,0.12)' }, { offset: 1, color: 'rgba(210,153,34,0.01)' }] } },
+                    itemStyle: { color: '#d29922' },
+                    markLine: { data: [{ yAxis: 1.0, lineStyle: { color: '#f8514980', type: 'dashed' }, label: { show: true, formatter: 'SOPR=1', color: '#f8514980', fontSize: 9 } }] }
+                }]
+            }));
+            window.addEventListener('resize', function() { soprChart.resize(); });
+
+            // NUPL Chart
+            var nuplChart = echarts.init(document.getElementById('ihChartNupl'));
+            nuplChart.setOption(Object.assign({}, gridBase, {
+                tooltip: tooltipBase,
+                title: { text: 'NUPL', left: 'center', top: 2, textStyle: { color: '#8b949e', fontSize: 11 } },
+                xAxis: { type: 'category', data: ihDates, axisLabel: Object.assign({}, axisLabel, { showMaxLabel: false }), axisLine },
+                yAxis: { type: 'value', min: -0.5, max: 1, axisLabel, splitLine: { lineStyle: { color: '#21262d' } } },
+                series: [{
+                    type: 'line', data: ihNupl, smooth: true,
+                    lineStyle: { width: 2, color: function(params) { var v = params.value; if (v < 0) return '#f85149'; if (v < 0.25) return '#d29922'; if (v < 0.5) return '#e3b341'; if (v < 0.75) return '#58a6ff'; return '#3fb950'; } },
+                    itemStyle: { color: function(params) { var v = params.value; if (v < 0) return '#f85149'; if (v < 0.25) return '#d29922'; if (v < 0.5) return '#e3b341'; if (v < 0.75) return '#58a6ff'; return '#3fb950'; } },
+                    areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(88,166,255,0.1)' }, { offset: 1, color: 'rgba(88,166,255,0.01)' }] } },
+                    markLine: { data: [{ yAxis: 0, lineStyle: { color: '#f8514980', type: 'dashed' }, label: { show: true, formatter: '0', color: '#f8514980', fontSize: 9 } }, { yAxis: 0.75, lineStyle: { color: '#3fb95080', type: 'dashed' }, label: { show: true, formatter: 'euphoria', color: '#3fb95080', fontSize: 9 } }] }
+                }]
+            }));
+            window.addEventListener('resize', function() { nuplChart.resize(); });
+        })();'''.replace(
+        '__IH_DATES__', dates_json
+    ).replace(
+        '__IH_PRICE__', price_json
+    ).replace(
+        '__IH_MVRV__', mvrv_json
+    ).replace(
+        '__IH_RSI__', rsi_json
+    ).replace(
+        '__IH_SOPR__', sopr_json
+    ).replace(
+        '__IH_NUPL__', nupl_json
+    ).replace(
+        '__IH_CURRENCY__', f'BTC Price ({currency})'
+    )
+
+
 def build_html(**kw) -> str:
     """Build the complete HTML dashboard string."""
     # Unpack all needed variables from kw
@@ -798,6 +933,9 @@ def build_html(**kw) -> str:
         .dca-grid {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }}
         .ind-charts-grid {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }}
         .ih-chart-box {{ height: 200px; }}
+        @media (max-width: 900px) {{
+            .ind-charts-grid {{ grid-template-columns: 1fr 1fr; }}
+        }}
         @media (max-width: 640px) {{
             .grid-2, .grid-3, .dca-grid {{ grid-template-columns: 1fr; }}
             .ind-charts-grid {{ grid-template-columns: 1fr; }}
@@ -1269,9 +1407,11 @@ def build_html(**kw) -> str:
     <div class="card" style="margin-bottom:16px;">
         <div class="card-title">Indicator History (last {len(ih_dates)} days)</div>
         <div class="ind-charts-grid" id="ihCharts">
+            <div class="ih-chart-box"><div id="ihChartPrice"></div></div>
             <div class="ih-chart-box"><div id="ihChartMvrv"></div></div>
             <div class="ih-chart-box"><div id="ihChartRsi"></div></div>
             <div class="ih-chart-box"><div id="ihChartSopr"></div></div>
+            <div class="ih-chart-box"><div id="ihChartNupl"></div></div>
         </div>
     </div>
 
@@ -1656,76 +1796,8 @@ def build_html(**kw) -> str:
             window.addEventListener('resize', function() {{ chart.resize(); }});
         }})();
 
-        // B22: Indicator History Charts
-        (function() {{
-            var ihDates = {json.dumps(ih_dates)};
-            var ihPrice = {json.dumps(ih_price)};
-            var ihMvrv = {json.dumps(ih_mvrv)};
-            var ihRsi = {json.dumps(ih_rsi)};
-            var ihSopr = {json.dumps(ih_sopr)};
-
-            if (ihDates.length < 2) {{
-                var box = document.getElementById('ihCharts');
-                if (box) box.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:40px 20px;"><div style="font-size:0.85rem;">กราฟ indicator จะปรากฏหลัง bot ทำงาน 2 วันขึ้นไป</div></div>';
-                return;
-            }}
-
-            var gridBase = {{ backgroundColor: 'transparent', grid: {{ left: 50, right: 15, top: 25, bottom: 35 } } }};
-            var axisLabel = {{ color: '#8b949e', fontSize: 9 }};
-            var axisLine = {{ lineStyle: {{ color: '#30363d' }} }};
-            var tooltipBase = {{ trigger: 'axis', backgroundColor: '#1c2128', borderColor: '#30363d', textStyle: {{ color: '#e6edf3', fontSize: 11 }} }};
-
-            // MVRV Chart
-            var mvrvChart = echarts.init(document.getElementById('ihChartMvrv'));
-            mvrvChart.setOption(Object.assign({{}}, gridBase, {{
-                tooltip: tooltipBase,
-                title: {{ text: 'MVRV', left: 'center', top: 2, textStyle: {{ color: '#8b949e', fontSize: 11 }} }},
-                xAxis: {{ type: 'category', data: ihDates, axisLabel: Object.assign({{}}, axisLabel, {{ showMaxLabel: false }}), axisLine }},
-                yAxis: {{ type: 'value', axisLabel, splitLine: {{ lineStyle: {{ color: '#21262d' }} }},
-                series: [{{
-                    type: 'line', data: ihMvrv, smooth: true,
-                    lineStyle: {{ color: '#58a6ff', width: 2 }},
-                    areaStyle: {{ color: {{ type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{{ offset: 0, color: 'rgba(88,166,255,0.15)' }}, {{ offset: 1, color: 'rgba(88,166,255,0.01)' }}] }} }},
-                    itemStyle: {{ color: '#58a6ff' }},
-                    markLine: {{ data: [{{ yAxis: 1.0, lineStyle: {{ color: '#f8514980', type: 'dashed' }}, label: {{ show: true, formatter: 'MVRV=1', color: '#f8514980', fontSize: 9 }} }}], {{ yAxis: 2.0, lineStyle: {{ color: '#d2992280', type: 'dashed' }}, label: {{ show: true, formatter: 'MVRV=2', color: '#d2992280', fontSize: 9 }} }}] }}
-                }}]
-            }}));
-            window.addEventListener('resize', function() {{ mvrvChart.resize(); }});
-
-            // RSI Chart
-            var rsiChart = echarts.init(document.getElementById('ihChartRsi'));
-            rsiChart.setOption(Object.assign({{}}, gridBase, {{
-                tooltip: tooltipBase,
-                title: {{ text: 'RSI', left: 'center', top: 2, textStyle: {{ color: '#8b949e', fontSize: 11 }} }},
-                xAxis: {{ type: 'category', data: ihDates, axisLabel: Object.assign({{}}, axisLabel, {{ showMaxLabel: false }}), axisLine }},
-                yAxis: {{ type: 'value', min: 0, max: 100, axisLabel, splitLine: {{ lineStyle: {{ color: '#21262d' }} } }},
-                series: [{{
-                    type: 'line', data: ihRsi, smooth: true,
-                    lineStyle: {{ color: '#bc8cff', width: 2 }},
-                    areaStyle: {{ color: {{ type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{{ offset: 0, color: 'rgba(188,140,255,0.12)' }}, {{ offset: 1, color: 'rgba(188,140,255,0.01)' }}] }} }},
-                    itemStyle: {{ color: '#bc8cff' }},
-                    markLine: {{ data: [{{ yAxis: 30, lineStyle: {{ color: '#3fb95080', type: 'dashed' }} }}, {{ yAxis: 70, lineStyle: {{ color: '#f8514980', type: 'dashed' }}}] }}
-                }}]
-            }}));
-            window.addEventListener('resize', function() {{ rsiChart.resize(); }});
-
-            // SOPR Chart
-            var soprChart = echarts.init(document.getElementById('ihChartSopr'));
-            soprChart.setOption(Object.assign({{}}, gridBase, {{
-                tooltip: tooltipBase,
-                title: {{ text: 'SOPR', left: 'center', top: 2, textStyle: {{ color: '#8b949e', fontSize: 11 }} }},
-                xAxis: {{ type: 'category', data: ihDates, axisLabel: Object.assign({{}}, axisLabel, {{ showMaxLabel: false }}), axisLine }},
-                yAxis: {{ type: 'value', axisLabel, splitLine: {{ lineStyle: {{ color: '#21262d' }} } }},
-                series: [{{
-                    type: 'line', data: ihSopr, smooth: true,
-                    lineStyle: {{ color: '#d29922', width: 2 }},
-                    areaStyle: {{ color: {{ type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{{ offset: 0, color: 'rgba(210,153,34,0.12)' }}, {{ offset: 1, color: 'rgba(210,153,34,0.01)' }}] }} }},
-                    itemStyle: {{ color: '#d29922' }},
-                    markLine: {{ data: [{{ yAxis: 1.0, lineStyle: {{ color: '#f8514980', type: 'dashed' }}, label: {{ show: true, formatter: 'SOPR=1', color: '#f8514980', fontSize: 9 }} }}] }}
-                }}]
-            }}));
-            window.addEventListener('resize', function() {{ soprChart.resize(); }});
-        }})();
+        // B22: Indicator History Charts (built via _build_indicator_charts_js)
+        {_build_indicator_charts_js(ih_dates, ih_price, ih_mvrv, ih_rsi, ih_sopr, ih_nupl, currency)}
     </script>
 </body>
 </html>'''

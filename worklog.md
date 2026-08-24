@@ -1,6 +1,27 @@
 # Phoenix DCA Bot — Work Log
 
 ---
+Task ID: Wave-8-D6-D7
+Agent: main
+Task: ตรวจสอบ TODO จาก session ก่อน และทำต่อให้เสร็จ
+
+Work Log:
+- อ่าน worklog.md + version.md จาก session ก่อน
+- พบว่า B22 ถูก implement แล้วใน Wave 7 (แต่ version.md เขียนผิดว่า deferred)
+- พบว่า dashboard indicator_history integration ถูก implement แล้ว (โค้ดครบ ทั้ง load, pass, render ECharts)
+- แต่พบ commit 6d4543b ทำให้ generate_dashboard.py compile ไม่ได้ (f-string {{/}} จัดสมดุลผิด 5 จุด)
+- แยก ECharts indicator JS เป็น `_build_indicator_charts_js()` ใช้ regular string + .replace()
+- เพิ่มกราฟ Price + NUPL (จากเดิม 3 กราฟ → 5 กราฟ)
+- เพิ่ม responsive grid 2 columns ที่ 900px breakpoint
+- แก้ version.md ให้ B22 แสดงสถานะถูกต้อง
+
+Stage Summary:
+- D6 (CRITICAL): generate_dashboard.py SyntaxError — แยก f-string IIFE เป็น regular string function
+- D7 (MEDIUM): เพิ่มกราฟ Price + NUPL พร้อม responsive grid
+- B22: ยืนยันว่าถูก implement แล้วใน Wave 7, แก้ version.md
+- indicator_history pipeline: พร้อมใช้งาน รอ bot รันครั้งต่อไปเพื่อสร้างข้อมูล
+
+---
 Task ID: Wave-7-B18-B24
 Agent: main + 1 investigator + 1 reviewer
 Task: ตรวจสอบและปรับปรุงระบบ indicator DCA, BGeometrics API caching, ประวัติ indicator, และ proxy accuracy
