@@ -81,8 +81,14 @@
         .grid-2 { grid-template-columns: 1fr 1fr; }
         .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
         .dca-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+        .ind-charts-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+        .ih-chart-box { height: 200px; }
+        @media (max-width: 900px) {
+            .ind-charts-grid { grid-template-columns: 1fr 1fr; }
+        }
         @media (max-width: 640px) {
             .grid-2, .grid-3, .dca-grid { grid-template-columns: 1fr; }
+            .ind-charts-grid { grid-template-columns: 1fr; }
             body { padding: 10px; }
             .card { padding: 12px; border-radius: 10px; }
             .grid { gap: 10px; margin-bottom: 10px; }
@@ -339,33 +345,33 @@
             <div class="card-title">Portfolio Summary</div>
             <div class="metric">
                 <div class="metric-label">Portfolio Value</div>
-                <div class="metric-value hero green num-mono">27,188.84 <small style="font-size:0.7em;opacity:0.7;">THB</small></div>
+                <div class="metric-value hero green num-mono">27,259.26 <small style="font-size:0.7em;opacity:0.7;">THB</small></div>
             </div>
-            <div class="metric" style="margin-top:-4px;"><div class="metric-label">24h Change</div><div class="metric-value green" style="font-size:0.95rem;">27,187.63 THB (+2246911.57%)</div></div>
+            <div class="metric" style="margin-top:-4px;"><div class="metric-label">24h Change</div><div class="metric-value green" style="font-size:0.95rem;">27,251.49 THB (+350727.03%)</div></div>
             <div class="metric">
                 <div class="metric-label">BTC Holdings</div>
-                <div class="metric-value blue num-mono">0.001715 BTC</div>
-                <div class="metric-sub">4,337.15 THB</div>
+                <div class="metric-value blue num-mono">0.001836 BTC</div>
+                <div class="metric-sub">4,715.54 THB</div>
             </div>
             <div class="metric">
                 <div class="metric-label">Cash Balance</div>
-                <div class="metric-value">22,851.69 THB</div>
+                <div class="metric-value">22,543.72 THB</div>
             </div>
-            <div class="metric" style="margin-top:-4px;"><div class="metric-label">Avg Buy Price</div><div class="metric-value dim" style="font-size:0.95rem;">2,520,637.72 THB</div></div>
-            <div class="metric" style="margin-top:-4px;"><div class="metric-label">Unrealized P&L</div><div class="metric-value green" style="font-size:0.95rem;">13.10 THB (+3.3%)</div></div>
+            <div class="metric" style="margin-top:-4px;"><div class="metric-label">Avg Buy Price</div><div class="metric-value dim" style="font-size:0.95rem;">2,535,496.96 THB</div></div>
+            <div class="metric" style="margin-top:-4px;"><div class="metric-label">Unrealized P&L</div><div class="metric-value green" style="font-size:0.95rem;">60.27 THB (+10.0%)</div></div>
             <div class="metric" style="margin-top:-4px;"><div class="metric-label">Avg Buy Size</div><div class="metric-value dim" style="font-size:0.95rem;">200.00 THB/trade</div></div>
             <div class="grid grid-2" style="margin-top:12px; gap:8px;">
                 <div class="metric">
                     <div class="metric-label">ROI (ตลอดกาล)</div>
-                    <div class="metric-value green">+984.3%</div>
+                    <div class="metric-value green">+685.9%</div>
                 </div>
                 <div class="metric">
                     <div class="metric-label">Total Invested</div>
-                    <div class="metric-value dim">400.00 THB</div>
+                    <div class="metric-value dim">600.00 THB</div>
                 </div>
                 <div class="metric">
                     <div class="metric-label">Peak Value</div>
-                    <div class="metric-value dim">27,192.58</div>
+                    <div class="metric-value dim">27,259.26</div>
                 </div>
                 <div class="metric">
                     <div class="metric-label">Max Drawdown</div>
@@ -392,15 +398,15 @@
                 </div>
                 <div class="ind-item">
                     <span class="label">รันล่าสุด</span>
-                    <span class="val">2026-08-23</span>
+                    <span class="val">2026-08-24</span>
                 </div>
                 <div class="ind-item">
                     <span class="label">จำนวนรัน (ตลอดกาล)</span>
-                    <span class="val">2</span>
+                    <span class="val">3</span>
                 </div>
                 <div class="ind-item">
                     <span class="label">ราคา BTC ตอนนี้</span>
-                    <span class="val num-mono">2,528,271.59 THB</span>
+                    <span class="val num-mono">2,568,322.53 THB</span>
                 </div>
                 <!-- U11: Next Run -->
                 <div class="ind-item">
@@ -426,7 +432,7 @@
             <div class="ind-grid" style="margin-top:8px;">
                 <div class="ind-item">
                     <span class="label">MVRV</span>
-                    <span class="val blue">1.458</span>
+                    <span class="val blue">1.479</span>
                 </div>
                 <div class="ind-item">
                     <span class="label">MVRV Zone</span>
@@ -434,11 +440,11 @@
                 </div>
                 <div class="ind-item">
                     <span class="label">MVRV %ile</span>
-                    <span class="val">52.3%</span>
+                    <span class="val">54.0%</span>
                 </div>
                 <div class="ind-item">
                     <span class="label">MVRV Z-Score</span>
-                    <span class="val">-0.21</span>
+                    <span class="val">0.81</span>
                 </div>
                 <div class="ind-item">
                     <span class="label">RSI (14)</span>
@@ -446,23 +452,23 @@
                 </div>
                 <div class="ind-item">
                     <span class="label">MACD Hist</span>
-                    <span class="val">-5,777.6838</span>
+                    <span class="val">-5,786.5317</span>
                 </div>
                 <div class="ind-item">
                     <span class="label">NUPL</span>
-                    <span class="val">0.314</span>
+                    <span class="val">0.324</span>
                 </div>
                 <div class="ind-item">
                     <span class="label">SOPR</span>
-                    <span class="val">1.197 <small class="tag neutral sopr-src">MVRV-proxy</small></span>
+                    <span class="val">1.004 <small class="tag neutral sopr-src">BG</small></span>
                 </div>
                 <div class="ind-item">
                     <span class="label">SMA 200</span>
-                    <span class="val">2,334,391.53</span>
+                    <span class="val">2,337,966.40</span>
                 </div>
                 <div class="ind-item">
                     <span class="label">SMA 365</span>
-                    <span class="val">2,820,286.70</span>
+                    <span class="val">2,824,605.67</span>
                 </div>
             </div>
             <div style="margin-top:12px;padding:10px;border-radius:8px;background:var(--blue-bg, rgba(139,148,158,0.1));border:1px solid var(--blue, var(--border));">
@@ -489,7 +495,7 @@
                 </div>
                 <div class="ind-item">
                     <span class="label">ATH</span>
-                    <span class="val">4,070,101.33</span>
+                    <span class="val">4,076,334.26</span>
                 </div>
             </div>
             <div style="margin-top:16px;">
@@ -497,7 +503,7 @@
                 <div class="ind-grid">
                     <div class="ind-item">
                         <span class="label">Total Buys</span>
-                        <span class="val green">2</span>
+                        <span class="val green">3</span>
                     </div>
                     <div class="ind-item">
                         <span class="label">Total Sells</span>
@@ -505,7 +511,7 @@
                     </div>
                     <div class="ind-item">
                         <span class="label">BTC ซื้อรวม</span>
-                        <span class="val num-mono">0.00015869 BTC</span>
+                        <span class="val num-mono">0.00023664 BTC</span>
                     </div>
                     <div class="ind-item">
                         <span class="label">BTC ขายรวม</span>
@@ -525,7 +531,7 @@
                     </div>
                     <div class="ind-item">
                         <span class="label">Last Trade</span>
-                        <span class="val">2026-08-23 20:37</span>
+                        <span class="val">2026-08-24 20:56</span>
                     </div>
                 </div>
             </div>
@@ -536,6 +542,18 @@
     <div class="card" style="margin-bottom:16px;">
         <div class="card-title">Portfolio Value Over Time</div>
         <div class="chart-container" id="chart"></div>
+    </div>
+
+    <!-- Row 3b: Indicator History Charts (B22) -->
+    <div class="card" style="margin-bottom:16px;">
+        <div class="card-title">Indicator History (last 0 days)</div>
+        <div class="ind-charts-grid" id="ihCharts">
+            <div class="ih-chart-box"><div id="ihChartPrice"></div></div>
+            <div class="ih-chart-box"><div id="ihChartMvrv"></div></div>
+            <div class="ih-chart-box"><div id="ihChartRsi"></div></div>
+            <div class="ih-chart-box"><div id="ihChartSopr"></div></div>
+            <div class="ih-chart-box"><div id="ihChartNupl"></div></div>
+        </div>
     </div>
 
     <!-- Row 4: Recent Trades -->
@@ -554,6 +572,14 @@
             </thead>
             <tbody>
                 
+        <tr class="buy">
+            <td>2026-08-24 20:56</td>
+            <td class="buy">BUY</td>
+            <td>200.00 THB</td>
+            <td class="num-mono">0.00007795 BTC</td>
+            <td>2,565,875.22</td>
+            <td>0.00</td>
+        </tr>
         <tr class="buy">
             <td>2026-08-23 20:37</td>
             <td class="buy">BUY</td>
@@ -591,13 +617,13 @@
             <div class="ind-grid" style="margin-top:12px;">
                 <div class="ind-item"><span class="label">Exchange</span><span class="val">BITKUB</span></div>
 <div class="ind-item"><span class="label">Currency</span><span class="val">THB</span></div>
-<div class="ind-item"><span class="label">USD/THB Rate</span><span class="val">32.650</span></div>
+<div class="ind-item"><span class="label">USD/THB Rate</span><span class="val">32.700</span></div>
 <div class="ind-item"><span class="label">Daily DCA Budget</span><span class="val">100 THB = 3.06 USDT</span></div>
-<div class="ind-item"><span class="label">Max Buy/Trade</span><span class="val">1,000 THB = 30.63 USDT</span></div>
+<div class="ind-item"><span class="label">Max Buy/Trade</span><span class="val">1,000 THB = 30.58 USDT</span></div>
 <div class="ind-item"><span class="label">Max DCA Buys/Day</span><span class="val">1</span></div>
-<div class="ind-item"><span class="label">Reserve Floor</span><span class="val">6.13 USDT</span></div>
-<div class="ind-item"><span class="label">Max Reserve Inject</span><span class="val">27.57 USDT</span></div>
-<div class="ind-item"><span class="label">Max Boosted Inject</span><span class="val">49.62 USDT</span></div>
+<div class="ind-item"><span class="label">Reserve Floor</span><span class="val">6.12 USDT</span></div>
+<div class="ind-item"><span class="label">Max Reserve Inject</span><span class="val">27.52 USDT</span></div>
+<div class="ind-item"><span class="label">Max Boosted Inject</span><span class="val">49.54 USDT</span></div>
 <div class="ind-item"><span class="label">Boost Multiplier</span><span class="val">1.8x</span></div>
 <div class="ind-item"><span class="label">Boost Price Ratio</span><span class="val">1.05x realized</span></div>
 <div class="ind-item"><span class="label">Low Balance Alert</span><span class="val">< 7 days remaining</span></div>
@@ -638,7 +664,7 @@
 
     <!-- Footer -->
     <div class="footer">
-        Phoenix v5.1 DCA Bot | Generated: 2026-08-23 13:52 | Auto-refresh: 5 min | <a href="https://github.com/manhiiautomation-gif/Smart-dca" target="_blank" style="color:var(--blue);text-decoration:none;">GitHub</a>
+        Phoenix v5.1 DCA Bot | Generated: 2026-08-24 13:58 | Auto-refresh: 5 min | <a href="https://github.com/manhiiautomation-gif/Smart-dca" target="_blank" style="color:var(--blue);text-decoration:none;">GitHub</a>
     </div>
 
     <script>
@@ -812,7 +838,7 @@
             if (isAlive) {
                 title.textContent = 'Kill Bot?';
                 msg.innerHTML = '⚠️ ก่อน Kill:<br>' +
-                    '• กำลังถือ: <b>' + '0.00' + ' BTC</b> (~' + '4,337.15' + ' THB)<br>' +
+                    '• กำลังถือ: <b>' + '0.00' + ' BTC</b> (~' + '4,715.54' + ' THB)<br>' +
                     '• ถ้าราคาเปลี่ยน จะไม่มี auto-sell<br>' +
                     '• ต้อง Resume ด้วยมือเท่านั้น';
                 input.value = '';
@@ -891,7 +917,7 @@
 
         // U9: Freshness badge — shows relative time since generation
         (function() {
-            var genTime = 1787493151 * 1000;
+            var genTime = 1787579921 * 1000;
             var el = document.getElementById('freshness');
             if (!el) return;
             function update() {
@@ -910,9 +936,9 @@
     <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
     <script>
         (function() {
-            var dates = ["2026-08-22 20:37", "2026-08-23 20:37", "2026-08-23"];
-            var values = [1.17, 1.21, 27188.84];
-            var types = ["buy", "buy", "current"];
+            var dates = ["2026-08-22 20:37", "2026-08-23 20:37", "2026-08-24 20:56", "2026-08-24"];
+            var values = [4.36, 7.57, 7.77, 27259.26];
+            var types = ["buy", "buy", "buy", "current"];
 
             if (dates.length === 0) {
                 document.getElementById('chart').innerHTML =
@@ -993,6 +1019,112 @@
             var chart = echarts.init(document.getElementById('chart'));
             chart.setOption(option);
             window.addEventListener('resize', function() { chart.resize(); });
+        })();
+
+        // B22: Indicator History Charts (built via _build_indicator_charts_js)
+                // B22: Indicator History Charts
+        (function() {
+            var ihDates = [];
+            var ihPrice = [];
+            var ihMvrv = [];
+            var ihRsi = [];
+            var ihSopr = [];
+            var ihNupl = [];
+
+            if (ihDates.length < 2) {
+                var box = document.getElementById('ihCharts');
+                if (box) box.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:40px 20px;"><div style="font-size:0.85rem;">กราฟ indicator จะปรากฏหลัง bot ทำงาน 2 วันขึ้นไป</div></div>';
+                return;
+            }
+
+            var gridBase = { backgroundColor: 'transparent', grid: { left: 50, right: 15, top: 25, bottom: 35 } };
+            var axisLabel = { color: '#8b949e', fontSize: 9 };
+            var axisLine = { lineStyle: { color: '#30363d' } };
+            var tooltipBase = { trigger: 'axis', backgroundColor: '#1c2128', borderColor: '#30363d', textStyle: { color: '#e6edf3', fontSize: 11 } };
+
+            // Price Chart
+            var priceChart = echarts.init(document.getElementById('ihChartPrice'));
+            priceChart.setOption(Object.assign({}, gridBase, {
+                tooltip: tooltipBase,
+                title: { text: 'BTC Price (THB)', left: 'center', top: 2, textStyle: { color: '#8b949e', fontSize: 11 } },
+                xAxis: { type: 'category', data: ihDates, axisLabel: Object.assign({}, axisLabel, { showMaxLabel: false }), axisLine },
+                yAxis: { type: 'value', axisLabel, splitLine: { lineStyle: { color: '#21262d' } } },
+                series: [{
+                    type: 'line', data: ihPrice, smooth: true,
+                    lineStyle: { color: '#3fb950', width: 2 },
+                    areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(63,185,80,0.15)' }, { offset: 1, color: 'rgba(63,185,80,0.01)' }] } },
+                    itemStyle: { color: '#3fb950' }
+                }]
+            }));
+            window.addEventListener('resize', function() { priceChart.resize(); });
+
+            // MVRV Chart
+            var mvrvChart = echarts.init(document.getElementById('ihChartMvrv'));
+            mvrvChart.setOption(Object.assign({}, gridBase, {
+                tooltip: tooltipBase,
+                title: { text: 'MVRV', left: 'center', top: 2, textStyle: { color: '#8b949e', fontSize: 11 } },
+                xAxis: { type: 'category', data: ihDates, axisLabel: Object.assign({}, axisLabel, { showMaxLabel: false }), axisLine },
+                yAxis: { type: 'value', axisLabel, splitLine: { lineStyle: { color: '#21262d' } } },
+                series: [{
+                    type: 'line', data: ihMvrv, smooth: true,
+                    lineStyle: { color: '#58a6ff', width: 2 },
+                    areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(88,166,255,0.15)' }, { offset: 1, color: 'rgba(88,166,255,0.01)' }] } },
+                    itemStyle: { color: '#58a6ff' },
+                    markLine: { data: [{ yAxis: 1.0, lineStyle: { color: '#f8514980', type: 'dashed' }, label: { show: true, formatter: 'MVRV=1', color: '#f8514980', fontSize: 9 } }], [{ yAxis: 2.0, lineStyle: { color: '#d2992280', type: 'dashed' }, label: { show: true, formatter: 'MVRV=2', color: '#d2992280', fontSize: 9 } }] }
+                }]
+            }));
+            window.addEventListener('resize', function() { mvrvChart.resize(); });
+
+            // RSI Chart
+            var rsiChart = echarts.init(document.getElementById('ihChartRsi'));
+            rsiChart.setOption(Object.assign({}, gridBase, {
+                tooltip: tooltipBase,
+                title: { text: 'RSI', left: 'center', top: 2, textStyle: { color: '#8b949e', fontSize: 11 } },
+                xAxis: { type: 'category', data: ihDates, axisLabel: Object.assign({}, axisLabel, { showMaxLabel: false }), axisLine },
+                yAxis: { type: 'value', min: 0, max: 100, axisLabel, splitLine: { lineStyle: { color: '#21262d' } } },
+                series: [{
+                    type: 'line', data: ihRsi, smooth: true,
+                    lineStyle: { color: '#bc8cff', width: 2 },
+                    areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(188,140,255,0.12)' }, { offset: 1, color: 'rgba(188,140,255,0.01)' }] } },
+                    itemStyle: { color: '#bc8cff' },
+                    markLine: { data: [{ yAxis: 30, lineStyle: { color: '#3fb95080', type: 'dashed' } }, { yAxis: 70, lineStyle: { color: '#f8514980', type: 'dashed' } }] }
+                }]
+            }));
+            window.addEventListener('resize', function() { rsiChart.resize(); });
+
+            // SOPR Chart
+            var soprChart = echarts.init(document.getElementById('ihChartSopr'));
+            soprChart.setOption(Object.assign({}, gridBase, {
+                tooltip: tooltipBase,
+                title: { text: 'SOPR', left: 'center', top: 2, textStyle: { color: '#8b949e', fontSize: 11 } },
+                xAxis: { type: 'category', data: ihDates, axisLabel: Object.assign({}, axisLabel, { showMaxLabel: false }), axisLine },
+                yAxis: { type: 'value', axisLabel, splitLine: { lineStyle: { color: '#21262d' } } },
+                series: [{
+                    type: 'line', data: ihSopr, smooth: true,
+                    lineStyle: { color: '#d29922', width: 2 },
+                    areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(210,153,34,0.12)' }, { offset: 1, color: 'rgba(210,153,34,0.01)' }] } },
+                    itemStyle: { color: '#d29922' },
+                    markLine: { data: [{ yAxis: 1.0, lineStyle: { color: '#f8514980', type: 'dashed' }, label: { show: true, formatter: 'SOPR=1', color: '#f8514980', fontSize: 9 } }] }
+                }]
+            }));
+            window.addEventListener('resize', function() { soprChart.resize(); });
+
+            // NUPL Chart
+            var nuplChart = echarts.init(document.getElementById('ihChartNupl'));
+            nuplChart.setOption(Object.assign({}, gridBase, {
+                tooltip: tooltipBase,
+                title: { text: 'NUPL', left: 'center', top: 2, textStyle: { color: '#8b949e', fontSize: 11 } },
+                xAxis: { type: 'category', data: ihDates, axisLabel: Object.assign({}, axisLabel, { showMaxLabel: false }), axisLine },
+                yAxis: { type: 'value', min: -0.5, max: 1, axisLabel, splitLine: { lineStyle: { color: '#21262d' } } },
+                series: [{
+                    type: 'line', data: ihNupl, smooth: true,
+                    lineStyle: { width: 2, color: function(params) { var v = params.value; if (v < 0) return '#f85149'; if (v < 0.25) return '#d29922'; if (v < 0.5) return '#e3b341'; if (v < 0.75) return '#58a6ff'; return '#3fb950'; } },
+                    itemStyle: { color: function(params) { var v = params.value; if (v < 0) return '#f85149'; if (v < 0.25) return '#d29922'; if (v < 0.5) return '#e3b341'; if (v < 0.75) return '#58a6ff'; return '#3fb950'; } },
+                    areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(88,166,255,0.1)' }, { offset: 1, color: 'rgba(88,166,255,0.01)' }] } },
+                    markLine: { data: [{ yAxis: 0, lineStyle: { color: '#f8514980', type: 'dashed' }, label: { show: true, formatter: '0', color: '#f8514980', fontSize: 9 } }, { yAxis: 0.75, lineStyle: { color: '#3fb95080', type: 'dashed' }, label: { show: true, formatter: 'euphoria', color: '#3fb95080', fontSize: 9 } }] }
+                }]
+            }));
+            window.addEventListener('resize', function() { nuplChart.resize(); });
         })();
     </script>
 </body>
