@@ -70,7 +70,6 @@ def load_state(path: str) -> dict:
     from state.json.bak (last known good state). Falls back to defaults
     only if both files are unreadable.
     """
-    import shutil
     lock = _lock_path(path)
     backup_path = path + '.bak'
     if os.path.exists(path):
@@ -112,6 +111,58 @@ def _sanitize_for_json(obj):
     return obj
 
 
+
+# ── CQ: Shared atomic JSON write helper ──
+# Eliminates duplication across save_state, append_trade_log,
+# clear_trade_log, append_indicator_history.
+
+_MAX_TRADE_LOG_ENTRIES = 5000  # ~13.7 years at 1 trade/day
+
+
+def _atomic_json_write(path: str, data, max_entries: int = 0,
+                        make_backup: bool = False) -> None:
+    """Write JSON data atomically with exclusive lock.
+
+    Args:
+        path: file to write
+        data: data to serialize (list or dict)
+        max_entries: if > 0 and data is a list, trim to last N entries
+        make_backup: if True, copy current file to .bak before overwriting
+
+    Uses tempfile + os.replace for atomicity and fcntl.flock for exclusivity.
+    """
+    import tempfile
+    dir_name = os.path.dirname(path) or '.'
+    os.makedirs(dir_name, exist_ok=True)
+    lock = _lock_path(path)
+
+    if max_entries > 0 and isinstance(data, list):
+        data = data[-max_entries:]
+
+    tmp_path = None
+    with open(lock, 'w') as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            # Backup current content before overwriting
+            if make_backup and os.path.exists(path):
+                try:
+                    with open(path, 'r') as src:
+                        with open(path + '.bak', 'w') as dst:
+                            dst.write(src.read())
+                except OSError:
+                    pass
+            fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
+            with os.fdopen(fd, 'w') as f:
+                json.dump(data, f, indent=2, default=str)
+            os.replace(tmp_path, path)
+        except Exception:
+            if tmp_path is not None and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            raise
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
+
+
 def save_state(state: dict, path: str):
     """Save state to JSON file atomically with exclusive lock (H4).
 
@@ -120,32 +171,28 @@ def save_state(state: dict, path: str):
     NaN/Infinity values are replaced with None to produce valid JSON.
     Also creates a .bak backup of the previous state for corruption recovery.
     """
-    import tempfile
-    lock = _lock_path(path)
-    backup_path = path + '.bak'
-    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
-    dir_name = os.path.dirname(path) or '.'
     clean_state = _sanitize_for_json(state)
+    _atomic_json_write(path, clean_state, make_backup=True)
+
+
+def _load_json_locked(path: str, default=None):
+    """Load JSON from file with shared lock. Returns default on any error.
+
+    Used by load_state, load_trade_log, load_indicator_history.
+    """
+    if default is None:
+        default = []
+    if not os.path.exists(path):
+        return default
+    lock = _lock_path(path)
     with open(lock, 'w') as lf:
-        fcntl.flock(lf, fcntl.LOCK_EX)  # exclusive lock
-        tmp_path = None
+        fcntl.flock(lf, fcntl.LOCK_SH)
         try:
-            # Backup current state before overwriting
-            if os.path.exists(path):
-                try:
-                    with open(path, 'r') as src:
-                        with open(backup_path, 'w') as dst:
-                            dst.write(src.read())
-                except OSError:
-                    pass  # non-critical: backup failure shouldn't block save
-            fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
-            with os.fdopen(fd, 'w') as f:
-                json.dump(clean_state, f, indent=2, default=str)
-            os.replace(tmp_path, path)
-        except Exception:
-            if tmp_path is not None and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-            raise
+            with open(path, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            print(f'[STATE] WARNING: corrupted file at {path}, returning default')
+            return default
         finally:
             fcntl.flock(lf, fcntl.LOCK_UN)
 
@@ -241,7 +288,7 @@ def append_trade_log(log_path: str, trade_type: str, amount: float,
     import tempfile
     dir_name = os.path.dirname(log_path) or '.'
     os.makedirs(dir_name, exist_ok=True)
-    lock = log_path + '.lock'
+    lock = _lock_path(log_path)
 
     record = {
         'date': _dt.now(_THAI_TZ).strftime('%Y-%m-%d %H:%M'),
@@ -254,11 +301,11 @@ def append_trade_log(log_path: str, trade_type: str, amount: float,
     if extra:
         record.update(extra)
 
+    # CQ: Use _MAX_TRADE_LOG_ENTRIES constant instead of magic 5000
     tmp_path = None
     with open(lock, 'w') as lf:
         fcntl.flock(lf, fcntl.LOCK_EX)  # exclusive lock for ENTIRE read-modify-write
         try:
-            # Read existing log (under exclusive lock)
             if os.path.exists(log_path):
                 with open(log_path, 'r') as f:
                     log = json.load(f)
@@ -266,10 +313,9 @@ def append_trade_log(log_path: str, trade_type: str, amount: float,
                 log = []
 
             log.append(record)
-            if len(log) > 5000:
-                log = log[-5000:]
+            if len(log) > _MAX_TRADE_LOG_ENTRIES:
+                log = log[-_MAX_TRADE_LOG_ENTRIES:]
 
-            # Atomic write (still under exclusive lock)
             fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
             with os.fdopen(fd, 'w') as f:
                 json.dump(log, f, indent=2, default=str)
@@ -289,25 +335,8 @@ def clear_trade_log(log_path: str):
     Used during D3 (dry-run → live transition) to remove contaminated dry-run
     entries so the dashboard only shows live trades.
     """
-    import tempfile
-    dir_name = os.path.dirname(log_path) or '.'
-    os.makedirs(dir_name, exist_ok=True)
-    lock = log_path + '.lock'
-    tmp_path = None
-    with open(lock, 'w') as lf:
-        fcntl.flock(lf, fcntl.LOCK_EX)
-        try:
-            fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
-            with os.fdopen(fd, 'w') as f:
-                json.dump([], f, indent=2)
-            os.replace(tmp_path, log_path)
-            print('[STATE] Trade log cleared (D3: dry-run → live transition).')
-        except Exception:
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-            raise
-        finally:
-            fcntl.flock(lf, fcntl.LOCK_UN)
+    _atomic_json_write(log_path, [])
+    print('[STATE] Trade log cleared (D3: dry-run → live transition).')
 
 
 # ── B18: Indicator History ─────────────────────────────────────────────
@@ -327,16 +356,11 @@ def append_indicator_history(history_path: str, indicators: dict,
 
     Each entry is a dict with 'date' (Thai TZ ISO) and all indicator
     values. Retention: last 730 entries (~2 years).
-
-    Args:
-        history_path: path to indicator_history.json
-        indicators: dict of indicator values (from bot_state['last_indicators'])
-        decision: optional dict of decision values (from bot_state['last_decision'])
     """
     import tempfile
     dir_name = os.path.dirname(history_path) or '.'
     os.makedirs(dir_name, exist_ok=True)
-    lock = history_path + '.lock'
+    lock = _lock_path(history_path)
 
     now_str = datetime.now(_THAI_TZ).strftime('%Y-%m-%d %H:%M')
     entry = {'date': now_str}
@@ -344,6 +368,7 @@ def append_indicator_history(history_path: str, indicators: dict,
     if decision:
         entry['decision'] = decision
 
+    # CQ: Use _MAX_INDICATOR_HISTORY constant
     tmp_path = None
     with open(lock, 'w') as lf:
         fcntl.flock(lf, fcntl.LOCK_EX)

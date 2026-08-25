@@ -152,11 +152,7 @@ def get_klines_kraken(days: int = 500) -> list:
             break
 
     # Deduplicate and sort
-    seen = {}
-    for c in all_candles:
-        seen[c['date']] = c
-    result = sorted(seen.values(), key=lambda x: x['date'])
-    return result[-days:]
+    return _dedup_sort_trim(all_candles, days)
 
 
 def get_klines_kucoin(days: int = 500) -> list:
@@ -202,11 +198,7 @@ def get_klines_kucoin(days: int = 500) -> list:
             break
 
     # Deduplicate and sort oldest-first
-    seen = {}
-    for c in all_candles:
-        seen[c['date']] = c
-    result = sorted(seen.values(), key=lambda x: x['date'])
-    return result[-days:]
+    return _dedup_sort_trim(all_candles, days)
 
 
 def get_klines_coincap(days: int = 500) -> list:
@@ -228,11 +220,7 @@ def get_klines_coincap(days: int = 500) -> list:
     for item in data:
         dt = datetime.fromtimestamp(item['time'] / 1000, tz=timezone.utc).date()
         candles.append({'date': dt, 'close': float(item['priceUsd'])})
-    seen = {}
-    for c in candles:
-        seen[c['date']] = c
-    result = sorted(seen.values(), key=lambda x: x['date'])
-    return result[-days:]
+    return _dedup_sort_trim(candles, days)
 
 
 def get_klines_coingecko(days: int = 500) -> list:
@@ -249,11 +237,7 @@ def get_klines_coingecko(days: int = 500) -> list:
     for ts_ms, price in data.get('prices', []):
         dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).date()
         candles.append({'date': dt, 'close': float(price)})
-    seen = {}
-    for c in candles:
-        seen[c['date']] = c
-    result = sorted(seen.values(), key=lambda x: x['date'])
-    return result[-days:]
+    return _dedup_sort_trim(candles, days)
 
 
 def get_klines_fallback(days: int = 500) -> list:
@@ -283,6 +267,26 @@ def get_klines_fallback(days: int = 500) -> list:
 
 
 # ═══════════════════════════════════════════════════════════════════
+
+# -- CQ: Shared helpers --
+
+def _check_binance_app_error(data):
+    if isinstance(data, dict) and 'code' in data:
+        raise RuntimeError(f"Binance API error {data['code']}: {data.get('msg', '')}")
+
+def _extract_usdt_fee(data):
+    total_fee = 0.0
+    for fill in data.get('fills', []):
+        if fill.get('commissionAsset') == 'USDT':
+            total_fee += float(fill.get('commission', 0))
+    return total_fee
+
+def _dedup_sort_trim(candles, days):
+    seen = {}
+    for c in candles:
+        seen[c['date']] = c
+    return sorted(seen.values(), key=lambda x: x['date'])[-days:]
+
 # BINANCE RETRY HELPER
 # ═══════════════════════════════════════════════════════════════════
 
@@ -436,14 +440,8 @@ class BinanceClient:
         ))
         resp.raise_for_status()
         data = resp.json()
-        # Check Binance application-level error (HTTP 200 with error code)
-        if isinstance(data, dict) and 'code' in data:
-            raise RuntimeError(f"Binance API error {data['code']}: {data.get('msg', '')}")
-        # Extract actual fee from fills array (quote currency only)
-        total_fee = 0.0
-        for fill in data.get('fills', []):
-            if fill.get('commissionAsset') == 'USDT':
-                total_fee += float(fill.get('commission', 0))
+        _check_binance_app_error(data)
+        total_fee = _extract_usdt_fee(data)
         return {
             'executed_qty': float(data['executedQty']),
             'cummulative_quote_qty': float(data['cummulativeQuoteQty']),
@@ -466,14 +464,8 @@ class BinanceClient:
         ))
         resp.raise_for_status()
         data = resp.json()
-        # Check Binance application-level error (HTTP 200 with error code)
-        if isinstance(data, dict) and 'code' in data:
-            raise RuntimeError(f"Binance API error {data['code']}: {data.get('msg', '')}")
-        # Extract actual fee from fills array (quote currency only)
-        total_fee = 0.0
-        for fill in data.get('fills', []):
-            if fill.get('commissionAsset') == 'USDT':
-                total_fee += float(fill.get('commission', 0))
+        _check_binance_app_error(data)
+        total_fee = _extract_usdt_fee(data)
         # DI-3: Normalize to net-of-fee (consistent with Bitkub's 'recv' semantics).
         # Binance cummulativeQuoteQty is gross; Bitkub recv is net.
         net_proceeds = float(data['cummulativeQuoteQty']) - total_fee

@@ -17,6 +17,7 @@ from datetime import date, timedelta
 
 # ── Embedded MVRV History (self-contained, no pandas dependency) ──
 from ._mvrv_history import MVRV_START_DATE, MVRV_DAILY_VALUES
+from .engine import REALIZED_PRICE_SANITY_MULTIPLIER
 
 
 def _build_mvrv_lookup():
@@ -27,6 +28,55 @@ def _build_mvrv_lookup():
 _MVRV_LOOKUP = _build_mvrv_lookup()
 _MVRV_HISTORY_MIN = min(_MVRV_LOOKUP.keys())
 _MVRV_HISTORY_MAX = max(_MVRV_LOOKUP.keys())
+
+# CQ: Named constants for strategy parameters
+MVRV_FALLBACK_TOLERANCE_DAYS = 7
+MVRV_MIN_HISTORY = 60
+REALIZED_PRICE_SANITY_MULTIPLIER = 5.0
+DEPLOY_RATE_DEEP_BEAR = 0.25
+DEPLOY_RATE_BEAR = 0.20
+DEPLOY_RATE_NEAR_1 = 0.15
+DEPLOY_RATE_LOW_1 = 0.10
+DEPLOY_RATE_LOW_1_3 = 0.06
+DEPLOY_RATE_FLOOR = 0.03
+SELL_SCORE_BEAR_BLOCK_PENALTY = 200
+SELL_TIERS = [
+    (75, 0.40, 35),
+    (60, 0.18, 28),
+    (50, 0.08, 22),
+    (0, 0.04, 18),
+]
+SELL_TIER_A_EXT = (48, 0.08, 22)
+SELL_TIER_B_HIGH = (56, 0.08, 28)
+SELL_TIER_B_LOW = (48, 0.04, 22)
+
+
+# ── CQ: Named constants for MVRV and strategy parameters ──
+MVRV_FALLBACK_TOLERANCE_DAYS = 7
+MVRV_MIN_HISTORY = 60
+REALIZED_PRICE_SANITY_MULTIPLIER = 5.0
+
+# Reserve deploy rates by MVRV zone (documented from backtest research)
+DEPLOY_RATE_DEEP_BEAR = 0.25
+DEPLOY_RATE_BEAR = 0.20
+DEPLOY_RATE_NEAR_1 = 0.15
+DEPLOY_RATE_LOW_1 = 0.10
+DEPLOY_RATE_LOW_1_3 = 0.06
+DEPLOY_RATE_FLOOR = 0.03
+
+# Sell scoring weights (each threshold adds to sell_score)
+SELL_SCORE_BEAR_BLOCK_PENALTY = 200
+
+# Sell execution tiers: (min_score, fraction_of_portfolio, cooldown_days)
+SELL_TIERS = [
+    (75, 0.40, 35),  # Path A, score >= 75
+    (60, 0.18, 28),  # Path A, score >= 60
+    (50, 0.08, 22),  # Path A, score >= 50
+    (0,  0.04, 18),   # Path A, score >= 45
+]
+SELL_TIER_A_EXT = (48, 0.08, 22)
+SELL_TIER_B_HIGH = (56, 0.08, 28)
+SELL_TIER_B_LOW = (48, 0.04, 22)
 
 
 def get_mvrv_for_date(d: date) -> float:
@@ -41,7 +91,7 @@ def get_mvrv_for_date(d: date) -> float:
     if d in _MVRV_LOOKUP:
         return _MVRV_LOOKUP[d]
     # Fallback: use most recent available MVRV value
-    if _MVRV_HISTORY_MIN <= d <= _MVRV_HISTORY_MAX + timedelta(days=7):
+    if _MVRV_HISTORY_MIN <= d <= _MVRV_HISTORY_MAX + timedelta(days=MVRV_FALLBACK_TOLERANCE_DAYS):
         best = _MVRV_HISTORY_MAX
         print(f'[BOT] MVRV: No data for {d}, using latest available: {best} '
               f'(MVRV={_MVRV_LOOKUP[best]:.3f})')
@@ -53,14 +103,8 @@ def compute_mvrv_percentile(d: date, current_mvrv: float, window: int = 365) -> 
     """MVRV percentile from embedded history (same as v5.1 backtest)."""
     if not isinstance(d, date):
         d = date.fromisoformat(str(d))
-    hist_values = []
-    for i in range(1, window + 1):
-        check = d - timedelta(days=i)
-        if check in _MVRV_LOOKUP:
-            hist_values.append(_MVRV_LOOKUP[check])
-        elif check < _MVRV_HISTORY_MIN:
-            break
-    if len(hist_values) < 60:
+    hist_values = _get_mvrv_history(d, window)
+    if len(hist_values) < MVRV_MIN_HISTORY:
         return float('nan')
     hist_values.sort()
     # S1: Use side='right' so that values equal to a historical value
@@ -74,14 +118,8 @@ def compute_mvrv_zscore(d: date, current_mvrv: float, window: int = 365) -> floa
     """MVRV Z-score from embedded history (same as v5.1 backtest)."""
     if not isinstance(d, date):
         d = date.fromisoformat(str(d))
-    hist_values = []
-    for i in range(1, window + 1):
-        check = d - timedelta(days=i)
-        if check in _MVRV_LOOKUP:
-            hist_values.append(_MVRV_LOOKUP[check])
-        elif check < _MVRV_HISTORY_MIN:
-            break
-    if len(hist_values) < 60:
+    hist_values = _get_mvrv_history(d, window)
+    if len(hist_values) < MVRV_MIN_HISTORY:
         return float('nan')
     arr = np.array(hist_values)
     return (current_mvrv - arr.mean()) / max(arr.std(), 0.01)
@@ -166,10 +204,10 @@ def phoenix_v5_1_decision(
     # cash_reserve = money from BTC sells, held for dip buying
     # reserve_floor = minimum cash to keep (e.g. ~6 USDT or 200 THB)
     # S3: Sanity check realized_price before using it.
-    # If MVRV is very small (e.g., 0.05), realized_price = price/0.05 = 20x price.
-    # This would unconditionally trigger the boost condition.
+    # REALIZED_PRICE_SANITY_MULTIPLIER: if MVRV is very small,
+    # realized_price = price/mvrv becomes unrealistically large.
     rp_valid = (not np.isnan(realized_price) and realized_price > 0
-                and realized_price < price * 5.0)
+                and realized_price < price * REALIZED_PRICE_SANITY_MULTIPLIER)
     usable_reserve = max(cash_reserve - reserve_floor, 0.0)
     if usable_reserve > 0 and mvrv < 1.5 and rp_valid:
         if mvrv < 0.8 and in_bear:
@@ -238,7 +276,7 @@ def phoenix_v5_1_decision(
 
     # ═══ TRIPLE-TRIGGER GATE ═══
     path_a = mvrv > 2.5
-    path_a_ext = (2.0 <= mvrv <= 2.5 and mvrv_pct >= 0.95 and mvrv_z >= 2.5
+    path_a_ext = (2.0 <= mvrv <= 2.5 and mvrv_pct >= SELL_TIER_A_EXT[0] and mvrv_z >= SELL_TIER_A_EXT[0])
                    and not path_a)
     path_b = (mvrv_pct >= 0.92 and mvrv > 2.0
               and not path_a and not path_a_ext)
@@ -256,33 +294,15 @@ def phoenix_v5_1_decision(
     if cooldown == 0 and btc_balance > 0:
         if path_a and sell_score >= 45:
             path_taken = 'A'
-            if sell_score >= 75:
-                sell_amount = btc_val * 0.40
-                new_cooldown = 35
-            elif sell_score >= 60:
-                sell_amount = btc_val * 0.18
-                new_cooldown = 28
-            elif sell_score >= 50:
-                sell_amount = btc_val * 0.08
-                new_cooldown = 22
-            else:
-                sell_amount = btc_val * 0.04
-                new_cooldown = 18
+            sell_amount, new_cooldown = _apply_sell_tier(sell_score, btc_val, SELL_TIERS)
 
-        elif path_a_ext and sell_score >= 48:
+        elif path_a_ext and sell_score >= SELL_TIER_A_EXT[0]:
             path_taken = 'A-Ext'
-            sell_amount = btc_val * 0.08
-            new_cooldown = 22
+            sell_amount, new_cooldown = _apply_sell_tier(sell_score, btc_val, [SELL_TIER_A_EXT])
 
-        elif path_b and sell_score >= 48:
+        elif path_b and sell_score >= SELL_TIER_B_LOW[0]:
             path_taken = 'B'
-            if sell_score >= 56:
-                sell_amount = btc_val * 0.08
-                new_cooldown = 28
-            else:
-                sell_amount = btc_val * 0.04
-                new_cooldown = 22
-
+            sell_amount, new_cooldown = _apply_sell_tier(sell_score, btc_val, [SELL_TIER_B_HIGH, SELL_TIER_B_LOW])
     # If buy_amount is effectively zero, set to 0
     if buy_amount < 0.01:
         buy_amount = 0.0
@@ -305,3 +325,15 @@ def _no_trade(reason: str, cooldown: int = 0) -> dict:
         'reserve_injection': 0.0, 'path_taken': f'no-trade:{reason}',
         'in_bear': False,
     }
+
+def _get_mvrv_history(d: date, window: int = 365) -> list:
+    """Gather MVRV history values for a date range. Shared by percentile and zscore."""
+    values = []
+    for i in range(1, window + 1):
+        check = d - timedelta(days=i)
+        if check in _MVRV_LOOKUP:
+            values.append(_MVRV_LOOKUP[check])
+        elif check < _MVRV_HISTORY_MIN:
+            break
+    return values
+

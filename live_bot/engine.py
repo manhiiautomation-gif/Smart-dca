@@ -9,9 +9,29 @@ Modes:
 '''
 
 import math
+import os
 import time
-import numpy as np
 from datetime import date, datetime, timezone, timedelta
+
+from . import config
+from . import indicators as ind
+from . import strategy
+from . import state as state_mod
+from . import notifier
+from . import kill_switch as ks_mod
+
+# ── Named constants (CQ: replace magic numbers) ──
+PRICE_HISTORY_DAYS = 500
+MIN_CLOSES_FOR_INDICATORS = 50
+BALANCE_VERIFY_DELAY_S = 5
+BTC_BALANCE_EPSILON = 1e-8
+MAX_SELL_PCT_OF_BALANCE = 0.99
+MIN_SELL_AMOUNT = 10.0
+LTH_RP_BEAR_MULTIPLIER = 1.25
+LTH_RP_HIGH_MVRV_MULTIPLIER = 1.10
+LTH_RP_DEFAULT_MULTIPLIER = 1.15
+HIGH_MVRV_THRESHOLD = 2.5
+SOPR_ACCURACY_FLOOR = 0.001
 
 # H1: Thai timezone for idempotency check
 # GitHub Actions cron: 03:00/03:10/03:30 UTC = 10:00/10:10/10:30 THB
@@ -54,15 +74,12 @@ from . import notifier
 from . import kill_switch as ks_mod
 
 
-def _fetch_price_history(exchange) -> list:
-    '''Fetch daily closes from exchange. Returns list of floats.'''
-    klines = exchange.get_klines(days=500)
-    return [k['close'] for k in klines]
+# Dead code removed: _fetch_price_history() — unused, only _fetch_price_history_with_dates() is called.
 
 
 def _fetch_price_history_with_dates(exchange) -> list:
     '''Fetch daily closes with dates. Returns list of {date, close}.'''
-    return exchange.get_klines(days=500)
+    return exchange.get_klines(days=PRICE_HISTORY_DAYS)
 
 
 # ── B22: Shared on-chain metric resolution ────────────────────────────
@@ -90,12 +107,12 @@ def _lth_rp_proxy(realized_price_val, price, mvrv_val, in_bear=False):
     LTH holders have higher cost basis than overall realized price.
     """
     if not math.isnan(realized_price_val) and realized_price_val > 0:
-        multiplier = 1.25 if in_bear else (1.10 if mvrv_val > 2.5 else 1.15)
+        multiplier = LTH_RP_BEAR_MULTIPLIER if in_bear else (LTH_RP_HIGH_MVRV_MULTIPLIER if mvrv_val > HIGH_MVRV_THRESHOLD else LTH_RP_DEFAULT_MULTIPLIER)
         return realized_price_val * multiplier
     # Derive from MVRV if no realized price
     if mvrv_val > 0 and not math.isnan(mvrv_val) and price > 0:
         est_rp = price / mvrv_val
-        multiplier = 1.25 if in_bear else (1.10 if mvrv_val > 2.5 else 1.15)
+        multiplier = LTH_RP_BEAR_MULTIPLIER if in_bear else (LTH_RP_HIGH_MVRV_MULTIPLIER if mvrv_val > HIGH_MVRV_THRESHOLD else LTH_RP_DEFAULT_MULTIPLIER)
         return est_rp * multiplier
     return float('nan')
 
@@ -269,7 +286,7 @@ def _resolve_onchain_metrics(price, closes, today,
         # B20: Proxy accuracy logging (when BG has actual SOPR)
         _proxy_sopr = _sopr_proxy(price, sma14, sma30)
         if not math.isnan(sopr) and not math.isnan(_proxy_sopr) and sopr_source == 'BG':
-            proxy_err = abs(sopr - _proxy_sopr) / max(abs(sopr), 0.001) * 100
+            proxy_err = abs(sopr - _proxy_sopr) / max(abs(sopr), SOPR_ACCURACY_FLOOR) * 100
             print(f'{log_prefix} SOPR proxy accuracy: actual={sopr:.4f} proxy={_proxy_sopr:.4f} err={proxy_err:.1f}%')
 
     except Exception as e:
@@ -335,6 +352,105 @@ def _get_btc_balance(exchange) -> float:
     return 0.0
 
 
+# ── Extracted helpers (CQ: reduce duplication) ─────────────────
+
+
+def _build_indicators_snapshot(metrics: dict, overrides: dict = None) -> dict:
+    """Build standardized indicators dict for state snapshot.
+
+    Used by run_daily(), refresh_dashboard(), run_demo(), and
+    idempotency-skip path. Eliminates ~80 lines of duplication.
+
+    Args:
+        metrics: dict from _resolve_onchain_metrics()
+        overrides: optional dict of extra fields to merge
+    """
+    snap = {
+        'price': round(metrics['price'], 2),
+        'mvrv': round(metrics['mvrv'], 3) if not math.isnan(metrics['mvrv']) else None,
+        'mvrv_source': metrics['mvrv_source'],
+        'mvrv_pct': round(metrics['mvrv_pct'], 3) if not math.isnan(metrics.get('mvrv_pct', float('nan'))) else None,
+        'mvrv_z': round(metrics['mvrv_z'], 2) if not math.isnan(metrics.get('mvrv_z', float('nan'))) else None,
+        'mvrv_z_source': metrics['mvrv_z_source'],
+        'rsi': round(metrics['rsi'], 1),
+        'macd_h': round(metrics['macd_h'], 4),
+        'nupl': round(metrics['nupl'], 3),
+        'sopr': round(metrics['sopr'], 3) if not math.isnan(metrics['sopr']) else None,
+        'sopr_source': metrics['sopr_source'],
+        'sma_200': round(metrics['sma_200'], 2) if not math.isnan(metrics['sma_200']) else None,
+        'sma_365': round(metrics['sma_365'], 2) if not math.isnan(metrics['sma_365']) else None,
+        'macd_bear': metrics['macd_bear'],
+        'macd_declining': metrics['macd_declining'],
+        'rsi_divergence': metrics['rsi_div'],
+        'ath': round(metrics['ath'], 2),
+        'sell_score': metrics.get('sell_score', 0),
+        'path_taken': metrics.get('path_taken', 'none'),
+        'in_bear': metrics.get('in_bear', False),
+        'cooldown': metrics.get('cooldown', 0),
+    }
+    # Optional fields (not always present in metrics)
+    for key in ('realized_price', 'lth_realized_price', 'lth_source', 'rp_source'):
+        val = metrics.get(key)
+        if val is not None:
+            if isinstance(val, float) and math.isnan(val):
+                snap[key] = None
+            elif isinstance(val, float):
+                snap[key] = round(val, 2)
+            else:
+                snap[key] = val
+    if overrides:
+        snap.update(overrides)
+    return snap
+
+
+def _build_decision_metadata(decision: dict, monday_boost: bool,
+                             in_dca_window: bool) -> dict:
+    """Build decision metadata dict for state/dashboard.
+
+    Used by run_daily() and run_demo().
+    """
+    buy_amt = decision.get('buy_amount', 0)
+    base_budget_display = config.get_daily_budget()
+    if base_budget_display > 0 and buy_amt > 0:
+        calc_mult = round(buy_amt / base_budget_display, 1)
+    else:
+        calc_mult = 0.0
+    return {
+        'buy_amount': round(buy_amt, 2),
+        'sell_amount': round(decision.get('sell_amount', 0), 2),
+        'multiplier': calc_mult,
+        'base_budget': round(base_budget_display, 2),
+        'reserve_injection': round(decision.get('reserve_injection', 0), 2),
+        'monday_boost': config.MONDAY_DCA_MULTIPLIER if monday_boost else 1.0,
+        'in_dca_window': in_dca_window,
+    }
+
+
+def _update_state_metadata(bot_state: dict, exchange, btc: float,
+                            cash: float, portfolio: float, price: float) -> None:
+    """Update state with exchange metadata (balances, price, name).
+
+    Used by run_daily(), refresh_dashboard(), idempotency-skip path.
+    Does NOT set last_dry_run (caller controls that).
+    """
+    bot_state['last_btc_balance'] = round(btc, 8)
+    bot_state['last_cash_balance'] = round(cash, 2)
+    bot_state['last_portfolio_value'] = round(portfolio, 2)
+    bot_state['last_price'] = round(price, 2)
+    bot_state['last_exchange_currency'] = exchange.currency
+    bot_state['last_exchange_name'] = exchange.__class__.__name__.replace('Client', '').upper()
+
+
+def _apply_monday_boost(base_budget: float) -> tuple:
+    """Apply Monday DCA boost if applicable.
+
+    Returns (boosted_budget, is_boosted).
+    """
+    if _is_monday_thai() and config.MONDAY_DCA_MULTIPLIER != 1.0:
+        return base_budget * config.MONDAY_DCA_MULTIPLIER, True
+    return base_budget, False
+
+
 def run_daily(exchange, bot_state: dict, dry_run: bool = False,
               trade_log_path: str = 'trade_log.json',
               kill_switch_path: str = 'kill_switch.json',
@@ -380,7 +496,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             refresh_price = exchange.get_price()
             refresh_klines = _fetch_price_history_with_dates(exchange)
             refresh_closes = [k['close'] for k in refresh_klines]
-            if len(refresh_closes) >= 50:
+            if len(refresh_closes) >= MIN_CLOSES_FOR_INDICATORS:
                 rm = _resolve_onchain_metrics(refresh_price, refresh_closes, today,
                                                 log_prefix='[BOT/idem]',
                                                 allow_web_fallback=False,
@@ -395,39 +511,13 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
                         r_cash = _get_cash_balance(exchange)
                     r_portfolio = r_btc * refresh_price + r_cash
 
-                    bot_state['last_indicators'] = {
-                        'price': round(refresh_price, 2),
-                        'mvrv': round(rm['mvrv'], 3) if not math.isnan(rm['mvrv']) else None,
-                        'mvrv_source': rm['mvrv_source'],
-                        'mvrv_pct': round(rm['mvrv_pct'], 3) if not math.isnan(rm.get('mvrv_pct', float('nan'))) else None,
-                        'mvrv_z': round(rm['mvrv_z'], 2) if not math.isnan(rm.get('mvrv_z', float('nan'))) else None,
-                        'mvrv_z_source': rm['mvrv_z_source'],
-                        'rsi': round(rm['rsi'], 1),
-                        'macd_h': round(rm['macd_h'], 4),
-                        'nupl': round(rm['nupl'], 3),
-                        'sopr': round(rm['sopr'], 3) if not math.isnan(rm['sopr']) else None,
-                        'sopr_source': rm['sopr_source'],
-                        'sma_200': round(rm['sma_200'], 2) if not math.isnan(rm['sma_200']) else None,
-                        'sma_365': round(rm['sma_365'], 2) if not math.isnan(rm['sma_365']) else None,
-                        'macd_bear': rm['macd_bear'],
-                        'macd_declining': rm['macd_declining'],
-                        'rsi_divergence': rm['rsi_div'],
-                        'ath': round(rm['ath'], 2),
-                        'sell_score': bot_state.get('last_indicators', {}).get('sell_score', 0),
-                        'path_taken': bot_state.get('last_indicators', {}).get('path_taken', 'none'),
-                        'in_bear': rm['in_bear'],
-                        'cooldown': bot_state.get('cooldown', 0),
-                        'realized_price': round(rm['realized_price'], 2) if not math.isnan(rm['realized_price']) else None,
-                        'lth_realized_price': round(rm['lth_realized_price'], 2) if not math.isnan(rm['lth_realized_price']) else None,
-                        'lth_source': rm['lth_source'],
-                        'rp_source': rm['rp_source'],
-                    }
-                    bot_state['last_btc_balance'] = round(r_btc, 8)
-                    bot_state['last_cash_balance'] = round(r_cash, 2)
-                    bot_state['last_portfolio_value'] = round(r_portfolio, 2)
-                    bot_state['last_price'] = round(refresh_price, 2)
-                    bot_state['last_exchange_currency'] = currency
-                    bot_state['last_exchange_name'] = exchange.__class__.__name__.replace('Client', '').upper()
+                    rm_for_snap = {**rm, 'price': refresh_price,
+                                   'sell_score': bot_state.get('last_indicators', {}).get('sell_score', 0),
+                                   'path_taken': bot_state.get('last_indicators', {}).get('path_taken', 'none'),
+                                   'in_bear': rm['in_bear'],
+                                   'cooldown': bot_state.get('cooldown', 0)}
+                    bot_state['last_indicators'] = _build_indicators_snapshot(rm_for_snap)
+                    _update_state_metadata(bot_state, exchange, r_btc, r_cash, r_portfolio, refresh_price)
                     # D2: Do NOT overwrite last_dry_run in refresh-only paths.
                     if r_portfolio > bot_state.get('peak_value', 0):
                         bot_state['peak_value'] = r_portfolio
@@ -529,7 +619,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     closes = [k['close'] for k in klines]
     print(f'[BOT] Got {len(closes)} daily closes')
 
-    if len(closes) < 50:
+    if len(closes) < MIN_CLOSES_FOR_INDICATORS:
         print('[BOT] ERROR: Not enough price history for indicators')
         notifier.send_telegram(
             f'Phoenix v5.1 ERROR: Only {len(closes)} days of price data. Skipping.'
@@ -549,11 +639,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     sma_200 = m['sma_200']
     sma_365 = m['sma_365']
     rsi_val = m['rsi']
-    macd_line = m['macd_line']
-    macd_sig = m['macd_sig']
     macd_h = m['macd_h']
-    macd_hist_series = m['macd_hist_series']
-    rsi_series = m['rsi_series']
     macd_bear = m['macd_bear']
     macd_declining = m['macd_declining']
     rsi_div = m['rsi_div']
@@ -598,13 +684,11 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     max_buy = config.get_max_buy()
     print(f'[BOT] Budget: {base_budget:.2f} {currency}/run (max buy: {max_buy:.2f})')
 
-    # ── 6a. Monday DCA boost ──
+    # ── 6a. Monday DCA boost (CQ: shared helper) ──
     # Research: Monday has highest next-day BTC returns (+0.38% avg, 6/7 sources).
     # Apply to base_budget BEFORE strategy so max_buy cap inside strategy still works.
-    monday_boost = False
-    if _is_monday_thai() and config.MONDAY_DCA_MULTIPLIER != 1.0:
-        base_budget = base_budget * config.MONDAY_DCA_MULTIPLIER
-        monday_boost = True
+    base_budget, monday_boost = _apply_monday_boost(base_budget)
+    if monday_boost:
         print(f'[BOT] MONDAY BOOST: base_budget x{config.MONDAY_DCA_MULTIPLIER} = {base_budget:.2f} {currency}')
 
     # ── 6b. DCA time window check ──
@@ -676,9 +760,6 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     sell_proceeds_actual = 0.0
     trade_attempted = False
     trade_succeeded = False
-    _original_buy_amt = decision['buy_amount']
-    _original_sell_amt = decision['sell_amount']
-
     # BUY
     if decision['buy_amount'] > 0:
         # Check minimum order size
@@ -725,11 +806,11 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             if 'timeout' in _err_str or 'connection' in _err_str or 'ssl' in _err_str:
                 print(f'[BOT] BUY TIMEOUT — attempting verification via balance check...')
                 trade_succeeded = True  # Consume daily slot to prevent double-buy
-                time.sleep(5)
+                time.sleep(BALANCE_VERIFY_DELAY_S)
                 try:
                     post_btc = _get_btc_balance(exchange)
                     btc_diff = post_btc - btc_balance
-                    if btc_diff > 1e-8:  # BTC balance increased — order likely executed
+                    if btc_diff > BTC_BALANCE_EPSILON:  # BTC balance increased — order likely executed
                         buy_btc_got = btc_diff
                         buy_cost_actual = decision['buy_amount']  # best estimate of cost
                         buy_fee = 0  # Unknown — be conservative
@@ -774,9 +855,9 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             decision['sell_amount'] = 0
         else:
             btc_to_sell = decision['sell_amount'] / price
-            if btc_to_sell >= btc_balance * 0.99:
-                btc_to_sell = btc_balance * 0.99  # Never sell 100%
-            min_sell = 10.0 if currency == 'USDT' else 10.0
+            if btc_to_sell >= btc_balance * MAX_SELL_PCT_OF_BALANCE:
+                btc_to_sell = btc_balance * MAX_SELL_PCT_OF_BALANCE  # Never sell 100%
+            min_sell = MIN_SELL_AMOUNT
             if btc_to_sell * price < min_sell:
                 print(f'[BOT] Sell amount {btc_to_sell * price:.2f} below minimum {min_sell}. Skipping.')
                 decision['sell_amount'] = 0
@@ -886,61 +967,18 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             bot_state['max_drawdown'] = dd
 
     # ── 11. Snapshot indicators for dashboard ──
-    bot_state['last_indicators'] = {
-        'price': round(price, 2),
-        'mvrv': round(mvrv_val, 3),
-        'mvrv_source': mvrv_source,
-        'mvrv_pct': round(mvrv_pct, 3) if not math.isnan(mvrv_pct) else None,
-        'mvrv_z': round(mvrv_z, 2) if not math.isnan(mvrv_z) else None,
-        'mvrv_z_source': mvrv_z_source,
-        'rsi': round(rsi_val, 1),
-        'macd_h': round(macd_h, 4),
-        'nupl': round(nupl, 3),
-        'sopr': round(sopr, 3) if not math.isnan(sopr) else None,
-        'sopr_source': sopr_source,
-        'sma_200': round(sma_200, 2) if not math.isnan(sma_200) else None,
-        'sma_365': round(sma_365, 2) if not math.isnan(sma_365) else None,
-        'macd_bear': macd_bear,
-        'macd_declining': macd_declining,
-        'rsi_divergence': rsi_div,
-        'ath': round(ath, 2),
-        'sell_score': decision.get('sell_score', 0),
-        'path_taken': decision.get('path_taken', 'none'),
-        'in_bear': decision.get('in_bear', False),
-        'cooldown': decision.get('new_cooldown', 0),
-        'realized_price': round(realized_price, 2) if not math.isnan(realized_price) else None,
-        'lth_realized_price': round(lth_rp, 2) if not math.isnan(lth_rp) else None,
-        'lth_source': lth_source,
-        'rp_source': rp_source,
-    }
-    # Store decision details for dashboard (multiplier, amounts)
-    buy_amt = decision.get('buy_amount', 0)
-    # Use pre-boost base_budget for accurate multiplier display
-    base_budget_display = config.get_daily_budget()
-    if base_budget_display > 0 and buy_amt > 0:
-        calc_multiplier = round(buy_amt / base_budget_display, 1)
-    else:
-        calc_multiplier = 0.0
-    bot_state['last_decision'] = {
-        'buy_amount': round(buy_amt, 2),
-        'sell_amount': round(decision.get('sell_amount', 0), 2),
-        'multiplier': calc_multiplier,
-        'base_budget': round(base_budget_display, 2),
-        'reserve_injection': round(decision.get('reserve_injection', 0), 2),
-        'monday_boost': config.MONDAY_DCA_MULTIPLIER if monday_boost else 1.0,
-        'in_dca_window': in_dca_window,
-    }
-    bot_state['last_btc_balance'] = round(current_btc, 8)
-    bot_state['last_cash_balance'] = round(current_cash, 2)
-    bot_state['last_portfolio_value'] = round(portfolio, 2)
-    bot_state['last_price'] = round(price, 2)
-    bot_state['last_exchange_currency'] = currency
-    bot_state['last_exchange_name'] = exchange.__class__.__name__.replace('Client', '').upper()
+    m_for_snap = {**m, 'price': price,
+                   'sell_score': decision.get('sell_score', 0),
+                   'path_taken': decision.get('path_taken', 'none'),
+                   'in_bear': decision.get('in_bear', False),
+                   'cooldown': decision.get('new_cooldown', 0)}
+    bot_state['last_indicators'] = _build_indicators_snapshot(m_for_snap)
+    bot_state['last_decision'] = _build_decision_metadata(decision, monday_boost, in_dca_window)
+    _update_state_metadata(bot_state, exchange, current_btc, current_cash, portfolio, price)
     bot_state['last_dry_run'] = dry_run
 
     # ── 11b. B18: Append indicator history for retrospective analysis ──
     try:
-        import os
         ih_path = os.path.join(os.path.dirname(trade_log_path), 'indicator_history.json')
         state_mod.append_indicator_history(
             ih_path,
@@ -1018,7 +1056,7 @@ def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
     closes = [k['close'] for k in klines]
     print(f'[REFRESH] Got {len(closes)} daily closes')
 
-    if len(closes) < 50:
+    if len(closes) < MIN_CLOSES_FOR_INDICATORS:
         print('[REFRESH] ERROR: Not enough price history')
         return bot_state
 
@@ -1033,11 +1071,7 @@ def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
     sma_200 = rm['sma_200']
     sma_365 = rm['sma_365']
     rsi_val = rm['rsi']
-    macd_line = rm['macd_line']
-    macd_sig = rm['macd_sig']
     macd_h = rm['macd_h']
-    macd_hist_series = rm['macd_hist_series']
-    rsi_series = rm['rsi_series']
     macd_bear = rm['macd_bear']
     macd_declining = rm['macd_declining']
     rsi_div = rm['rsi_div']
@@ -1067,41 +1101,14 @@ def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
         print(f'[REFRESH] LIVE balances: BTC={btc_balance:.8f} Cash={cash_balance:,.2f} {currency}')
     portfolio = btc_balance * price + cash_balance
 
-    # ── 6. Snapshot indicators to state (same format as run_daily) ──
-    bot_state['last_indicators'] = {
-        'price': round(price, 2),
-        'mvrv': round(mvrv_val, 3) if not math.isnan(mvrv_val) else None,
-        'mvrv_source': mvrv_source,
-        'mvrv_pct': round(mvrv_pct, 3) if not math.isnan(mvrv_pct) else None,
-        'mvrv_z': round(mvrv_z, 2) if not math.isnan(mvrv_z) else None,
-        'mvrv_z_source': mvrv_z_source,
-        'rsi': round(rsi_val, 1),
-        'macd_h': round(macd_h, 4),
-        'nupl': round(nupl, 3),
-        'sopr': round(sopr, 3) if not math.isnan(sopr) else None,
-        'sopr_source': sopr_source,
-        'sma_200': round(sma_200, 2) if not math.isnan(sma_200) else None,
-        'sma_365': round(sma_365, 2) if not math.isnan(sma_365) else None,
-        'macd_bear': macd_bear,
-        'macd_declining': macd_declining,
-        'rsi_divergence': rsi_div,
-        'ath': round(ath, 2),
-        'sell_score': bot_state.get('last_indicators', {}).get('sell_score', 0),
-        'path_taken': bot_state.get('last_indicators', {}).get('path_taken', 'none'),
-        'in_bear': in_bear,
-        'cooldown': bot_state.get('cooldown', 0),
-        'realized_price': round(realized_price, 2) if not math.isnan(realized_price) else None,
-        'lth_realized_price': round(lth_rp, 2) if not math.isnan(lth_rp) else None,
-        'lth_source': lth_source,
-        'rp_source': rp_source,
-        'refreshed': True,
-    }
-    bot_state['last_btc_balance'] = round(btc_balance, 8)
-    bot_state['last_cash_balance'] = round(cash_balance, 2)
-    bot_state['last_portfolio_value'] = round(portfolio, 2)
-    bot_state['last_price'] = round(price, 2)
-    bot_state['last_exchange_currency'] = currency
-    bot_state['last_exchange_name'] = exchange.__class__.__name__.replace('Client', '').upper()
+    # ── 6. Snapshot indicators to state (CQ: shared helpers) ──
+    rm_for_snap = {**rm, 'price': price,
+                   'sell_score': bot_state.get('last_indicators', {}).get('sell_score', 0),
+                   'path_taken': bot_state.get('last_indicators', {}).get('path_taken', 'none'),
+                   'in_bear': in_bear,
+                   'cooldown': bot_state.get('cooldown', 0)}
+    bot_state['last_indicators'] = _build_indicators_snapshot(rm_for_snap, {'refreshed': True})
+    _update_state_metadata(bot_state, exchange, btc_balance, cash_balance, portfolio, price)
     # D2: Do NOT overwrite last_dry_run in refresh-only paths.
     # refresh_dashboard() only fetches data for the dashboard, it doesn't trade,
     # so it must not change the provenance flag of existing trade data.
@@ -1136,7 +1143,7 @@ def _snapshot_indicators(bot_state: dict, price: float, currency: str,
     try:
         klines = _fetch_price_history_with_dates(exchange)
         closes = [k['close'] for k in klines]
-        if len(closes) < 50:
+        if len(closes) < MIN_CLOSES_FOR_INDICATORS:
             return
 
         sma_200 = ind.sma(closes, 200)
@@ -1177,9 +1184,7 @@ def _snapshot_indicators(bot_state: dict, price: float, currency: str,
             'killed': True,
             'kill_reason': kill_reason,
         }
-        bot_state['last_price'] = round(price, 2)
-        bot_state['last_exchange_currency'] = currency
-        bot_state['last_exchange_name'] = exchange.__class__.__name__.replace('Client', '').upper()
+        _update_state_metadata(bot_state, exchange, 0.0, 0.0, 0.0, price)
         # D2: Do NOT overwrite last_dry_run in kill-switch snapshot path.
     except Exception as e:
         print(f'[BOT] Indicator snapshot failed: {e}')
@@ -1228,7 +1233,7 @@ def run_demo(exchange, demo_state: dict, project_root: str,
     closes = [k['close'] for k in klines]
     print(f'[DEMO] Got {len(closes)} daily closes')
 
-    if len(closes) < 50:
+    if len(closes) < MIN_CLOSES_FOR_INDICATORS:
         print('[DEMO] ERROR: Not enough price history')
         return demo_state
 
@@ -1246,11 +1251,7 @@ def run_demo(exchange, demo_state: dict, project_root: str,
     sma_200 = dm['sma_200']
     sma_365 = dm['sma_365']
     rsi_val = dm['rsi']
-    macd_line = dm['macd_line']
-    macd_sig = dm['macd_sig']
     macd_h = dm['macd_h']
-    macd_hist_series = dm['macd_hist_series']
-    rsi_series = dm['rsi_series']
     macd_bear = dm['macd_bear']
     macd_declining = dm['macd_declining']
     rsi_div = dm['rsi_div']
@@ -1274,11 +1275,9 @@ def run_demo(exchange, demo_state: dict, project_root: str,
     max_buy = config.get_max_buy()
     print(f'[DEMO] Budget: {base_budget:.2f} {currency}/run (max buy: {max_buy:.2f})')
 
-    # ── 5a. Monday DCA boost (same as run_daily) ──
-    monday_boost = False
-    if _is_monday_thai() and config.MONDAY_DCA_MULTIPLIER != 1.0:
-        base_budget = base_budget * config.MONDAY_DCA_MULTIPLIER
-        monday_boost = True
+    # ── 5a. Monday DCA boost (CQ: shared helper) ──
+    base_budget, monday_boost = _apply_monday_boost(base_budget)
+    if monday_boost:
         print(f'[DEMO] MONDAY BOOST: base_budget x{config.MONDAY_DCA_MULTIPLIER} = {base_budget:.2f} {currency}')
 
     # ── 5b. DCA time window check (same as run_daily) ──
@@ -1326,46 +1325,14 @@ def run_demo(exchange, demo_state: dict, project_root: str,
         monday_boost=config.MONDAY_DCA_MULTIPLIER if monday_boost else 1.0,
     )
 
-    # ── 8. Snapshot indicators ──
-    indicators_snapshot = {
-        'price': round(price, 2),
-        'mvrv': round(mvrv_val, 3),
-        'mvrv_pct': round(mvrv_pct, 3) if not math.isnan(mvrv_pct) else None,
-        'mvrv_z': round(mvrv_z, 2) if not math.isnan(mvrv_z) else None,
-        'mvrv_z_source': mvrv_z_source,
-        'rsi': round(rsi_val, 1),
-        'macd_h': round(macd_h, 4),
-        'nupl': round(nupl, 3),
-        'sopr': round(sopr, 3) if not math.isnan(sopr) else None,
-        'sopr_source': sopr_source,
-        'sma_200': round(sma_200, 2) if not math.isnan(sma_200) else None,
-        'sma_365': round(sma_365, 2) if not math.isnan(sma_365) else None,
-        'macd_bear': macd_bear,
-        'macd_declining': macd_declining,
-        'rsi_divergence': rsi_div,
-        'ath': round(ath, 2),
-        'sell_score': decision.get('sell_score', 0),
-        'path_taken': decision.get('path_taken', 'none'),
-        'in_bear': decision.get('in_bear', False),
-        'cooldown': decision.get('new_cooldown', 0),
-    }
-    # Store decision details for dashboard
-    # Use pre-boost base_budget for accurate multiplier display
-    buy_amt = decision.get('buy_amount', 0)
-    base_budget_display = config.get_daily_budget()
-    if base_budget_display > 0 and buy_amt > 0:
-        calc_mult = round(buy_amt / base_budget_display, 1)
-    else:
-        calc_mult = 0.0
-    demo_state['last_decision'] = {
-        'buy_amount': round(buy_amt, 2),
-        'sell_amount': round(decision.get('sell_amount', 0), 2),
-        'multiplier': calc_mult,
-        'base_budget': round(base_budget_display, 2),
-        'reserve_injection': round(decision.get('reserve_injection', 0), 2),
-        'monday_boost': config.MONDAY_DCA_MULTIPLIER if monday_boost else 1.0,
-        'in_dca_window': in_dca_window,
-    }
+    # ── 8. Snapshot indicators (CQ: shared helper) ──
+    dm_for_snap = {**dm, 'price': price,
+                   'sell_score': decision.get('sell_score', 0),
+                   'path_taken': decision.get('path_taken', 'none'),
+                   'in_bear': decision.get('in_bear', False),
+                   'cooldown': decision.get('new_cooldown', 0)}
+    indicators_snapshot = _build_indicators_snapshot(dm_for_snap)
+    demo_state['last_decision'] = _build_decision_metadata(decision, monday_boost, in_dca_window)
     dp.snapshot_indicators(demo_state, indicators_snapshot)
 
     # ── 9. Send notification ──
