@@ -362,7 +362,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
 
     # ── 0. Idempotency guard: skip if already ran today (unless --force) ──
     # H1: Uses Thai timezone so daily guard aligns with THB calendar day
-    # (cron at 03:00/03:10/03:30 UTC = 10:00/10:10/10:30 THB)
+    # (cron at 03:00/03:20/03:40 UTC = 10:00/10:20/10:40 THB)
     # Each cron slot also has 3x internal retry with 60s backoff.
     # Backup slots are safety nets — if 1st run succeeds,
     # last_run_date is set and later runs skip via this guard.
