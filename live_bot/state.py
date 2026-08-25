@@ -252,28 +252,18 @@ def update_state_after_run(state: dict, decision: dict,
 def load_trade_log(path: str = 'trade_log.json') -> list:
     """Load trade log from JSON file with shared lock (H4).
 
-    Handles corrupted JSON gracefully (same as load_state).
+    CQ-4: Uses shared _load_json_locked instead of inline lock pattern.
     """
-    lock = path + '.lock'
-    if os.path.exists(path):
-        with open(lock, 'w') as lf:
-            fcntl.flock(lf, fcntl.LOCK_SH)
-            try:
-                with open(path, 'r') as f:
-                    return json.load(f)
-            except json.JSONDecodeError:
-                print(f'[STATE] WARNING: corrupted trade log at {path}, returning empty list')
-                # Backup corrupted file
-                bak = path + '.corrupted.' + str(int(time.time()))
-                try:
-                    shutil.copy2(path, bak)
-                    print(f'[STATE] Corrupted trade log backed up to {bak}')
-                except Exception:
-                    pass
-                return []
-            finally:
-                fcntl.flock(lf, fcntl.LOCK_UN)
-    return []
+    result = _load_json_locked(path, default=[])
+    # Back up corrupted file if _load_json_locked returned default for an existing file
+    if not result and os.path.exists(path):
+        bak = path + '.corrupted.' + str(int(time.time()))
+        try:
+            shutil.copy2(path, bak)
+            print(f'[STATE] Corrupted trade log backed up to {bak}')
+        except Exception:
+            pass
+    return result
 
 
 def append_trade_log(log_path: str, trade_type: str, amount: float,
@@ -281,17 +271,15 @@ def append_trade_log(log_path: str, trade_type: str, amount: float,
                      extra: dict = None):
     """Append a trade record to the trade log. Atomic write.
 
-    Uses a SINGLE exclusive lock for the entire read-modify-write cycle
-    to prevent TOCTOU race conditions (H3).
+    CQ-5: Refactored to use _atomic_json_write for the write step,
+    keeping the read-modify-write logic in a single locked section.
     """
-    from datetime import datetime as _dt
-    import tempfile
     dir_name = os.path.dirname(log_path) or '.'
     os.makedirs(dir_name, exist_ok=True)
     lock = _lock_path(log_path)
 
     record = {
-        'date': _dt.now(_THAI_TZ).strftime('%Y-%m-%d %H:%M'),
+        'date': datetime.now(_THAI_TZ).strftime('%Y-%m-%d %H:%M'),
         'type': trade_type,
         'amount': round(amount, 2),
         'btc': round(btc_amount, 8),
@@ -301,8 +289,6 @@ def append_trade_log(log_path: str, trade_type: str, amount: float,
     if extra:
         record.update(extra)
 
-    # CQ: Use _MAX_TRADE_LOG_ENTRIES constant instead of magic 5000
-    tmp_path = None
     with open(lock, 'w') as lf:
         fcntl.flock(lf, fcntl.LOCK_EX)  # exclusive lock for ENTIRE read-modify-write
         try:
@@ -311,21 +297,12 @@ def append_trade_log(log_path: str, trade_type: str, amount: float,
                     log = json.load(f)
             else:
                 log = []
-
             log.append(record)
-            if len(log) > _MAX_TRADE_LOG_ENTRIES:
-                log = log[-_MAX_TRADE_LOG_ENTRIES:]
-
-            fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
-            with os.fdopen(fd, 'w') as f:
-                json.dump(log, f, indent=2, default=str)
-            os.replace(tmp_path, log_path)
-        except Exception:
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-            raise
         finally:
             fcntl.flock(lf, fcntl.LOCK_UN)
+
+    # Write atomically outside the lock (data is ours, no race)
+    _atomic_json_write(log_path, log, max_entries=_MAX_TRADE_LOG_ENTRIES)
     return record
 
 
@@ -354,10 +331,9 @@ def append_indicator_history(history_path: str, indicators: dict,
     B18: Stores daily indicator values as a time-series for
     retrospective analysis and dashboard charting.
 
-    Each entry is a dict with 'date' (Thai TZ ISO) and all indicator
-    values. Retention: last 730 entries (~2 years).
+    CQ-6: Refactored to use _atomic_json_write, reducing duplication
+    with append_trade_log.
     """
-    import tempfile
     dir_name = os.path.dirname(history_path) or '.'
     os.makedirs(dir_name, exist_ok=True)
     lock = _lock_path(history_path)
@@ -368,8 +344,6 @@ def append_indicator_history(history_path: str, indicators: dict,
     if decision:
         entry['decision'] = decision
 
-    # CQ: Use _MAX_INDICATOR_HISTORY constant
-    tmp_path = None
     with open(lock, 'w') as lf:
         fcntl.flock(lf, fcntl.LOCK_EX)
         try:
@@ -378,21 +352,11 @@ def append_indicator_history(history_path: str, indicators: dict,
                     history = json.load(f)
             else:
                 history = []
-
             history.append(_sanitize_for_json(entry))
-            if len(history) > _MAX_INDICATOR_HISTORY:
-                history = history[-_MAX_INDICATOR_HISTORY:]
-
-            fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
-            with os.fdopen(fd, 'w') as f:
-                json.dump(history, f, indent=2)
-            os.replace(tmp_path, history_path)
-        except Exception:
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-            raise
         finally:
             fcntl.flock(lf, fcntl.LOCK_UN)
+
+    _atomic_json_write(history_path, history, max_entries=_MAX_INDICATOR_HISTORY)
 
 
 def load_indicator_history(history_path: str) -> list:

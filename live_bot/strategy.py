@@ -17,41 +17,9 @@ from datetime import date, timedelta
 
 # ── Embedded MVRV History (self-contained, no pandas dependency) ──
 from ._mvrv_history import MVRV_START_DATE, MVRV_DAILY_VALUES
-from .engine import REALIZED_PRICE_SANITY_MULTIPLIER
 
 
-def _build_mvrv_lookup():
-    start = date.fromisoformat(MVRV_START_DATE)
-    return {start + timedelta(days=i): v for i, v in enumerate(MVRV_DAILY_VALUES)}
-
-
-_MVRV_LOOKUP = _build_mvrv_lookup()
-_MVRV_HISTORY_MIN = min(_MVRV_LOOKUP.keys())
-_MVRV_HISTORY_MAX = max(_MVRV_LOOKUP.keys())
-
-# CQ: Named constants for strategy parameters
-MVRV_FALLBACK_TOLERANCE_DAYS = 7
-MVRV_MIN_HISTORY = 60
-REALIZED_PRICE_SANITY_MULTIPLIER = 5.0
-DEPLOY_RATE_DEEP_BEAR = 0.25
-DEPLOY_RATE_BEAR = 0.20
-DEPLOY_RATE_NEAR_1 = 0.15
-DEPLOY_RATE_LOW_1 = 0.10
-DEPLOY_RATE_LOW_1_3 = 0.06
-DEPLOY_RATE_FLOOR = 0.03
-SELL_SCORE_BEAR_BLOCK_PENALTY = 200
-SELL_TIERS = [
-    (75, 0.40, 35),
-    (60, 0.18, 28),
-    (50, 0.08, 22),
-    (0, 0.04, 18),
-]
-SELL_TIER_A_EXT = (48, 0.08, 22)
-SELL_TIER_B_HIGH = (56, 0.08, 28)
-SELL_TIER_B_LOW = (48, 0.04, 22)
-
-
-# ── CQ: Named constants for MVRV and strategy parameters ──
+# ── Named constants for MVRV and strategy parameters ──
 MVRV_FALLBACK_TOLERANCE_DAYS = 7
 MVRV_MIN_HISTORY = 60
 REALIZED_PRICE_SANITY_MULTIPLIER = 5.0
@@ -77,6 +45,16 @@ SELL_TIERS = [
 SELL_TIER_A_EXT = (48, 0.08, 22)
 SELL_TIER_B_HIGH = (56, 0.08, 28)
 SELL_TIER_B_LOW = (48, 0.04, 22)
+
+
+def _build_mvrv_lookup():
+    start = date.fromisoformat(MVRV_START_DATE)
+    return {start + timedelta(days=i): v for i, v in enumerate(MVRV_DAILY_VALUES)}
+
+
+_MVRV_LOOKUP = _build_mvrv_lookup()
+_MVRV_HISTORY_MIN = min(_MVRV_LOOKUP.keys())
+_MVRV_HISTORY_MAX = max(_MVRV_LOOKUP.keys())
 
 
 def get_mvrv_for_date(d: date) -> float:
@@ -211,17 +189,17 @@ def phoenix_v5_1_decision(
     usable_reserve = max(cash_reserve - reserve_floor, 0.0)
     if usable_reserve > 0 and mvrv < 1.5 and rp_valid:
         if mvrv < 0.8 and in_bear:
-            deploy_rate = 0.25
+            deploy_rate = DEPLOY_RATE_DEEP_BEAR
         elif mvrv < 0.9 and in_bear:
-            deploy_rate = 0.20
+            deploy_rate = DEPLOY_RATE_BEAR
         elif mvrv < 1.0:
-            deploy_rate = 0.15
+            deploy_rate = DEPLOY_RATE_NEAR_1
         elif mvrv < 1.1:
-            deploy_rate = 0.10
+            deploy_rate = DEPLOY_RATE_LOW_1
         elif mvrv < 1.3:
-            deploy_rate = 0.06
+            deploy_rate = DEPLOY_RATE_LOW_1_3
         else:
-            deploy_rate = 0.03
+            deploy_rate = DEPLOY_RATE_FLOOR
 
         injection = min(usable_reserve * deploy_rate, max_reserve_injection)
 
@@ -276,7 +254,8 @@ def phoenix_v5_1_decision(
 
     # ═══ TRIPLE-TRIGGER GATE ═══
     path_a = mvrv > 2.5
-    path_a_ext = (2.0 <= mvrv <= 2.5 and mvrv_pct >= SELL_TIER_A_EXT[0] and mvrv_z >= SELL_TIER_A_EXT[0])
+    path_a_ext = (2.0 <= mvrv <= 2.5 and mvrv_pct >= SELL_TIER_A_EXT[0]
+                   and mvrv_z >= SELL_TIER_A_EXT[0]
                    and not path_a)
     path_b = (mvrv_pct >= 0.92 and mvrv > 2.0
               and not path_a and not path_a_ext)

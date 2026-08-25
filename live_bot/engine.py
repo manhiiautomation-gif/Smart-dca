@@ -1067,29 +1067,6 @@ def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
                                       allow_web_fallback=False,
                                       notify_on_fail=False)
 
-    # Unpack resolved metrics
-    sma_200 = rm['sma_200']
-    sma_365 = rm['sma_365']
-    rsi_val = rm['rsi']
-    macd_h = rm['macd_h']
-    macd_bear = rm['macd_bear']
-    macd_declining = rm['macd_declining']
-    rsi_div = rm['rsi_div']
-    ath = rm['ath']
-    mvrv_val = rm['mvrv']
-    mvrv_source = rm['mvrv_source']
-    mvrv_pct = rm['mvrv_pct']
-    mvrv_z = rm['mvrv_z']
-    mvrv_z_source = rm['mvrv_z_source']
-    nupl = rm['nupl']
-    realized_price = rm['realized_price']
-    rp_source = rm['rp_source']
-    sopr = rm['sopr']
-    sopr_source = rm['sopr_source']
-    lth_rp = rm['lth_realized_price']
-    lth_source = rm['lth_source']
-    in_bear = rm['in_bear']
-
     # ── 5. Get balances ──
     if dry_run:
         btc_balance = bot_state.get('dry_run_btc', 0.0)
@@ -1101,11 +1078,11 @@ def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
         print(f'[REFRESH] LIVE balances: BTC={btc_balance:.8f} Cash={cash_balance:,.2f} {currency}')
     portfolio = btc_balance * price + cash_balance
 
-    # ── 6. Snapshot indicators to state (CQ: shared helpers) ──
+    # ── 6. Snapshot indicators to state (CQ-9: use resolved metrics dict directly) ──
     rm_for_snap = {**rm, 'price': price,
                    'sell_score': bot_state.get('last_indicators', {}).get('sell_score', 0),
                    'path_taken': bot_state.get('last_indicators', {}).get('path_taken', 'none'),
-                   'in_bear': in_bear,
+                   'in_bear': rm['in_bear'],
                    'cooldown': bot_state.get('cooldown', 0)}
     bot_state['last_indicators'] = _build_indicators_snapshot(rm_for_snap, {'refreshed': True})
     _update_state_metadata(bot_state, exchange, btc_balance, cash_balance, portfolio, price)
@@ -1139,53 +1116,34 @@ def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
 def _snapshot_indicators(bot_state: dict, price: float, currency: str,
                          dry_run: bool, exchange, killed: bool = False,
                          kill_reason: str = ''):
-    '''Fetch and snapshot indicators when bot is killed (for dashboard).'''
+    '''Fetch and snapshot indicators when bot is killed (for dashboard).
+
+    CQ-3: Refactored to use shared _resolve_onchain_metrics() +
+    _build_indicators_snapshot() instead of inline duplicated code.
+    '''
     try:
+        today = _thai_today()
         klines = _fetch_price_history_with_dates(exchange)
         closes = [k['close'] for k in klines]
         if len(closes) < MIN_CLOSES_FOR_INDICATORS:
             return
 
-        sma_200 = ind.sma(closes, 200)
-        sma_365 = ind.sma(closes, 365)
-        rsi_val = ind.rsi(closes, 14)
-        _, _, macd_h = ind.macd(closes)
-        ath = max(closes) if closes else 0
-        sma14_quick = ind.sma(closes, 14)
-        sopr = price / sma14_quick if sma14_quick > 0 else 1.0
+        m = _resolve_onchain_metrics(price, closes, today,
+                                      log_prefix='[SNAPSHOT]',
+                                      allow_web_fallback=False,
+                                      notify_on_fail=False)
+        if m.get('_mvrv_all_failed'):
+            return
 
-        today = _thai_today()
-        mvrv_val = strategy.get_mvrv_for_date(today)
-        if mvrv_val is not None and mvrv_val <= 0:
-            mvrv_val = float('nan')
-        # DI-6: Default to NaN (not 0) when MVRV unavailable.
-        mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val) if not math.isnan(mvrv_val) else float('nan')
-        mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val) if not math.isnan(mvrv_val) else float('nan')
-        mvrv_z_source = 'embedded-365d'
-        nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 and not math.isnan(mvrv_val) else 0
-
-        bot_state['last_indicators'] = {
-            'price': round(price, 2),
-            'mvrv': round(mvrv_val, 3) if not math.isnan(mvrv_val) else None,
-            'mvrv_pct': round(mvrv_pct, 3) if not math.isnan(mvrv_pct) else None,
-            'mvrv_z': round(mvrv_z, 2) if not math.isnan(mvrv_z) else None,
-            'mvrv_z_source': mvrv_z_source,
-            'rsi': round(rsi_val, 1),
-            'macd_h': round(macd_h, 4),
-            'nupl': round(nupl, 3),
-            'sopr': round(sopr, 3),
-            'sma_200': round(sma_200, 2) if not math.isnan(sma_200) else None,
-            'sma_365': round(sma_365, 2) if not math.isnan(sma_365) else None,
-            'ath': round(ath, 2),
-            'sell_score': 0,
-            'path_taken': 'killed',
-            'in_bear': price < sma_200 if not math.isnan(sma_200) else False,
-            'cooldown': bot_state.get('cooldown', 0),
-            'killed': True,
-            'kill_reason': kill_reason,
-        }
+        m_for_snap = {**m, 'price': price,
+                       'sell_score': 0,
+                       'path_taken': 'killed',
+                       'in_bear': m.get('in_bear', False),
+                       'cooldown': bot_state.get('cooldown', 0),
+                       'killed': True,
+                       'kill_reason': kill_reason}
+        bot_state['last_indicators'] = _build_indicators_snapshot(m_for_snap)
         _update_state_metadata(bot_state, exchange, 0.0, 0.0, 0.0, price)
-        # D2: Do NOT overwrite last_dry_run in kill-switch snapshot path.
     except Exception as e:
         print(f'[BOT] Indicator snapshot failed: {e}')
 
@@ -1247,29 +1205,6 @@ def run_demo(exchange, demo_state: dict, project_root: str,
         print('[DEMO] WARNING: No MVRV data. Skipping.')
         return demo_state
 
-    # Unpack resolved metrics
-    sma_200 = dm['sma_200']
-    sma_365 = dm['sma_365']
-    rsi_val = dm['rsi']
-    macd_h = dm['macd_h']
-    macd_bear = dm['macd_bear']
-    macd_declining = dm['macd_declining']
-    rsi_div = dm['rsi_div']
-    ath = dm['ath']
-    mvrv_val = dm['mvrv']
-    mvrv_source = dm['mvrv_source']
-    mvrv_pct = dm['mvrv_pct']
-    mvrv_z = dm['mvrv_z']
-    mvrv_z_source = dm['mvrv_z_source']
-    nupl = dm['nupl']
-    realized_price = dm['realized_price']
-    rp_source = dm['rp_source']
-    sopr = dm['sopr']
-    sopr_source = dm['sopr_source']
-    lth_rp = dm['lth_realized_price']
-    lth_source = dm['lth_source']
-    in_bear = dm['in_bear']
-
     # ── 5. Convert budget ──
     base_budget = config.get_daily_budget()
     max_buy = config.get_max_buy()
@@ -1291,15 +1226,15 @@ def run_demo(exchange, demo_state: dict, project_root: str,
     demo_reserve = demo_state.get('sell_proceeds_reserve', 0.0)
     print(f'[DEMO] Sell proceeds reserve: {demo_reserve:,.2f} {currency}')
 
-    # ── 6. Run strategy (same logic as live) ──
+    # ── 6. Run strategy (CQ-9: pass dm dict keys directly, no unpacking) ──
     print('[DEMO] Running Phoenix v5.1 strategy...')
     decision = strategy.phoenix_v5_1_decision(
-        mvrv=mvrv_val, rsi=rsi_val, sopr=sopr, nupl=nupl,
-        price=price, sma_200=sma_200, sma_365=sma_365,
-        realized_price=realized_price, lth_realized_price=lth_rp,
-        mvrv_pct=mvrv_pct, mvrv_z=mvrv_z,
-        macd_cross_bear=macd_bear, macd_hist_declining=macd_declining,
-        rsi_divergence_flag=rsi_div, ath=ath,
+        mvrv=dm['mvrv'], rsi=dm['rsi'], sopr=dm['sopr'], nupl=dm['nupl'],
+        price=price, sma_200=dm['sma_200'], sma_365=dm['sma_365'],
+        realized_price=dm['realized_price'], lth_realized_price=dm['lth_realized_price'],
+        mvrv_pct=dm['mvrv_pct'], mvrv_z=dm['mvrv_z'],
+        macd_cross_bear=dm['macd_bear'], macd_hist_declining=dm['macd_declining'],
+        rsi_divergence_flag=dm['rsi_div'], ath=dm['ath'],
         btc_balance=demo_state['btc'],
         cash_reserve=demo_reserve,
         cooldown=demo_state['cooldown'],
@@ -1337,7 +1272,7 @@ def run_demo(exchange, demo_state: dict, project_root: str,
 
     # ── 9. Send notification ──
     msg = notifier.format_report(
-        decision, price, mvrv_val,
+        decision, price, dm['mvrv'],
         demo_state['btc'], demo_state['cash'],
         currency, is_dry_run=True,
         monday_boost=config.MONDAY_DCA_MULTIPLIER if monday_boost else 1.0,
