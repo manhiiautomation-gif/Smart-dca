@@ -9,6 +9,7 @@ Modes:
 '''
 
 import math
+import time
 import numpy as np
 from datetime import date, datetime, timezone, timedelta
 
@@ -396,8 +397,8 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
                         'price': round(refresh_price, 2),
                         'mvrv': round(rm['mvrv'], 3) if not math.isnan(rm['mvrv']) else None,
                         'mvrv_source': rm['mvrv_source'],
-                        'mvrv_pct': round(rm['mvrv_pct'], 3),
-                        'mvrv_z': round(rm['mvrv_z'], 2),
+                        'mvrv_pct': round(rm['mvrv_pct'], 3) if not math.isnan(rm.get('mvrv_pct', float('nan'))) else None,
+                        'mvrv_z': round(rm['mvrv_z'], 2) if not math.isnan(rm.get('mvrv_z', float('nan'))) else None,
                         'mvrv_z_source': rm['mvrv_z_source'],
                         'rsi': round(rm['rsi'], 1),
                         'macd_h': round(rm['macd_h'], 4),
@@ -626,7 +627,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     print(f'[BOT] Sell proceeds reserve: {sell_proceeds_reserve:,.2f} {currency}')
 
     # ── 7. Decrement cooldown ──
-    if bot_state['cooldown'] > 0:
+    if bot_state.get('cooldown', 0) > 0:
         bot_state['cooldown'] -= 1
         print(f'[BOT] Cooldown: {bot_state["cooldown"] + 1} -> {bot_state["cooldown"]}')
 
@@ -720,17 +721,31 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             # Also estimate the trade details so trade_log and state are updated.
             _err_str = str(e).lower()
             if 'timeout' in _err_str or 'connection' in _err_str or 'ssl' in _err_str:
-                print(f'[BOT] BUY TIMEOUT — assuming order executed. Estimating trade details.')
-                trade_succeeded = True
-                # Use the ACTUAL amount sent to exchange (may be reduced by insufficient cash).
-                # _actual_sent_amt is the amount AFTER any cash adjustment.
-                _actual_sent_amt = decision['buy_amount']  # already adjusted if cash was insufficient
-                if price > 0:
-                    buy_btc_got = _actual_sent_amt / price
-                buy_cost_actual = _actual_sent_amt
-                buy_fee = buy_cost_actual * config.BUY_FEE_PCT
-                bot_state['total_btc_bought'] += buy_btc_got
-                print(f'[BOT] TIMEOUT ESTIMATE: {buy_btc_got:.8f} BTC for {buy_cost_actual:.2f} {currency}')
+                print(f'[BOT] BUY TIMEOUT — attempting verification via balance check...')
+                trade_succeeded = True  # Consume daily slot to prevent double-buy
+                time.sleep(5)
+                try:
+                    post_btc = _get_btc_balance(exchange)
+                    btc_diff = post_btc - btc_balance
+                    if btc_diff > 1e-8:  # BTC balance increased — order likely executed
+                        buy_btc_got = btc_diff
+                        buy_cost_actual = decision['buy_amount']  # best estimate of cost
+                        buy_fee = 0  # Unknown — be conservative
+                        bot_state['total_btc_bought'] += buy_btc_got
+                        print(f'[BOT] TIMEOUT VERIFIED: +{btc_diff:.8f} BTC detected via balance check')
+                    else:
+                        # BTC unchanged — order likely did NOT execute
+                        buy_btc_got = 0
+                        buy_cost_actual = 0
+                        buy_fee = 0
+                        print(f'[BOT] TIMEOUT UNVERIFIED: BTC balance unchanged ({post_btc:.8f}). '
+                              f'Slot consumed to prevent double-buy. No trade recorded.')
+                except Exception as ve:
+                    buy_btc_got = 0
+                    buy_cost_actual = 0
+                    buy_fee = 0
+                    print(f'[BOT] TIMEOUT VERIFICATION FAILED: {ve}. '
+                          f'Slot consumed to prevent double-buy. No trade recorded.')
             else:
                 decision['buy_amount'] = 0
     elif decision['buy_amount'] > 0 and dry_run:
@@ -848,9 +863,11 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             bot_state['sell_proceeds_reserve'] = bot_state.get('sell_proceeds_reserve', 0.0) + sell_proceeds_actual
     portfolio = current_btc * price + current_cash
 
-    if portfolio > bot_state['peak_value']:
+    peak = bot_state.get('peak_value', 0.0)
+    if portfolio > peak:
         bot_state['peak_value'] = portfolio
-    if bot_state['peak_value'] > 0:
+        peak = portfolio
+    if peak > 0:
         dd = (bot_state['peak_value'] - portfolio) / bot_state['peak_value']
         if dd > bot_state['max_drawdown']:
             bot_state['max_drawdown'] = dd
@@ -860,8 +877,8 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         'price': round(price, 2),
         'mvrv': round(mvrv_val, 3),
         'mvrv_source': mvrv_source,
-        'mvrv_pct': round(mvrv_pct, 3),
-        'mvrv_z': round(mvrv_z, 2),
+        'mvrv_pct': round(mvrv_pct, 3) if not math.isnan(mvrv_pct) else None,
+        'mvrv_z': round(mvrv_z, 2) if not math.isnan(mvrv_z) else None,
         'mvrv_z_source': mvrv_z_source,
         'rsi': round(rsi_val, 1),
         'macd_h': round(macd_h, 4),
@@ -1039,8 +1056,8 @@ def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
         'price': round(price, 2),
         'mvrv': round(mvrv_val, 3) if not math.isnan(mvrv_val) else None,
         'mvrv_source': mvrv_source,
-        'mvrv_pct': round(mvrv_pct, 3),
-        'mvrv_z': round(mvrv_z, 2),
+        'mvrv_pct': round(mvrv_pct, 3) if not math.isnan(mvrv_pct) else None,
+        'mvrv_z': round(mvrv_z, 2) if not math.isnan(mvrv_z) else None,
         'mvrv_z_source': mvrv_z_source,
         'rsi': round(rsi_val, 1),
         'macd_h': round(macd_h, 4),
@@ -1126,8 +1143,8 @@ def _snapshot_indicators(bot_state: dict, price: float, currency: str,
         bot_state['last_indicators'] = {
             'price': round(price, 2),
             'mvrv': round(mvrv_val, 3) if not math.isnan(mvrv_val) else None,
-            'mvrv_pct': round(mvrv_pct, 3),
-            'mvrv_z': round(mvrv_z, 2),
+            'mvrv_pct': round(mvrv_pct, 3) if not math.isnan(mvrv_pct) else None,
+            'mvrv_z': round(mvrv_z, 2) if not math.isnan(mvrv_z) else None,
             'mvrv_z_source': mvrv_z_source,
             'rsi': round(rsi_val, 1),
             'macd_h': round(macd_h, 4),
@@ -1296,8 +1313,8 @@ def run_demo(exchange, demo_state: dict, project_root: str,
     indicators_snapshot = {
         'price': round(price, 2),
         'mvrv': round(mvrv_val, 3),
-        'mvrv_pct': round(mvrv_pct, 3),
-        'mvrv_z': round(mvrv_z, 2),
+        'mvrv_pct': round(mvrv_pct, 3) if not math.isnan(mvrv_pct) else None,
+        'mvrv_z': round(mvrv_z, 2) if not math.isnan(mvrv_z) else None,
         'mvrv_z_source': mvrv_z_source,
         'rsi': round(rsi_val, 1),
         'macd_h': round(macd_h, 4),

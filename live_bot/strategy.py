@@ -61,7 +61,7 @@ def compute_mvrv_percentile(d: date, current_mvrv: float, window: int = 365) -> 
         elif check < _MVRV_HISTORY_MIN:
             break
     if len(hist_values) < 60:
-        return 0.0
+        return float('nan')
     hist_values.sort()
     rank = np.searchsorted(hist_values, current_mvrv)
     return rank / len(hist_values)
@@ -79,7 +79,7 @@ def compute_mvrv_zscore(d: date, current_mvrv: float, window: int = 365) -> floa
         elif check < _MVRV_HISTORY_MIN:
             break
     if len(hist_values) < 60:
-        return 0.0
+        return float('nan')
     arr = np.array(hist_values)
     return (current_mvrv - arr.mean()) / max(arr.std(), 0.01)
 

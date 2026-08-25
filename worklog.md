@@ -1,6 +1,38 @@
 # Phoenix DCA Bot — Work Log
 
 ---
+Task ID: Wave-10-Phase1
+Agent: main + 3 analysis sub-agents + 1 reviewer
+Task: วิเคราะห์ระบบทั้งหมด 3 ทีม parallel + แก้ไข Phase 1 Stability & Correctness (6 issues)
+
+Work Log:
+- Phase 1: ส่ง 3 sub-agents วิเคราะห์ parallel (engine.py, config/strategy/notifier/clients, dashboard/workflows)
+- พบปัญหารวม 50+ รายการ (Critical 7, High 27, Medium 34, Low 16)
+- จัดเป็น 5-phase roadmap (24 tasks)
+- Phase 3: อ่านโค้ดทุกไฟล์ที่เกี่ยวข้องยืนยัน line numbers + วางแผนแก้ 6 issues
+- Phase 4: Execute ทีละ issue:
+  - C4: Binance market_buy/sell ดึง fee จาก fills array + commissionAsset check (USDT only)
+  - C3: เพิ่ม Binance app-level error check (code field in HTTP 200 response)
+  - H9: เพิ่ม Bitkub _retry_request() (exponential backoff) wrap get_price, get_balances, market_sell
+  - C5: เปลี่ยน MVRV percentile/zscore คืน NaN แทน 0.0 + NaN guard ทั้ง 5 ที่ใน engine.py
+  - H1: bot_state['cooldown'] → .get('cooldown', 0)
+  - H2: bot_state['peak_value'] → .get('peak_value', 0.0) + local variable
+  - C2: Timeout buy verify ด้วย balance re-fetch (5s delay) แทน assume executed
+- Phase 5: Code review → พบ 2 MEDIUM issues → แก้ทันที:
+  - Missing NaN guards อีก 2 ที่ (idempotency-skip, kill-switch snapshot)
+  - Binance fee ignore commissionAsset (เพิ่ม USDT-only filter)
+- Phase 6: Quality scoring 93/100 PASS
+
+Stage Summary:
+- C2 (CRITICAL): Timeout buy ใช้ balance re-fetch verify แทน blind assumption
+- C3 (CRITICAL): Binance app-level error check ใน market_buy + market_sell
+- C4 (CRITICAL): Binance fee จาก fills array (USDT only, skip BNB)
+- C5 (CRITICAL): MVRV NaN fallback แทน 0.0 + 5 location NaN guards
+- H1 (HIGH): KeyError crash guard สำหรับ cooldown
+- H2 (HIGH): KeyError crash guard สำหรับ peak_value
+- H9 (HIGH): Bitkub retry logic สำหรับ get_price, get_balances, market_sell
+
+---
 Task ID: Research-DCA-TimeWindow-MondayMultiplier
 Agent: investigator
 Task: Analyze how adding a DCA time window (10:00-11:00 THB = 03:00-04:00 UTC) and Monday 1.2x multiplier would interact with existing code

@@ -70,11 +70,36 @@ class BitkubClient:
             raise ValueError('Bitkub API response missing "result" key')
         return data
 
+    def _retry_request(self, func, max_retries=3, base_delay=1.0, label='BITKUB'):
+        '''Execute an API request with exponential backoff retry.
+
+        Retries on: timeout, connection error, HTTP 5xx.
+        Does NOT retry on 4xx (client errors like bad signature, insufficient funds).
+        '''
+        for attempt in range(max_retries):
+            try:
+                resp = func()
+                if resp.status_code >= 500:
+                    delay = base_delay * (2 ** attempt)
+                    print(f'[{label}] Server error ({resp.status_code}). Retrying in {delay}s... (attempt {attempt+1}/{max_retries})')
+                    time.sleep(delay)
+                    continue
+                return resp
+            except (requests.Timeout, requests.ConnectionError) as e:
+                if attempt == max_retries - 1:
+                    raise
+                delay = base_delay * (2 ** attempt)
+                print(f'[{label}] {type(e).__name__}: {e}. Retrying in {delay}s... (attempt {attempt+1}/{max_retries})')
+                time.sleep(delay)
+        return func()
+
     def get_price(self) -> float:
         """Current BTC price in THB."""
-        resp = requests.get(
-            f'{self.BASE_URL}/api/v3/market/ticker',
-            params={'sym': self.SYMBOL}, timeout=10
+        resp = self._retry_request(
+            lambda: requests.get(
+                f'{self.BASE_URL}/api/v3/market/ticker',
+                params={'sym': self.SYMBOL}, timeout=10
+            ), label='BITKUB-price'
         )
         body = self._check_response(resp, 'market/ticker')
         if isinstance(body, list) and body:
@@ -185,8 +210,10 @@ class BitkubClient:
         path = '/api/v3/market/wallet'
         body = '{}'
         headers = self._auth_headers('POST', path, body=body)
-        resp = requests.post(
-            f'{self.BASE_URL}{path}', headers=headers, data=body, timeout=10
+        resp = self._retry_request(
+            lambda: requests.post(
+                f'{self.BASE_URL}{path}', headers=headers, data=body, timeout=10
+            ), label='BITKUB-wallet'
         )
         data = self._check_response(resp, path)
         result_data = data.get('result', data)
@@ -212,8 +239,10 @@ class BitkubClient:
         body = '{{"sym":"{}","amt":{:.2f},"rat":0,"typ":"market"}}'.format(
             self.SYMBOL, thb_amount)
         headers = self._auth_headers('POST', path, body=body)
-        resp = requests.post(
-            f'{self.BASE_URL}{path}', headers=headers, data=body, timeout=15
+        resp = self._retry_request(
+            lambda: requests.post(
+                f'{self.BASE_URL}{path}', headers=headers, data=body, timeout=15
+            ), label='BITKUB-buy'
         )
         data = self._check_response(resp, path)
         result = data['result']
@@ -256,8 +285,10 @@ class BitkubClient:
         body = '{{"sym":"{}","amt":{:.8f},"rat":0,"typ":"market"}}'.format(
             self.SYMBOL, btc_amount)
         headers = self._auth_headers('POST', path, body=body)
-        resp = requests.post(
-            f'{self.BASE_URL}{path}', headers=headers, data=body, timeout=15
+        resp = self._retry_request(
+            lambda: requests.post(
+                f'{self.BASE_URL}{path}', headers=headers, data=body, timeout=15
+            ), label='BITKUB-sell'
         )
         data = self._check_response(resp, path)
         result = data['result']

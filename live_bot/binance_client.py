@@ -436,9 +436,18 @@ class BinanceClient:
         ))
         resp.raise_for_status()
         data = resp.json()
+        # Check Binance application-level error (HTTP 200 with error code)
+        if isinstance(data, dict) and 'code' in data:
+            raise RuntimeError(f"Binance API error {data['code']}: {data.get('msg', '')}")
+        # Extract actual fee from fills array (quote currency only)
+        total_fee = 0.0
+        for fill in data.get('fills', []):
+            if fill.get('commissionAsset') == 'USDT':
+                total_fee += float(fill.get('commission', 0))
         return {
             'executed_qty': float(data['executedQty']),
             'cummulative_quote_qty': float(data['cummulativeQuoteQty']),
+            'fee': total_fee,
             'status': data['status'],
         }
 
@@ -457,9 +466,18 @@ class BinanceClient:
         ))
         resp.raise_for_status()
         data = resp.json()
+        # Check Binance application-level error (HTTP 200 with error code)
+        if isinstance(data, dict) and 'code' in data:
+            raise RuntimeError(f"Binance API error {data['code']}: {data.get('msg', '')}")
+        # Extract actual fee from fills array (quote currency only)
+        total_fee = 0.0
+        for fill in data.get('fills', []):
+            if fill.get('commissionAsset') == 'USDT':
+                total_fee += float(fill.get('commission', 0))
         return {
             'executed_qty': float(data['executedQty']),
             'cummulative_quote_qty': float(data['cummulativeQuoteQty']),
+            'fee': total_fee,
             'status': data['status'],
         }
 
