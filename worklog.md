@@ -1,6 +1,146 @@
 # Phoenix DCA Bot — Work Log
 
 ---
+Task ID: Research-DCA-TimeWindow-MondayMultiplier
+Agent: investigator
+Task: Analyze how adding a DCA time window (10:00-11:00 THB = 03:00-04:00 UTC) and Monday 1.2x multiplier would interact with existing code
+
+Findings:
+
+## 1. run_daily() Buy Decision Flow & Monday Multiplier Placement
+
+**Key line numbers (engine.py):**
+- L570-571: `base_budget = config.get_daily_budget()`, `max_buy = config.get_max_buy()` — budget/mx resolved
+- L592-609: `decision = strategy.phoenix_v5_1_decision(...)` — strategy called with `base_budget` + `max_buy`
+- L611-613: Decision logged (buy_amount, sell_amount, score, path)
+- L624: `_original_buy_amt = decision['buy_amount']` — snapshot before any adjustment
+- L628-640: Min buy check, insufficient cash adjustment
+- L647+: Trade execution
+- L743-749: Trade log recording (buy)
+- L831-844: `last_decision` saved to state (includes `calc_multiplier`)
+- L882-885: Notification via `notifier.format_report(decision, ...)`
+
+**CRITICAL: max_buy cap is INSIDE the strategy (strategy.py L157):**
+```python
+buy_amount = min(base_budget * multiplier, max_buy)
+```
+This means the Monday multiplier placement MATTERS:
+- **If applied BEFORE strategy (multiply base_budget L570):** max_buy cap still works correctly. The `calc_multiplier` at L835 would show `strategy_mult * 1.2` combined (e.g., 3.6x instead of 3.0x) — indistinguishable from a higher strategy multiplier.
+- **If applied AFTER strategy (multiply decision['buy_amount'] post-L609):** BYPASSES the max_buy cap! E.g., if strategy returns 1000 (capped at max_buy), 1.2x → 1200 exceeds cap. Must re-apply `min(..., max_buy)`.
+- **RECOMMENDED: Apply BEFORE strategy at L570**, by replacing `base_budget` with `base_budget * monday_mult` when it's Monday. This keeps the max_buy cap intact inside strategy.
+
+## 2. Idempotency Guard (L347) & Time-of-Day Dependency
+
+- L347: `if not force and bot_state.get('last_run_date') == today.isoformat():`
+- `_thai_today()` (L20-22) returns a `date` object — **no time component**.
+- **Nothing in the guard depends on time of day**, only the date.
+- **Time window impact:** The current cron runs at 13:00/13:10/13:30 UTC. A new 03:00-04:00 UTC window would be a DIFFERENT time but SAME Thai date. The idempotency guard would **block** the second window because `last_run_date` is already set from the 13:00 UTC run.
+- **Fix needed:** Either (a) remove idempotency guard and rely solely on `MAX_DCA_BUYS_PER_DAY` (L412-437), or (b) make the guard time-window-aware, or (c) use `MAX_DCA_BUYS_PER_DAY >= 2` to allow the daily count guard to be the primary limiter.
+- The daily buy count guard (L417-437) counts actual buys per Thai date from trade_log — this WOULD allow a second buy if `MAX_DCA_BUYS_PER_DAY >= 2`. This is the safer guard.
+
+## 3. run_demo() (L1095-1275)
+
+- L1190-1206: Calls `strategy.phoenix_v5_1_decision()` DIRECTLY with `base_budget` from L1180.
+- **Monday multiplier in engine.py would NOT automatically apply to demo mode** because run_demo() has its own `base_budget = config.get_daily_budget()` at L1180 and its own strategy call at L1190.
+- **Changes needed in run_demo():** Same Monday multiplier logic must be duplicated at L1180 (or extracted to a shared helper function).
+- **Time window:** Demo mode has its own idempotency guard at L1115 (also date-based via `_thai_today()`). Same issue as live mode if time windows are added.
+- **Trade recording:** Demo uses `dp.process_demo_trade()` (L1213) which calls `_append_demo_trade()` (demo_portfolio.py L637). The demo trade log record includes `extra` dict with `slippage` and `reserve`. Monday boost should be added to `extra`.
+
+## 4. refresh_dashboard() (L895-1037)
+
+- **Does NOT call strategy.** Only fetches price, indicators, and balances.
+- **Should NOT be affected by time window or Monday multiplier.** No changes needed.
+- It stores `last_indicators` but NOT `last_decision` (no trading decision is made).
+
+## 5. _snapshot_indicators (L1040-1092)
+
+- Only called when the bot is KILLED (L474).
+- Stores indicators only, no decision or trade data.
+- **No changes needed for Monday boost.**
+
+## 6. Trade Log Recording
+
+**Live mode (engine.py L743-749):**
+```python
+state_mod.append_trade_log(trade_log_path, 'buy', buy_cost_actual, buy_btc_got,
+    price, buy_fee,
+    extra={'dry_run': dry_run, 'reserve': round(decision.get('reserve_injection', 0), 2)})
+```
+- `buy_cost_actual` = actual amount spent (after Monday boost if applied)
+- The `extra` dict should include `'monday_boost': True` (or the multiplier value) for auditability.
+- Currently only `dry_run` and `reserve` are in `extra`.
+
+**Demo mode (demo_portfolio.py L324-329):**
+```python
+_append_demo_trade(project_root, scenario, 'buy', cost_with_slippage, btc_got, price, fee,
+    extra={'slippage': ..., 'reserve': ...})
+```
+- Same: should add `'monday_boost': True` to extra.
+
+**state.py append_trade_log (L231-282):** Generic function, no changes needed — it just passes through `extra`.
+
+## 7. Notification (notifier.py L25-53)
+
+```python
+def format_report(decision, price, mvrv, btc_balance, cash, exchange_currency, is_dry_run):
+    # Shows: decision['buy_amount'], decision['reserve_injection']
+```
+- If Monday boost is applied to `base_budget` before strategy, then `decision['buy_amount']` already includes the boost.
+- **Should explicitly mention Monday boost** in the notification for clarity, e.g., "BUY: 120.00 USDT (Monday 1.2x boost)".
+- Requires adding a `monday_boost` flag to the `decision` dict, OR checking in `format_report`.
+- `format_report` signature would need a new parameter (e.g., `monday_boost=False`).
+
+## 8. Dashboard (generate_dashboard.py L298-384)
+
+- Shows `ld_mult` = `buy_amount / base_budget` (calculated at engine.py L835).
+- If Monday boost is applied by multiplying `base_budget`, then `ld_mult` = strategy_mult * 1.2 (combined).
+- **Problem:** Dashboard can't distinguish "3.0x strategy + Monday boost" from "3.6x strategy".
+- **Recommendation:** Store `monday_boost_applied` flag in `last_decision` dict (engine.py L838-844) so dashboard can show it separately (e.g., "3.0x + Monday 1.2x").
+- Dashboard's "Next round estimate" (L305-331) would NOT show Monday boost (it's date-dependent, not indicator-dependent). This is correct behavior.
+
+## 9. demo_portfolio.py — Does it call phoenix_v5_1_decision directly?
+
+- **No.** `demo_portfolio.py` does NOT call `phoenix_v5_1_decision`.
+- It calls `dp.process_demo_trade()` (engine.py L1213), which receives the already-computed `decision` dict from the strategy call in `run_demo()` (engine.py L1190).
+- So if the Monday multiplier is applied in `run_demo()` before `process_demo_trade()`, it flows through automatically.
+
+## 10. Summary: Exact Line Numbers Where Changes Are Needed
+
+| Location | File | Line(s) | Change | Priority |
+|----------|------|---------|--------|----------|
+| Monday multiplier calc | engine.py | ~L570 (run_daily) | Apply 1.2x to `base_budget` on Monday | HIGH |
+| Monday multiplier calc | engine.py | ~L1180 (run_demo) | Same 1.2x logic duplicated | HIGH |
+| Time window guard | engine.py | ~L347 (idempotency) | Allow re-run if in different time window | HIGH |
+| Time window guard | engine.py | ~L1115 (demo idempotency) | Same for demo | HIGH |
+| Monday flag in decision | engine.py | ~L838-844 (last_decision) | Add `monday_boost: True` field | MEDIUM |
+| Monday flag in decision | engine.py | ~L1250-1256 (demo last_decision) | Same for demo | MEDIUM |
+| Trade log extra | engine.py | ~L747-748 | Add `'monday_boost': True` to extra | MEDIUM |
+| Trade log extra | demo_portfolio.py | ~L326-329 | Add `'monday_boost': True` to extra | MEDIUM |
+| Notification | notifier.py | ~L25-53 | Add Monday boost mention to report | LOW |
+| Notification caller | engine.py | ~L882-885 | Pass monday_boost flag to format_report | LOW |
+| Dashboard | generate_dashboard.py | ~L298-384 | Show Monday boost badge if applicable | LOW |
+| Config | config.py | ~L148 area | Add MONDAY_BOOST_MULTIPLIER, TIME_WINDOW_* | HIGH |
+
+## 11. Potential Side Effects
+
+1. **max_buy cap bypass:** If Monday multiplier is applied AFTER strategy returns (post-L609), the max_buy cap inside strategy is defeated. Must apply BEFORE (L570) or re-cap after.
+2. **Idempotency conflict:** Current idempotency guard blocks same-day re-runs. Adding a second time window requires relaxing this guard while keeping `MAX_DCA_BUYS_PER_DAY` as the real limiter.
+3. **Daily buy count guard interaction:** The guard at L417-437 counts buys from trade_log. If `MAX_DCA_BUYS_PER_DAY` is increased to 2, the 13:00 UTC run consumes 1 slot and the 03:00 UTC run can use the 2nd. This is safe.
+4. **calc_multiplier accuracy:** L835 `calc_multiplier = buy_amt / base_budget`. If base_budget is boosted, the displayed multiplier is inflated. Store original base_budget separately for accurate display.
+5. **Low balance warning (L866-879):** Uses `config.get_daily_budget()` (un-boosted). On Mondays, actual spend is 1.2x higher, so remaining days calculation is slightly optimistic. Minor issue.
+6. **Reserve deployment:** The reserve injection is added AFTER the base buy (strategy.py L183). Monday boost on base_budget would also boost the relative size of the buy but reserve deployment is independent of base_budget. No conflict.
+7. **Timeout estimation (L675-678):** Uses `decision['buy_amount']` (post-Monday boost). This is correct — the actual sent amount is what matters.
+
+Stage Summary:
+- Monday 1.2x multiplier: Apply to `base_budget` BEFORE strategy call (L570 for live, L1180 for demo)
+- Time window: Requires relaxing idempotency guard (L347, L1115) + increasing MAX_DCA_BUYS_PER_DAY to >= 2
+- Trade log: Add `monday_boost` to `extra` dict (engine.py L748, demo_portfolio.py L328)
+- Dashboard: Add `monday_boost` flag to `last_decision` (engine.py L838, L1250)
+- Notification: Add Monday boost mention (notifier.py L39, engine.py L882)
+- Demo mode: Needs parallel changes (not automatic)
+- refresh_dashboard + _snapshot_indicators: NO changes needed
+
+---
 Task ID: Wave-8-D6-D7
 Agent: main
 Task: ตรวจสอบ TODO จาก session ก่อน และทำต่อให้เสร็จ
