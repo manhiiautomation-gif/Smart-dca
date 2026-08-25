@@ -221,7 +221,8 @@ def process_demo_trade(state: dict, decision: dict, price: float,
                        currency: str, fee_pct: float = 0.0015,
                        use_slippage: bool = True,
                        project_root: str = '.',
-                       scenario: str = 'default') -> dict:
+                       scenario: str = 'default',
+                       monday_boost: float = 1.0) -> dict:
     """Process a trading decision in the demo portfolio.
 
     This replaces the trade execution logic in engine.py for demo mode.
@@ -326,6 +327,7 @@ def process_demo_trade(state: dict, decision: dict, price: float,
                               extra={
                                   'slippage': round(max(0, slip_cost), 4),
                                   'reserve': round(decision.get('reserve_injection', 0), 2),
+                                  'monday_boost': monday_boost if monday_boost != 1.0 else None,
                               })
 
     # ── SELL ──

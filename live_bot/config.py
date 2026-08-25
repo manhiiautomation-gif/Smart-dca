@@ -147,6 +147,15 @@ MAX_BUY_THB = _env_float('MAX_BUY_THB', '1000')
 # Maximum total DCA buys per day (e.g. 3 means up to 3x DCA per day)
 MAX_DCA_BUYS_PER_DAY = _env_int('MAX_DCA_BUYS_PER_DAY', '1')
 
+# DCA time window (Thai time, 24h format) — bot only buys during this window
+# Based on research: 03:00-04:00 UTC has lowest BTC volume and most negative returns.
+DCA_TIME_WINDOW_START = _env_int('DCA_TIME_WINDOW_START', '10')  # 10:00 THB = 03:00 UTC
+DCA_TIME_WINDOW_END = _env_int('DCA_TIME_WINDOW_END', '11')      # 11:00 THB = 04:00 UTC
+
+# Monday DCA boost multiplier — Mondays have highest next-day returns (research-based).
+# Applied to base_budget before strategy multiplier. Set to 1.0 to disable.
+MONDAY_DCA_MULTIPLIER = _env_float('MONDAY_DCA_MULTIPLIER', '1.2')
+
 # ═══════════════════════════════════════════════════════════════
 #  RESERVE DEPLOYMENT PARAMETERS (configurable)
 # ═══════════════════════════════════════════════════════════════

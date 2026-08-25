@@ -2,14 +2,12 @@ name: Phoenix v5.1 DCA - Bitkub
 
 on:
   schedule:
-    # Main:     13:00 UTC (20:00 THB) — US market open, peak momentum
-    # Backup 1: 13:10 UTC (20:10 THB) — retry if main failed
-    # Backup 2: 13:30 UTC (20:30 THB) — last resort if both failed
-    # Idempotency guard prevents duplicate trades on success.
-    # If ALL 3 fail, Telegram alert is sent.
-    - cron: '0 13 * * *'
-    - cron: '10 13 * * *'
-    - cron: '30 13 * * *'
+    # Research-based: 10:00-11:00 THB (03:00-04:00 UTC) has lowest BTC volume
+    # and most negative avg hourly returns — optimal DCA entry window.
+    # Monday: base_budget boosted 1.2x (research: highest next-day returns).
+    - cron: '0 3 * * *'
+    - cron: '10 3 * * *'
+    - cron: '30 3 * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -84,6 +82,9 @@ jobs:
           RESERVE_BOOST_MULTIPLIER: ${{ secrets.RESERVE_BOOST_MULTIPLIER || '1.8' }}
           RESERVE_BOOST_PRICE_RATIO: ${{ secrets.RESERVE_BOOST_PRICE_RATIO || '1.05' }}
           LOW_BALANCE_DAYS: ${{ secrets.LOW_BALANCE_DAYS || '7' }}
+          DCA_TIME_WINDOW_START: ${{ secrets.DCA_TIME_WINDOW_START || '10' }}
+          DCA_TIME_WINDOW_END: ${{ secrets.DCA_TIME_WINDOW_END || '11' }}
+          MONDAY_DCA_MULTIPLIER: ${{ secrets.MONDAY_DCA_MULTIPLIER || '1.2' }}
           DRY_RUN: ${{ steps.dr.outputs.val }}
         run: |
           FLAGS="--exchange bitkub --state-file live_bot/state.json"

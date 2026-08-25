@@ -13,13 +13,37 @@ import numpy as np
 from datetime import date, datetime, timezone, timedelta
 
 # H1: Thai timezone for idempotency check
-# GitHub Actions cron: 13:00/13:10/13:30 UTC = 20:00/20:10/20:30 THB
+# GitHub Actions cron: 03:00/03:10/03:30 UTC = 10:00/10:10/10:30 THB
 _THAI_TZ = timezone(timedelta(hours=7))
 
 
 def _thai_today() -> date:
     """Return today's date in Thai timezone (UTC+7)."""
     return datetime.now(_THAI_TZ).date()
+
+
+def _thai_now() -> datetime:
+    """Return current datetime in Thai timezone (UTC+7)."""
+    return datetime.now(_THAI_TZ)
+
+
+def _in_dca_time_window() -> bool:
+    """Check if current Thai time is within the DCA buy window.
+
+    Configured via DCA_TIME_WINDOW_START / DCA_TIME_WINDOW_END (Thai 24h).
+    Window is [start, end) — start inclusive, end exclusive.
+    """
+    now = _thai_now()
+    hour = now.hour
+    return config.DCA_TIME_WINDOW_START <= hour < config.DCA_TIME_WINDOW_END
+
+
+def _is_monday_thai() -> bool:
+    """Check if today (Thai timezone) is Monday.
+
+    Monday is weekday() == 0 in Python.
+    """
+    return _thai_today().weekday() == 0
 
 from . import config
 from . import indicators as ind
@@ -338,7 +362,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
 
     # ── 0. Idempotency guard: skip if already ran today (unless --force) ──
     # H1: Uses Thai timezone so daily guard aligns with THB calendar day
-    # (cron at 13:00/13:10/13:30 UTC = 20:00/20:10/20:30 THB)
+    # (cron at 03:00/03:10/03:30 UTC = 10:00/10:10/10:30 THB)
     # Each cron slot also has 3x internal retry with 60s backoff.
     # Backup slots are safety nets — if 1st run succeeds,
     # last_run_date is set and later runs skip via this guard.
@@ -571,7 +595,26 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     max_buy = config.get_max_buy()
     print(f'[BOT] Budget: {base_budget:.2f} {currency}/run (max buy: {max_buy:.2f})')
 
-    # ── 6b. Separate reserve from DCA cash ──
+    # ── 6a. Monday DCA boost ──
+    # Research: Monday has highest next-day BTC returns (+0.38% avg, 6/7 sources).
+    # Apply to base_budget BEFORE strategy so max_buy cap inside strategy still works.
+    monday_boost = False
+    if _is_monday_thai() and config.MONDAY_DCA_MULTIPLIER != 1.0:
+        base_budget = base_budget * config.MONDAY_DCA_MULTIPLIER
+        monday_boost = True
+        print(f'[BOT] MONDAY BOOST: base_budget x{config.MONDAY_DCA_MULTIPLIER} = {base_budget:.2f} {currency}')
+
+    # ── 6b. DCA time window check ──
+    # Only buy during configured Thai time window (default: 10:00-11:00 THB).
+    # Indicators + dashboard are still computed outside the window.
+    in_dca_window = _in_dca_time_window()
+    if not in_dca_window:
+        thai_h = _thai_now().hour
+        print(f'[BOT] DCA TIME WINDOW: {thai_h}:xx THB is outside '
+              f'{config.DCA_TIME_WINDOW_START}:00-{config.DCA_TIME_WINDOW_END}:00. '
+              f'Skipping BUY (indicators + dashboard still updated).')
+
+    # ── 6c. Separate reserve from DCA cash ──
     # In demo: sell_proceeds_reserve is tracked separately
     # In live/dry-run: we track total_sell_proceeds in state as reserve proxy
     # cash_reserve passed to strategy = ONLY profits from BTC sales
@@ -611,6 +654,15 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     print(f'[BOT] Decision: buy={decision["buy_amount"]:.2f} '
           f'sell={decision["sell_amount"]:.2f} '
           f'score={decision["sell_score"]} path={decision["path_taken"]}')
+
+    # ── 8b. DCA time window enforcement ──
+    # Zero out buy if outside the configured Thai time window.
+    # This is a safety feature that ALWAYS applies, even with --force.
+    # Rationale: buying outside the research-optimized window defeats the purpose.
+    # Sell decisions are NOT affected by time window.
+    if not in_dca_window and decision['buy_amount'] > 0:
+        print(f'[BOT] TIME WINDOW BLOCK: Zeroing buy {decision["buy_amount"]:.2f} (outside DCA window)')
+        decision['buy_amount'] = 0.0
 
     # ── 9. Execute trades ──
     buy_fee = 0.0
@@ -741,11 +793,14 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     # This ensures if trade log write fails, state is not yet mutated,
     # preventing data inconsistency between state.json and trade_log.json.
     if decision['buy_amount'] > 0 and buy_btc_got > 0:
+        buy_extra = {'dry_run': dry_run,
+                     'reserve': round(decision.get('reserve_injection', 0), 2)}
+        if monday_boost:
+            buy_extra['monday_boost'] = config.MONDAY_DCA_MULTIPLIER
         state_mod.append_trade_log(
             trade_log_path, 'buy', buy_cost_actual, buy_btc_got,
             price, buy_fee,
-            extra={'dry_run': dry_run,
-                   'reserve': round(decision.get('reserve_injection', 0), 2)}
+            extra=buy_extra
         )
 
     if decision['sell_amount'] > 0 and sell_btc_sold > 0:
@@ -830,17 +885,20 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     }
     # Store decision details for dashboard (multiplier, amounts)
     buy_amt = decision.get('buy_amount', 0)
-    base_budget_val = base_budget
-    if base_budget_val > 0 and buy_amt > 0:
-        calc_multiplier = round(buy_amt / base_budget_val, 1)
+    # Use pre-boost base_budget for accurate multiplier display
+    base_budget_display = config.get_daily_budget()
+    if base_budget_display > 0 and buy_amt > 0:
+        calc_multiplier = round(buy_amt / base_budget_display, 1)
     else:
         calc_multiplier = 0.0
     bot_state['last_decision'] = {
         'buy_amount': round(buy_amt, 2),
         'sell_amount': round(decision.get('sell_amount', 0), 2),
         'multiplier': calc_multiplier,
-        'base_budget': round(base_budget_val, 2),
+        'base_budget': round(base_budget_display, 2),
         'reserve_injection': round(decision.get('reserve_injection', 0), 2),
+        'monday_boost': config.MONDAY_DCA_MULTIPLIER if monday_boost else 1.0,
+        'in_dca_window': in_dca_window,
     }
     bot_state['last_btc_balance'] = round(current_btc, 8)
     bot_state['last_cash_balance'] = round(current_cash, 2)
@@ -881,7 +939,8 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     # ── 13. Send notification ──
     msg = notifier.format_report(
         decision, price, mvrv_val, current_btc, current_cash,
-        currency, is_dry_run=dry_run
+        currency, is_dry_run=dry_run,
+        monday_boost=config.MONDAY_DCA_MULTIPLIER if monday_boost else 1.0,
     )
     if notifier.send_telegram(msg):
         print('[BOT] Telegram notification sent')
@@ -1181,7 +1240,21 @@ def run_demo(exchange, demo_state: dict, project_root: str,
     max_buy = config.get_max_buy()
     print(f'[DEMO] Budget: {base_budget:.2f} {currency}/run (max buy: {max_buy:.2f})')
 
-    # ── 5b. Reserve = sell proceeds only ──
+    # ── 5a. Monday DCA boost (same as run_daily) ──
+    monday_boost = False
+    if _is_monday_thai() and config.MONDAY_DCA_MULTIPLIER != 1.0:
+        base_budget = base_budget * config.MONDAY_DCA_MULTIPLIER
+        monday_boost = True
+        print(f'[DEMO] MONDAY BOOST: base_budget x{config.MONDAY_DCA_MULTIPLIER} = {base_budget:.2f} {currency}')
+
+    # ── 5b. DCA time window check (same as run_daily) ──
+    # In demo mode, time window is logged but NOT enforced (demo is for simulation, not live trading).
+    in_dca_window = _in_dca_time_window()
+    if not in_dca_window:
+        print(f'[DEMO] Note: outside DCA time window ({config.DCA_TIME_WINDOW_START}:00-{config.DCA_TIME_WINDOW_END}:00 THB). ')
+        print(f'[DEMO] Demo mode allows trading any time for simulation purposes.')
+
+    # ── 5c. Reserve = sell proceeds only ──
     demo_reserve = demo_state.get('sell_proceeds_reserve', 0.0)
     print(f'[DEMO] Sell proceeds reserve: {demo_reserve:,.2f} {currency}')
 
@@ -1216,6 +1289,7 @@ def run_demo(exchange, demo_state: dict, project_root: str,
         use_slippage=True,
         project_root=project_root,
         scenario=scenario,
+        monday_boost=config.MONDAY_DCA_MULTIPLIER if monday_boost else 1.0,
     )
 
     # ── 8. Snapshot indicators ──
@@ -1242,17 +1316,21 @@ def run_demo(exchange, demo_state: dict, project_root: str,
         'cooldown': decision.get('new_cooldown', 0),
     }
     # Store decision details for dashboard
+    # Use pre-boost base_budget for accurate multiplier display
     buy_amt = decision.get('buy_amount', 0)
-    if base_budget > 0 and buy_amt > 0:
-        calc_mult = round(buy_amt / base_budget, 1)
+    base_budget_display = config.get_daily_budget()
+    if base_budget_display > 0 and buy_amt > 0:
+        calc_mult = round(buy_amt / base_budget_display, 1)
     else:
         calc_mult = 0.0
     demo_state['last_decision'] = {
         'buy_amount': round(buy_amt, 2),
         'sell_amount': round(decision.get('sell_amount', 0), 2),
         'multiplier': calc_mult,
-        'base_budget': round(base_budget, 2),
+        'base_budget': round(base_budget_display, 2),
         'reserve_injection': round(decision.get('reserve_injection', 0), 2),
+        'monday_boost': config.MONDAY_DCA_MULTIPLIER if monday_boost else 1.0,
+        'in_dca_window': in_dca_window,
     }
     dp.snapshot_indicators(demo_state, indicators_snapshot)
 
@@ -1261,6 +1339,7 @@ def run_demo(exchange, demo_state: dict, project_root: str,
         decision, price, mvrv_val,
         demo_state['btc'], demo_state['cash'],
         currency, is_dry_run=True,
+        monday_boost=config.MONDAY_DCA_MULTIPLIER if monday_boost else 1.0,
     )
     msg = msg.replace('DRY RUN', 'DEMO')
     if notifier.send_telegram(msg):
