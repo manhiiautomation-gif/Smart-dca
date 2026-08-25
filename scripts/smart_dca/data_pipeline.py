@@ -413,7 +413,8 @@ def build_master_dataframe(years=5):
             w = mvrv_ext[i - PCT_WINDOW:i]
             valid = w[~np.isnan(w)]
             if len(valid) > 10:
-                pct[i] = np.searchsorted(np.sort(valid), mvrv_ext[i]) / len(valid)
+                # S1-sync: Use side='right' consistent with live strategy.py
+                pct[i] = np.searchsorted(np.sort(valid), mvrv_ext[i], side='right') / len(valid)
         master['mvrv_pct'] = pct
         master.drop(columns=['mvrv_extended'], inplace=True)
     else:

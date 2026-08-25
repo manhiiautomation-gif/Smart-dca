@@ -71,7 +71,8 @@ def compute_percentile_from_embedded(current_date, current_mvrv, window=365):
         return 0.0
 
     hist_values.sort()
-    rank = np.searchsorted(hist_values, current_mvrv)
+    # S1-sync: Use side='right' consistent with live strategy.py
+    rank = np.searchsorted(hist_values, current_mvrv, side='right')
     return rank / len(hist_values)
 
 

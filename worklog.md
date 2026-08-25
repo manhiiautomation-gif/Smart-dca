@@ -1,6 +1,45 @@
 # Phoenix DCA Bot — Work Log
 
 ---
+Task ID: Wave-11-Phase2
+Agent: main + 3 analysis sub-agents + 1 reviewer
+Task: Phase 2 Data Integrity — แก้ไข 11 ปัญหาที่ข้อมูลไม่ตรงค่าจริง
+
+Work Log:
+- Phase 1: ส่ง 3 sub-agents วิเคราะห์ parallel (engine.py, strategy.py, state/client/notifier)
+- พบ 11 ปัญหา Data Integrity: 1 HIGH, 8 MEDIUM, 2 LOW
+- Phase 3: อ่านไฟล์ที่เกี่ยวข้องยืนยัน line numbers + วางแผนแก้ 11 issues
+- Phase 4: Execute ทีละ issue:
+  - DI-1 (HIGH): Timeout-unverified buy → zero decision['buy_amount'] ทั้ง 2 path
+  - H3: คำนวณ buy_fill_price/sell_fill_price จาก actual fills ส่งไป trade_log + update_state
+  - DI-2: adjusted_invested sell fraction ใช้ actual_sell แทน decision['sell_amount']
+  - DI-3: Binance market_sell return net-of-fee (cummulativeQuoteQty - fee)
+  - C7: เพิ่ม _fetch_monthly_usd_thb_rates() ดึง historical rates จาก CoinGecko BTC price ratio
+  - S1: searchsorted side='left' → side='right' ทั้ง 4 ที่ (live + 3 backtest files)
+  - S2: เพิ่ม nupl_valid NaN guard (same pattern as B24)
+  - S3: เพิ่ม rp_valid sanity check (realized_price < 5x price)
+  - DI-6: mvrv_pct/mvrv_z default 0 → float('nan') ทั้ง 4 ที่
+  - DI-4: format_report() รับ actual_buy/actual_sell, แสดงเมื่อต่างจาก intended
+  - DI-5: MVRV NaN แสดง 'N/A' แทน 'nan' ใน Telegram
+- Phase 5: Code review → พบ 2 issues → แก้ทันที:
+  - S1 backtest searchsorted ไม่ sync (3 files: _shared.py, data_pipeline.py, style_phoenix_v5_1.py)
+  - C7 fragile float equality ใน month identification → เปลี่ยนใช้ derived_set
+- Phase 6: Quality scoring 95/100 PASS
+
+Stage Summary:
+- DI-1 (HIGH): Timeout-unverified buy zero decision['buy_amount'] ป้องกัน phantom state counters
+- H3 (MEDIUM): Actual fill prices ใน trade_log + update_state (cost/qty, proceeds/qty)
+- DI-2 (MEDIUM): adjusted_invested sell fraction ใช้ actual proceeds
+- DI-3 (MEDIUM): Binance sell proceeds normalized to net-of-fee
+- C7 (MEDIUM): Historical USD/THB rates per month แทน single today's rate
+- S1 (MEDIUM): MVRV percentile side='right' ทั้ง 4 ที่ (live + backtest sync)
+- S2 (MEDIUM): NUPL explicit NaN guard
+- S3 (MEDIUM): realized_price sanity check (< 5x price)
+- DI-6 (MEDIUM): mvrv_pct/mvrv_z default NaN ไม่ใช่ 0
+- DI-4 (LOW): Telegram แสดง actual exchange fill amounts
+- DI-5 (LOW): MVRV NaN แสดง N/A ใน Telegram
+
+---
 Task ID: Wave-10-Phase1
 Agent: main + 3 analysis sub-agents + 1 reviewer
 Task: วิเคราะห์ระบบทั้งหมด 3 ทีม parallel + แก้ไข Phase 1 Stability & Correctness (6 issues)

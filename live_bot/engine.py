@@ -208,9 +208,11 @@ def _resolve_onchain_metrics(price, closes, today,
         else:
             mvrv_source = 'N/A'
 
-    mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val) if not math.isnan(mvrv_val) else 0
+    # DI-6: Default to NaN (not 0) when MVRV unavailable.
+    # 0 falsely implies 'MVRV at minimum' to dashboard/strategy.
+    mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val) if not math.isnan(mvrv_val) else float('nan')
     if math.isnan(mvrv_z):
-        mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val) if not math.isnan(mvrv_val) else 0
+        mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val) if not math.isnan(mvrv_val) else float('nan')
         mvrv_z_source = 'embedded-365d'
     nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 and not math.isnan(mvrv_val) else 0
     realized_price = price / mvrv_val if mvrv_val > 0 and not math.isnan(mvrv_val) else float('nan')
@@ -738,12 +740,14 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
                         buy_btc_got = 0
                         buy_cost_actual = 0
                         buy_fee = 0
+                        decision['buy_amount'] = 0  # DI-1: prevent phantom invested/buy_count
                         print(f'[BOT] TIMEOUT UNVERIFIED: BTC balance unchanged ({post_btc:.8f}). '
                               f'Slot consumed to prevent double-buy. No trade recorded.')
                 except Exception as ve:
                     buy_btc_got = 0
                     buy_cost_actual = 0
                     buy_fee = 0
+                    decision['buy_amount'] = 0  # DI-1: prevent phantom invested/buy_count
                     print(f'[BOT] TIMEOUT VERIFICATION FAILED: {ve}. '
                           f'Slot consumed to prevent double-buy. No trade recorded.')
             else:
@@ -807,6 +811,15 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
     # Record trades in trade log FIRST (before mutating state)
     # This ensures if trade log write fails, state is not yet mutated,
     # preventing data inconsistency between state.json and trade_log.json.
+    # H3: Compute actual fill prices from exchange response for accurate records
+    buy_fill_price = price
+    if buy_btc_got > 0 and buy_cost_actual > 0:
+        buy_fill_price = buy_cost_actual / buy_btc_got
+
+    sell_fill_price = price
+    if sell_btc_sold > 0 and sell_proceeds_actual > 0:
+        sell_fill_price = sell_proceeds_actual / sell_btc_sold
+
     if decision['buy_amount'] > 0 and buy_btc_got > 0:
         buy_extra = {'dry_run': dry_run,
                      'reserve': round(decision.get('reserve_injection', 0), 2)}
@@ -814,14 +827,14 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             buy_extra['monday_boost'] = config.MONDAY_DCA_MULTIPLIER
         state_mod.append_trade_log(
             trade_log_path, 'buy', buy_cost_actual, buy_btc_got,
-            price, buy_fee,
+            buy_fill_price, buy_fee,
             extra=buy_extra
         )
 
     if decision['sell_amount'] > 0 and sell_btc_sold > 0:
         state_mod.append_trade_log(
             trade_log_path, 'sell', sell_proceeds_actual, sell_btc_sold,
-            price, sell_fee,
+            sell_fill_price, sell_fee,
             extra={'dry_run': dry_run,
                    'path': decision.get('path_taken', ''),
                    'score': decision.get('sell_score', 0)}
@@ -829,7 +842,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
 
     # ── 10. Update state ──
     bot_state = state_mod.update_state_after_run(
-        bot_state, decision, price, price, currency,
+        bot_state, decision, buy_fill_price, sell_fill_price, currency,
         buy_fee=buy_fee, sell_fee=sell_fee,
         btc_balance=btc_balance, cash_balance=cash_balance,
         sell_proceeds_actual=sell_proceeds_actual,
@@ -954,10 +967,13 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
             notifier.send_telegram(warning_msg)
 
     # ── 13. Send notification ──
+    # DI-4: Pass actual fill amounts for accurate Telegram display
     msg = notifier.format_report(
         decision, price, mvrv_val, current_btc, current_cash,
         currency, is_dry_run=dry_run,
         monday_boost=config.MONDAY_DCA_MULTIPLIER if monday_boost else 1.0,
+        actual_buy=buy_cost_actual,
+        actual_sell=sell_proceeds_actual,
     )
     if notifier.send_telegram(msg):
         print('[BOT] Telegram notification sent')
@@ -1135,8 +1151,9 @@ def _snapshot_indicators(bot_state: dict, price: float, currency: str,
         mvrv_val = strategy.get_mvrv_for_date(today)
         if mvrv_val is not None and mvrv_val <= 0:
             mvrv_val = float('nan')
-        mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val) if not math.isnan(mvrv_val) else 0
-        mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val) if not math.isnan(mvrv_val) else 0
+        # DI-6: Default to NaN (not 0) when MVRV unavailable.
+        mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val) if not math.isnan(mvrv_val) else float('nan')
+        mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val) if not math.isnan(mvrv_val) else float('nan')
         mvrv_z_source = 'embedded-365d'
         nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 and not math.isnan(mvrv_val) else 0
 

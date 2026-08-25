@@ -63,7 +63,10 @@ def compute_mvrv_percentile(d: date, current_mvrv: float, window: int = 365) -> 
     if len(hist_values) < 60:
         return float('nan')
     hist_values.sort()
-    rank = np.searchsorted(hist_values, current_mvrv)
+    # S1: Use side='right' so that values equal to a historical value
+    # are counted as >= that value (standard percentile definition).
+    # side='left' (default) systematically underestimates percentile.
+    rank = np.searchsorted(hist_values, current_mvrv, side='right')
     return rank / len(hist_values)
 
 
@@ -133,6 +136,8 @@ def phoenix_v5_1_decision(
     # (NaN < 0.95 evaluates to False in NumPy, which gives 3.0x anyway,
     #  but making it explicit avoids silent reliance on NaN comparison behavior).
     sopr_valid = not np.isnan(sopr)
+    # S2: Same explicit NaN guard for NUPL (same class of bug as B24).
+    nupl_valid = not np.isnan(nupl)
 
     # ── BEAR BLOCK CHECK ──
     in_bear = not np.isnan(sma_200) and price < sma_200
@@ -146,7 +151,8 @@ def phoenix_v5_1_decision(
         # Without SOPR data, conservatively use 3.0x (not 4.5x).
         multiplier = 4.5 if (sopr_valid and sopr < 0.95) else 3.0
     elif mvrv < 1.5:
-        multiplier = 3.0 if nupl < 0.25 else 2.0
+        # S2: Use explicit nupl_valid guard (same pattern as B24 for SOPR)
+        multiplier = 3.0 if (nupl_valid and nupl < 0.25) else 2.0
     elif mvrv < 2.0:
         multiplier = 1.0
     elif mvrv < 2.5:
@@ -159,8 +165,13 @@ def phoenix_v5_1_decision(
     # ═══ 2. RESERVE DEPLOYMENT (buy-the-dip from BTC sale profits) ═══
     # cash_reserve = money from BTC sells, held for dip buying
     # reserve_floor = minimum cash to keep (e.g. ~6 USDT or 200 THB)
+    # S3: Sanity check realized_price before using it.
+    # If MVRV is very small (e.g., 0.05), realized_price = price/0.05 = 20x price.
+    # This would unconditionally trigger the boost condition.
+    rp_valid = (not np.isnan(realized_price) and realized_price > 0
+                and realized_price < price * 5.0)
     usable_reserve = max(cash_reserve - reserve_floor, 0.0)
-    if usable_reserve > 0 and mvrv < 1.5 and not np.isnan(realized_price):
+    if usable_reserve > 0 and mvrv < 1.5 and rp_valid:
         if mvrv < 0.8 and in_bear:
             deploy_rate = 0.25
         elif mvrv < 0.9 and in_bear:

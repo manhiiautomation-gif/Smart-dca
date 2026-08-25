@@ -191,10 +191,11 @@ def update_state_after_run(state: dict, decision: dict,
         state['last_sell_date'] = now_str
 
         # H5: Reduce adjusted_invested proportionally when selling
-        # Sell fraction = sell_amount / portfolio_value_before_sell
+        # DI-2: Use actual proceeds (not strategy's intended amount) for sell fraction.
+        # This accounts for 99% sell cap and market slippage.
         portfolio_before = btc_balance * sell_price + cash_balance
         if portfolio_before > 0 and state['adjusted_invested'] > 0:
-            sell_fraction = decision['sell_amount'] / portfolio_before
+            sell_fraction = actual_sell / portfolio_before
             state['adjusted_invested'] *= (1 - sell_fraction)
             state['adjusted_invested'] = max(round(state['adjusted_invested'], 2), 0)
 

@@ -124,11 +124,100 @@ class BitkubClient:
             print(f'[BITKUB] Binance Vision failed: {e}. Falling back to CoinGecko...')
         return self._ohlcv_coingecko(min(days, 365))
 
+    def _fetch_monthly_usd_thb_rates(self, months: list) -> dict:
+        """Fetch monthly average USD/THB rates from free API.
+
+        C7: Historical OHLCV must use period-appropriate rates, not today's.
+        Returns {YYYY-MM: avg_rate} dict. Falls back to today's rate for any
+        months that fail.
+        """
+        from live_bot import config
+        today_rate = config.get_usd_thb_rate()
+        rates = {}
+        # Fetch from exchangerate-api (free tier: 1500 req/month)
+        # Use the earliest and latest month to get a range of rates
+        for m in months:
+            rates[m] = today_rate  # default
+
+        try:
+            # Alpha Vantage free: FX_INTRADAY or FX_MONTHLY
+            # Instead, use a simpler approach: fetch a few key historical rates
+            # from frankfurter.app (free, no key, ECB data, USD/THB not available)
+            #
+            # Fallback approach: Use CoinGecko's BTC/THB vs BTC/USD ratio
+            # to derive historical USD/THB rates. This is the most reliable
+            # free source that covers THB.
+            #
+            # Simplest reliable approach: use monthly averages from
+            # the Bank of Thailand daily data (public CSV).
+            # URL: https://www.bot.or.th/App/BTWS_STAT/statistics/STATWEBBYCATXLS.aspx?reportID=133&language=E
+            #
+            # However, for reliability, we'll use a pragmatic approach:
+            # fetch BTC/THB and BTC/USD monthly closes, then derive rate = THB/USD.
+            # This works because BTC price ratio eliminates most market noise.
+            try:
+                # Derive historical USD/THB rates from BTC price ratio.
+                # BTC/THB price / BTC/USD price = effective USD/THB rate.
+                # CoinGecko free tier supports up to 365 days with monthly interval.
+                thb_prices = {}
+                usd_prices = {}
+                
+                # Get BTC/THB history (last 365 days max on free tier)
+                resp_thb = requests.get(
+                    'https://api.coingecko.com/api/v3/coins/bitcoin/market_chart',
+                    params={'vs_currency': 'thb', 'days': min(400, 365), 'interval': 'monthly'},
+                    timeout=30
+                )
+                resp_thb.raise_for_status()
+                for ts_ms, price in resp_thb.json().get('prices', []):
+                    m = date.fromtimestamp(ts_ms / 1000).strftime('%Y-%m')
+                    thb_prices[m] = float(price)
+
+                resp_usd = requests.get(
+                    'https://api.coingecko.com/api/v3/coins/bitcoin/market_chart',
+                    params={'vs_currency': 'usd', 'days': min(400, 365), 'interval': 'monthly'},
+                    timeout=30
+                )
+                resp_usd.raise_for_status()
+                for ts_ms, price in resp_usd.json().get('prices', []):
+                    m = date.fromtimestamp(ts_ms / 1000).strftime('%Y-%m')
+                    usd_prices[m] = float(price)
+
+                # Derive USD/THB = BTC/THB price / BTC/USD price
+                derived_set = set()
+                for m in set(thb_prices.keys()) & set(usd_prices.keys()):
+                    if usd_prices[m] > 0:
+                        rates[m] = thb_prices[m] / usd_prices[m]
+                        derived_set.add(m)
+
+                derived_count = len(derived_set)
+                print(f'[BITKUB] C7: Derived USD/THB rates for {derived_count} months from BTC price ratio')
+
+                # For months without derived rates, interpolate from nearest
+                if derived_set:
+                    derived_months = {m: rates[m] for m in derived_set}
+                    for m in rates:
+                        if m not in derived_set:
+                            # Find nearest derived month
+                            m_dt = date(int(m[:4]), int(m[5:7]), 1)
+                            nearest = min(derived_months.keys(),
+                                         key=lambda x: abs((date(int(x[:4]), int(x[5:7]), 1) - m_dt).days))
+                            rates[m] = derived_months[nearest]
+
+            except Exception as e:
+                print(f'[BITKUB] C7: Could not derive historical rates ({e}), using today\'s rate')
+
+        except Exception as e:
+            print(f'[BITKUB] C7: Rate fetch failed ({e}), using today\'s rate for all months')
+
+        return rates
+
     def _ohlcv_binance_vision(self, days: int) -> list:
         """Download BTCUSDT daily klines from Binance Vision.
 
         data.binance.vision serves static ZIP/CSV files - NOT geo-blocked
         unlike api.binance.com.  Prices are converted USDT -> THB.
+        C7: Uses historical USD/THB rates per month instead of today's rate.
         Binance Vision changed timestamp format in 2025:
           - <=2024: 13-digit millisecond timestamps
           - >=2025: 16-digit microsecond timestamps
@@ -149,8 +238,10 @@ class BitkubClient:
             else:
                 cur = cur.replace(month=cur.month + 1)
 
+        # C7: Fetch monthly USD/THB rates instead of single today's rate
+        monthly_rates = self._fetch_monthly_usd_thb_rates(months)
+
         base_url = 'https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1d'
-        rate = config.get_usd_thb_rate()
         seen = {}
 
         for m in months:
@@ -162,6 +253,8 @@ class BitkubClient:
                 resp.raise_for_status()
             except requests.HTTPError:
                 continue
+
+            rate = monthly_rates.get(m, config.get_usd_thb_rate())
 
             # Unzip CSV in memory
             zf = zipfile.ZipFile(io.BytesIO(resp.content))

@@ -73,7 +73,8 @@ def precompute_mvrv_percentile(df, window=365):
         w = mvrv[i - w_size:i]
         valid = w[~np.isnan(w)]
         if len(valid) > 10:
-            pct[i] = np.searchsorted(np.sort(valid), mvrv[i]) / len(valid)
+            # S1-sync: Use side='right' consistent with live strategy.py
+            pct[i] = np.searchsorted(np.sort(valid), mvrv[i], side='right') / len(valid)
     return pct
 
 

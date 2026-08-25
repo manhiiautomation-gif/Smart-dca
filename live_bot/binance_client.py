@@ -474,9 +474,12 @@ class BinanceClient:
         for fill in data.get('fills', []):
             if fill.get('commissionAsset') == 'USDT':
                 total_fee += float(fill.get('commission', 0))
+        # DI-3: Normalize to net-of-fee (consistent with Bitkub's 'recv' semantics).
+        # Binance cummulativeQuoteQty is gross; Bitkub recv is net.
+        net_proceeds = float(data['cummulativeQuoteQty']) - total_fee
         return {
             'executed_qty': float(data['executedQty']),
-            'cummulative_quote_qty': float(data['cummulativeQuoteQty']),
+            'cummulative_quote_qty': net_proceeds,
             'fee': total_fee,
             'status': data['status'],
         }

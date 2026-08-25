@@ -1,5 +1,6 @@
 '''Telegram notification sender.'''
 
+import math
 import requests
 import os
 
@@ -25,27 +26,45 @@ def send_telegram(message: str, token: str = '', chat_id: str = '') -> bool:
 def format_report(decision: dict, price: float, mvrv: float,
                   btc_balance: float, cash: float,
                   exchange_currency: str, is_dry_run: bool,
-                  monday_boost: float = 1.0) -> str:
-    """Format a human-readable trading report."""
+                  monday_boost: float = 1.0,
+                  actual_buy: float = 0.0,
+                  actual_sell: float = 0.0) -> str:
+    """Format a human-readable trading report.
+
+    DI-4: Shows actual exchange fill amounts when available.
+    DI-5: Shows 'N/A' instead of 'nan' for unavailable MVRV.
+    """
     prefix = '[DRY RUN] ' if is_dry_run else ''
     portfolio = btc_balance * price + cash
     boost_tag = f' (Mon x{monday_boost})' if monday_boost != 1.0 else ''
+
+    # DI-5: Guard MVRV NaN display
+    mvrv_display = f'{mvrv:.3f}' if not math.isnan(mvrv) else 'N/A'
+
     lines = [
         f'{prefix}<b>Phoenix v5.1 Daily Report</b>',
-        f'Price: {price:,.2f} {exchange_currency} | MVRV: {mvrv:.3f}',
+        f'Price: {price:,.2f} {exchange_currency} | MVRV: {mvrv_display}',
         f'Score: {decision["sell_score"]} | Path: {decision["path_taken"]}',
         f'Cooldown: {decision["new_cooldown"]}d | Bear: {decision["in_bear"]}',
         '',
     ]
     if decision['buy_amount'] > 0:
-        lines.append(f'BUY: {decision["buy_amount"]:,.2f} {exchange_currency}{boost_tag}')
+        line = f'BUY: {decision["buy_amount"]:,.2f} {exchange_currency}{boost_tag}'
+        # DI-4: Show actual fill if different from intended
+        if actual_buy > 0 and abs(actual_buy - decision['buy_amount']) > 0.01:
+            line += f' (actual: {actual_buy:,.2f})'
+        lines.append(line)
         if decision['reserve_injection'] > 0:
             lines.append(f'  (includes {decision["reserve_injection"]:,.2f} from reserve)')
     else:
         lines.append('BUY: none')
 
     if decision['sell_amount'] > 0:
-        lines.append(f'SELL: {decision["sell_amount"]:,.2f} {exchange_currency}')
+        line = f'SELL: {decision["sell_amount"]:,.2f} {exchange_currency}'
+        # DI-4: Show actual fill if different from intended
+        if actual_sell > 0 and abs(actual_sell - decision['sell_amount']) > 0.01:
+            line += f' (actual: {actual_sell:,.2f})'
+        lines.append(line)
     else:
         lines.append('SELL: none')
 
