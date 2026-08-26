@@ -1,0 +1,403 @@
+{
+  "timestamp": "2026-08-26T09:59:24.482307+00:00",
+  "score": 43.5,
+  "zone": {
+    "label": "Neutral",
+    "min": 40,
+    "max": 60,
+    "color": "#ffcc00"
+  },
+  "breakdown": {
+    "g1_onchain_valuation": {
+      "score": 0.0,
+      "weight": 0.3,
+      "label": "On-Chain Valuation",
+      "description": "MVRV, SOPR, NUPL, Exchange Reserve \u2014 valuation & holder behavior",
+      "indicators": {
+        "mvrv_z_score": {
+          "available": true,
+          "value": 1.481087,
+          "percentile": 0.5397,
+          "raw_score": -0.0795,
+          "weighted_score": -0.0079,
+          "inverted": true,
+          "source": "onchain",
+          "description": "MVRV Z-Score: market value vs realized value, normalized. High = overvalued.",
+          "evidence": "Grobys et al.; CryptoQuant; LookIntoBitcoin \u2014 top/bottom predictor"
+        },
+        "sopr": {
+          "available": false,
+          "value": null,
+          "percentile": null,
+          "raw_score": null,
+          "weighted_score": NaN,
+          "inverted": true,
+          "source": "external",
+          "description": "STH-SOPR: spent output profit ratio. >1 = selling at profit.",
+          "evidence": "BitcoinFoundation 2026; Glassnode \u2014 profit-taking detection"
+        },
+        "nupl": {
+          "available": true,
+          "value": 0.32482,
+          "percentile": 0.5397,
+          "raw_score": -0.0795,
+          "weighted_score": -0.0056,
+          "inverted": true,
+          "source": "derived",
+          "description": "NUPL: net unrealized profit/loss. Derived from MVRV.",
+          "evidence": "Correlated with MVRV (NUPL = 1 - 1/MVRV), cross-check validation"
+        },
+        "exchange_reserve": {
+          "available": true,
+          "value": 2720980.489755,
+          "percentile": 0.3562,
+          "raw_score": 0.2877,
+          "weighted_score": 0.0144,
+          "inverted": true,
+          "source": "onchain",
+          "description": "BTC Exchange Reserve: total BTC held on exchanges.",
+          "evidence": "On-chain supply pressure metric; rising = potential selling"
+        }
+      }
+    },
+    "g2_derivatives_sentiment": {
+      "score": -0.42,
+      "weight": 0.25,
+      "label": "Derivatives Sentiment",
+      "description": "Funding Rate, OI, Taker Ratio, Liquidations \u2014 leverage & futures positioning",
+      "indicators": {
+        "funding_rate": {
+          "available": true,
+          "value": 0.007539,
+          "percentile": 0.8959,
+          "raw_score": -0.7918,
+          "weighted_score": -0.0792,
+          "inverted": true,
+          "source": "onchain",
+          "description": "BTC Funding Rate (7d avg): cost of holding longs in futures.",
+          "evidence": "WhalePortal: 'funding rates are most powerful'; real-time leverage sentiment"
+        },
+        "taker_buy_sell_ratio": {
+          "available": true,
+          "value": 1.019744,
+          "percentile": 0.7808,
+          "raw_score": 0.5616,
+          "weighted_score": 0.0449,
+          "inverted": false,
+          "source": "onchain",
+          "description": "Taker Buy/Sell Ratio (7d avg): aggressive market buying vs selling.",
+          "evidence": "Spot market pressure indicator; high = buyers in control"
+        },
+        "liquidation_ratio": {
+          "available": true,
+          "value": 0.0,
+          "percentile": 0.0,
+          "raw_score": -1.0,
+          "weighted_score": -0.07,
+          "inverted": false,
+          "source": "derived",
+          "description": "Long/Short Liquidation Ratio: long liqs / (long + short liqs).",
+          "evidence": "Crowded positioning + cascade risk detection"
+        }
+      }
+    },
+    "g3_supply_flow": {
+      "score": -0.1,
+      "weight": 0.25,
+      "label": "Supply Flow",
+      "description": "Exchange Netflow, Stablecoin Reserve, Whale Ratio \u2014 supply/demand pressure",
+      "indicators": {
+        "exchange_netflow": {
+          "available": true,
+          "value": -9233.093013,
+          "percentile": 0.3096,
+          "raw_score": 0.3808,
+          "weighted_score": 0.0381,
+          "inverted": true,
+          "source": "onchain",
+          "description": "BTC Exchange Netflow (7d sum): inflow - outflow. Positive = selling pressure.",
+          "evidence": "Chi et al. (2024): exchange flow predicts BTC returns significantly"
+        },
+        "stablecoin_reserve": {
+          "available": true,
+          "value": -0.414921,
+          "percentile": 0.4548,
+          "raw_score": -0.0904,
+          "weighted_score": -0.0072,
+          "inverted": false,
+          "source": "onchain",
+          "description": "Stablecoin Exchange Reserve (7d change): proxy for incoming capital.",
+          "evidence": "BitcoinFoundation 2026: 'stablecoin supply growth = proxy for incoming capital'"
+        },
+        "whale_ratio": {
+          "available": true,
+          "value": 0.326248,
+          "percentile": 0.8959,
+          "raw_score": -0.7918,
+          "weighted_score": -0.0554,
+          "inverted": true,
+          "source": "onchain",
+          "description": "Exchange Whale Ratio (7d avg): top 10 inflows / total inflows.",
+          "evidence": "Whale activity \u2192 selling/buying pressure measurement"
+        }
+      }
+    },
+    "g4_technical_momentum": {
+      "score": null,
+      "weight": 0.2,
+      "label": "Technical Momentum",
+      "description": "RSI, MACD, Price vs SMA-200 \u2014 price trend & momentum",
+      "indicators": {
+        "rsi": {
+          "available": false,
+          "value": null,
+          "percentile": null,
+          "raw_score": null,
+          "weighted_score": NaN,
+          "inverted": false,
+          "source": "technical",
+          "description": "RSI-14: relative strength index.",
+          "evidence": "Classic momentum indicator; used in every quantitative framework"
+        },
+        "macd_hist": {
+          "available": false,
+          "value": null,
+          "percentile": null,
+          "raw_score": null,
+          "weighted_score": NaN,
+          "inverted": false,
+          "source": "technical",
+          "description": "MACD Histogram (7d MA trend): momentum direction and strength.",
+          "evidence": "Trend confirmation; widely used in quantitative strategies"
+        },
+        "price_vs_sma200": {
+          "available": false,
+          "value": null,
+          "percentile": null,
+          "raw_score": null,
+          "weighted_score": NaN,
+          "inverted": false,
+          "source": "technical",
+          "description": "Price vs SMA-200 ratio: regime detection (bull/bear).",
+          "evidence": "Long-term trend indicator; institutional standard for regime detection"
+        }
+      }
+    }
+  },
+  "indicators": {
+    "mvrv_z_score": {
+      "available": true,
+      "value": 1.481087,
+      "percentile": 0.5397,
+      "raw_score": -0.0795,
+      "weighted_score": -0.0079,
+      "inverted": true,
+      "source": "onchain",
+      "description": "MVRV Z-Score: market value vs realized value, normalized. High = overvalued.",
+      "evidence": "Grobys et al.; CryptoQuant; LookIntoBitcoin \u2014 top/bottom predictor"
+    },
+    "sopr": {
+      "available": false,
+      "value": null,
+      "percentile": null,
+      "raw_score": null,
+      "weighted_score": NaN,
+      "inverted": true,
+      "source": "external",
+      "description": "STH-SOPR: spent output profit ratio. >1 = selling at profit.",
+      "evidence": "BitcoinFoundation 2026; Glassnode \u2014 profit-taking detection"
+    },
+    "nupl": {
+      "available": true,
+      "value": 0.32482,
+      "percentile": 0.5397,
+      "raw_score": -0.0795,
+      "weighted_score": -0.0056,
+      "inverted": true,
+      "source": "derived",
+      "description": "NUPL: net unrealized profit/loss. Derived from MVRV.",
+      "evidence": "Correlated with MVRV (NUPL = 1 - 1/MVRV), cross-check validation"
+    },
+    "exchange_reserve": {
+      "available": true,
+      "value": 2720980.489755,
+      "percentile": 0.3562,
+      "raw_score": 0.2877,
+      "weighted_score": 0.0144,
+      "inverted": true,
+      "source": "onchain",
+      "description": "BTC Exchange Reserve: total BTC held on exchanges.",
+      "evidence": "On-chain supply pressure metric; rising = potential selling"
+    },
+    "funding_rate": {
+      "available": true,
+      "value": 0.007539,
+      "percentile": 0.8959,
+      "raw_score": -0.7918,
+      "weighted_score": -0.0792,
+      "inverted": true,
+      "source": "onchain",
+      "description": "BTC Funding Rate (7d avg): cost of holding longs in futures.",
+      "evidence": "WhalePortal: 'funding rates are most powerful'; real-time leverage sentiment"
+    },
+    "taker_buy_sell_ratio": {
+      "available": true,
+      "value": 1.019744,
+      "percentile": 0.7808,
+      "raw_score": 0.5616,
+      "weighted_score": 0.0449,
+      "inverted": false,
+      "source": "onchain",
+      "description": "Taker Buy/Sell Ratio (7d avg): aggressive market buying vs selling.",
+      "evidence": "Spot market pressure indicator; high = buyers in control"
+    },
+    "liquidation_ratio": {
+      "available": true,
+      "value": 0.0,
+      "percentile": 0.0,
+      "raw_score": -1.0,
+      "weighted_score": -0.07,
+      "inverted": false,
+      "source": "derived",
+      "description": "Long/Short Liquidation Ratio: long liqs / (long + short liqs).",
+      "evidence": "Crowded positioning + cascade risk detection"
+    },
+    "exchange_netflow": {
+      "available": true,
+      "value": -9233.093013,
+      "percentile": 0.3096,
+      "raw_score": 0.3808,
+      "weighted_score": 0.0381,
+      "inverted": true,
+      "source": "onchain",
+      "description": "BTC Exchange Netflow (7d sum): inflow - outflow. Positive = selling pressure.",
+      "evidence": "Chi et al. (2024): exchange flow predicts BTC returns significantly"
+    },
+    "stablecoin_reserve": {
+      "available": true,
+      "value": -0.414921,
+      "percentile": 0.4548,
+      "raw_score": -0.0904,
+      "weighted_score": -0.0072,
+      "inverted": false,
+      "source": "onchain",
+      "description": "Stablecoin Exchange Reserve (7d change): proxy for incoming capital.",
+      "evidence": "BitcoinFoundation 2026: 'stablecoin supply growth = proxy for incoming capital'"
+    },
+    "whale_ratio": {
+      "available": true,
+      "value": 0.326248,
+      "percentile": 0.8959,
+      "raw_score": -0.7918,
+      "weighted_score": -0.0554,
+      "inverted": true,
+      "source": "onchain",
+      "description": "Exchange Whale Ratio (7d avg): top 10 inflows / total inflows.",
+      "evidence": "Whale activity \u2192 selling/buying pressure measurement"
+    },
+    "rsi": {
+      "available": false,
+      "value": null,
+      "percentile": null,
+      "raw_score": null,
+      "weighted_score": NaN,
+      "inverted": false,
+      "source": "technical",
+      "description": "RSI-14: relative strength index.",
+      "evidence": "Classic momentum indicator; used in every quantitative framework"
+    },
+    "macd_hist": {
+      "available": false,
+      "value": null,
+      "percentile": null,
+      "raw_score": null,
+      "weighted_score": NaN,
+      "inverted": false,
+      "source": "technical",
+      "description": "MACD Histogram (7d MA trend): momentum direction and strength.",
+      "evidence": "Trend confirmation; widely used in quantitative strategies"
+    },
+    "price_vs_sma200": {
+      "available": false,
+      "value": null,
+      "percentile": null,
+      "raw_score": null,
+      "weighted_score": NaN,
+      "inverted": false,
+      "source": "technical",
+      "description": "Price vs SMA-200 ratio: regime detection (bull/bear).",
+      "evidence": "Long-term trend indicator; institutional standard for regime detection"
+    }
+  },
+  "trend_7d": [
+    57.5,
+    54.4,
+    50.1,
+    47.7,
+    54.8,
+    60.2,
+    43.7
+  ],
+  "trend_14d": [
+    40.2,
+    45.6,
+    45.1,
+    51.1,
+    50.0,
+    52.2,
+    55.4,
+    57.5,
+    54.4,
+    50.1,
+    47.7,
+    54.8,
+    60.2,
+    43.7
+  ],
+  "trend_30d": [
+    56.5,
+    52.1,
+    48.7,
+    54.1,
+    58.7,
+    51.9,
+    50.2,
+    48.8,
+    48.4,
+    53.1,
+    54.7,
+    51.8,
+    50.5,
+    52.5,
+    46.6,
+    40.2,
+    40.2,
+    45.6,
+    45.1,
+    51.1,
+    50.0,
+    52.2,
+    55.4,
+    57.5,
+    54.4,
+    50.1,
+    47.7,
+    54.8,
+    60.2,
+    43.7
+  ],
+  "meta": {
+    "total_indicators": 13,
+    "available_indicators": 9,
+    "missing_indicators": 4,
+    "percentile_window": 365,
+    "warnings": [
+      "sopr: external source, not available in Phase 1. Will use proxy or omit from score.",
+      "sopr: insufficient data (0 points, need 366)",
+      "rsi: insufficient data (0 points, need 366)",
+      "macd_hist: insufficient data (0 points, need 366)",
+      "price_vs_sma200: insufficient data (0 points, need 366)"
+    ],
+    "attribution": "On-chain data: Ercin Dedeoglu - Crypto Market Data (CC BY 4.0)"
+  }
+}

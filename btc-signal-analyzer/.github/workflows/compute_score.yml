@@ -1,0 +1,44 @@
+name: Compute Signal Score
+
+on:
+  schedule:
+    # Run daily at 06:00 UTC (13:00 THB) — after on-chain data updates
+    - cron: '0 6 * * *'
+  workflow_dispatch:  # Manual trigger
+
+permissions:
+  contents: write  # To commit signal_score.json
+
+jobs:
+  compute:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compute signal score
+        env:
+          SIGNAL_OUTPUT_DIR: ./output
+          SIGNAL_CACHE_DIR: ./cache
+        run: python -m src.signal_score
+
+      - name: Commit output
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add output/signal_score.json
+          # Only commit if file changed
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "score: update signal_score.json [skip ci]"
+            git push
+          fi

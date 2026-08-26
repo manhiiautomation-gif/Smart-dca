@@ -1,0 +1,8 @@
+# btc-signal-analyzer dependencies
+# Phase 1-2: No external dependencies (stdlib only for fetcher + scorer)
+# Phase 3 (backtest): uncomment below
+# pandas>=2.0
+# vectorbt>=0.26
+# numpy>=1.24
+# scipy>=1.10
+# scikit-learn>=1.3  # for Boruta feature selection

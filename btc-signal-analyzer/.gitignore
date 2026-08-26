@@ -1,0 +1,22 @@
+# Dependencies
+__pycache__/
+*.pyc
+
+# Cache (fetched data, rebuilt each run in CI)
+cache/
+
+# Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
