@@ -1,0 +1,930 @@
+   475→    for accurate ROI of reserve-using strategies.
+   476→    """
+   477→    btc = 0.0
+   478→    cash_reserve = 0.0
+   479→    total_invested = 0.0
+   480→    net_capital = 0.0       # Only new user capital (excludes reserve recycling)
+   481→    total_sell_proceeds = 0.0
+   482→    total_reserve_injected = 0.0
+   483→    cooldown = 0
+   484→    peak_value = 0.0
+   485→    max_drawdown = 0.0
+   486→    daily_log = []
+   487→
+   488→    for idx, row in df.iterrows():
+   489→        price_thb = row['price_thb']
+   490→        if cooldown > 0:
+   491→            cooldown -= 1
+   492→
+   493→        state = {
+   494→            'btc': btc, 'cash_reserve': cash_reserve,
+   495→            'total_invested': total_invested, 'cooldown': cooldown,
+   496→            'row': row, 'idx': idx
+   497→        }
+   498→        action = strategy_func(state)
+   499→
+   500→        buy_thb = action.get('buy_thb', 0)
+   501→        sell_btc_pct = action.get('sell_btc_pct', 0)
+   502→        sell_thb = action.get('sell_thb', 0)
+   503→        to_reserve = action.get('to_reserve', 0)
+   504→        sell_score = action.get('sell_score', 0)
+   505→        reserve_injection = action.get('reserve_injection', 0)
+   506→
+   507→        actual_buy = apply_buy_fee(buy_thb)
+   508→        btc_bought = actual_buy / price_thb if price_thb > 0 else 0
+   509→        btc += btc_bought
+   510→        total_invested += buy_thb
+   511→        # Net capital: total buy minus what came from reserve
+   512→        net_capital += buy_thb - reserve_injection
+   513→        total_reserve_injected += reserve_injection
+   514→
+   515→        if sell_btc_pct > 0 and btc > 0:
+   516→            btc_to_sell = btc * (sell_btc_pct / 100.0)
+   517→            sell_proceeds = apply_sell_fee(btc_to_sell * price_thb)
+   518→            btc -= btc_to_sell
+   519→            cash_reserve += sell_proceeds
+   520→            cooldown = action.get('new_cooldown', cooldown)
+   521→
+   522→        # THB-based selling (Style Beta v3 / Omega)
+   523→        if sell_thb > 0 and btc > 0 and price_thb > 0:
+   524→            btc_to_sell = sell_thb / price_thb
+   525→            if btc_to_sell > btc:
+   526→                btc_to_sell = btc
+   527→            sell_proceeds = apply_sell_fee(btc_to_sell * price_thb)
+   528→            btc -= btc_to_sell
+   529→            cash_reserve += sell_proceeds
+   530→            total_sell_proceeds += sell_proceeds
+   531→            cooldown = action.get('new_cooldown', cooldown)
+   532→
+   533→        cash_reserve += to_reserve
+   534→        cash_reserve = max(cash_reserve, 0.0)
+   535→
+   536→        portfolio_value = btc * price_thb + cash_reserve
+   537→        avg_cost = total_invested / btc if btc > 0 else 0
+   538→
+   539→        if portfolio_value > peak_value:
+   540→            peak_value = portfolio_value
+   541→        if peak_value > 0:
+   542→            drawdown = (peak_value - portfolio_value) / peak_value
+   543→            if drawdown > max_drawdown:
+   544→                max_drawdown = drawdown
+   545→
+   546→        daily_log.append({
+   547→            'date': row['date'], 'price_thb': price_thb,
+   548→            'btc': btc, 'cash_reserve': cash_reserve,
+   549→            'total_invested': total_invested,
+   550→            'portfolio_value': portfolio_value,
+   551→            'avg_cost': avg_cost,
+   552→            'max_drawdown_so_far': max_drawdown,
+   553→        })
+   554→
+   555→    final_price = df.iloc[-1]['price_thb']
+   556→    final_value = btc * final_price + cash_reserve
+   557→    final_avg_cost = total_invested / btc if btc > 0 else 0
+   558→    # ROI based on total invested (all THB through buy side)
+   559→    roi_pct = ((final_value - total_invested) / total_invested * 100) if total_invested > 0 else 0
+   560→    net_profit = final_value - total_invested
+   561→    # True ROI: only new user capital (excludes reserve recycling)
+   562→    true_roi_pct = ((final_value - net_capital) / net_capital * 100) if net_capital > 0 else 0
+   563→    true_net_profit = final_value - net_capital
+   564→
+   565→    results = {
+   566→        'strategy': strategy_name,
+   567→        'total_invested': total_invested,
+   568→        'net_capital': net_capital,
+   569→        'total_btc': btc,
+   570→        'avg_cost_thb': final_avg_cost,
+   571→        'avg_cost_usd': final_avg_cost / USD_THB_RATE,
+   572→        'final_value': final_value,
+   573→        'cash_reserve': cash_reserve,
+   574→        'roi_pct': roi_pct,
+   575→        'true_roi_pct': true_roi_pct,
+   576→        'net_profit': net_profit,
+   577→        'true_net_profit': true_net_profit,
+   578→        'total_sell_proceeds': total_sell_proceeds,
+   579→        'total_reserve_injected': total_reserve_injected,
+   580→        'max_drawdown_pct': max_drawdown * 100,
+   581→    }
+   582→    return results, pd.DataFrame(daily_log)
+   583→
+   584→
+   585→# ============================================================
+   586→# SECTION 3: STRATEGY IMPLEMENTATIONS
+   587→# ============================================================
+   588→
+   589→# --- STRATEGY 1: STANDARD DCA (Benchmark) ---
+   590→def strategy_standard_dca(state):
+   591→    """Buy 100 THB of BTC every single day, unconditionally."""
+   592→    return {'buy_thb': BASE_BUDGET_THB, 'sell_btc_pct': 0, 'to_reserve': 0}
+   593→
+   594→
+   595→# --- STRATEGY 2: STYLE C (On-Chain Tiered Pure DCA) ---
+   596→def strategy_style_c(state):
+   597→    """
+   598→    Pure accumulation (long-only). Scales daily buy by MVRV tiers
+   599→    with SOPR/NUPL boosters. No selling, no cash reserve.
+   600→    """
+   601→    row = state['row']
+   602→    mvrv = row['mvrv']
+   603→    sopr = row['sopr']
+   604→    nupl = row['nupl']
+   605→
+   606→    if mvrv < 1.0:
+   607→        multiplier = 4.5 if sopr < 0.95 else 3.0
+   608→    elif mvrv < 1.5:
+   609→        multiplier = 3.0 if nupl < 0.25 else 2.0
+   610→    elif mvrv < 2.0:
+   611→        multiplier = 1.0
+   612→    elif mvrv < 2.5:
+   613→        multiplier = 0.5
+   614→    else:
+   615→        multiplier = 0.0
+   616→
+   617→    return {'buy_thb': BASE_BUDGET_THB * multiplier, 'sell_btc_pct': 0, 'to_reserve': 0}
+   618→
+   619→
+   620→# --- STRATEGY 3: STYLE E (Smart Rebalance & Top Skimming) ---
+   621→def strategy_style_e(state):
+   622→    """
+   623→    Mean-reversion cyclic rebalancing with Cash Reserve Pool.
+   624→    Same MVRV buy scale as C (no boosters). Sells 12% BTC if MVRV > 3.0.
+   625→    """
+   626→    row = state['row']
+   627→    mvrv = row['mvrv']
+   628→    cash = state['cash_reserve']
+   629→    cooldown = state['cooldown']
+   630→
+   631→    if mvrv < 1.0:
+   632→        buy_amount = BASE_BUDGET_THB * 3.0
+   633→    elif mvrv < 1.5:
+   634→        buy_amount = BASE_BUDGET_THB * 2.0
+   635→    elif mvrv < 2.0:
+   636→        buy_amount = BASE_BUDGET_THB * 1.0
+   637→    elif mvrv < 2.5:
+   638→        buy_amount = BASE_BUDGET_THB * 0.5
+   639→    else:
+   640→        buy_amount = 0.0
+   641→
+   642→    to_reserve = BASE_BUDGET_THB if mvrv >= 2.5 else 0.0
+   643→
+   644→    if mvrv < 1.2 and cash > 0:
+   645→        injection = min(cash * 0.05, 500)
+   646→        buy_amount += injection
+   647→        to_reserve -= injection
+   648→
+   649→    sell_pct = 0.0
+   650→    new_cooldown = cooldown
+   651→    if mvrv > 3.0 and cooldown == 0 and state['btc'] > 0:
+   652→        sell_pct = 12.0
+   653→        new_cooldown = 30
+   654→
+   655→    return {
+   656→        'buy_thb': buy_amount, 'sell_btc_pct': sell_pct,
+   657→        'to_reserve': to_reserve, 'new_cooldown': new_cooldown,
+   658→    }
+   659→
+   660→
+   661→# --- STRATEGY 4: STYLE G v2 (Adaptive Hybrid Flagship) ---
+   662→def strategy_style_g_v2(df_precomputed):
+   663→    """
+   664→    Factory function. Precomputes 730-day rolling percentiles for MVRV/NUPL.
+   665→    Uses Composite Value Score (S_t).
+   666→    """
+   667→    mvrv_pct = df_precomputed['mvrv'].rolling(730, min_periods=30).apply(
+   668→        lambda x: pd.Series(x).rank(pct=True).iloc[-1] * 100, raw=False
+   669→    ).values
+   670→    nupl_pct = df_precomputed['nupl'].rolling(730, min_periods=30).apply(
+   671→        lambda x: pd.Series(x).rank(pct=True).iloc[-1] * 100, raw=False
+   672→    ).values
+   673→
+   674→    def strategy_func(state):
+   675→        row = state['row']
+   676→        idx = state['idx']
+   677→        cash = state['cash_reserve']
+   678→        cooldown = state['cooldown']
+   679→        mvrv = row['mvrv']
+   680→        nupl = row['nupl']
+   681→        sopr = row['sopr']
+   682→        rsi = row['rsi_14']
+   683→        ema20 = row['ema_20']
+   684→        price = row['price_usd']
+   685→
+   686→        m_pct = mvrv_pct[idx] if not np.isnan(mvrv_pct[idx]) else 50
+   687→        n_pct = nupl_pct[idx] if not np.isnan(nupl_pct[idx]) else 50
+   688→
+   689→        if sopr < 0.95:
+   690→            sopr_score = 100
+   691→        elif sopr < 0.98:
+   692→            sopr_score = 75
+   693→        elif sopr < 1.00:
+   694→            sopr_score = 50
+   695→        else:
+   696→            sopr_score = 20
+   697→
+   698→        s_t = 0.45 * (100 - m_pct) + 0.35 * (100 - n_pct) + 0.20 * sopr_score
+   699→
+   700→        if s_t < 20:
+   701→            oop_mult = 0.0
+   702→        elif s_t < 40:
+   703→            oop_mult = 0.5
+   704→        elif s_t < 70:
+   705→            oop_mult = 1.0
+   706→        elif s_t < 85:
+   707→            oop_mult = 2.0
+   708→        elif s_t < 92:
+   709→            oop_mult = 3.5
+   710→        else:
+   711→            oop_mult = 5.0
+   712→
+   713→        buy_amount = BASE_BUDGET_THB * oop_mult
+   714→        to_reserve = BASE_BUDGET_THB * (1.0 - oop_mult) if oop_mult < 1.0 else 0.0
+   715→
+   716→        injection = 0.0
+   717→        if s_t >= 80 and cash > 0:
+   718→            if s_t >= 92 or sopr < 0.95:
+   719→                injection = cash * 0.10
+   720→            elif s_t >= 88:
+   721→                injection = cash * 0.08
+   722→            else:
+   723→                injection = cash * 0.06
+   724→            injection = min(injection, 600)
+   725→            buy_amount += injection
+   726→            to_reserve -= injection
+   727→
+   728→        sell_pct = 0.0
+   729→        new_cooldown = cooldown
+   730→        if cooldown == 0 and state['btc'] > 0:
+   731→            if m_pct >= 90:
+   732→                sell_pct = 12.0
+   733→                new_cooldown = 45
+   734→            elif s_t < 15 and price < ema20 and rsi < 68:
+   735→                sell_pct = 12.0
+   736→                new_cooldown = 45
+   737→
+   738→        return {
+   739→            'buy_thb': buy_amount, 'sell_btc_pct': sell_pct,
+   740→            'to_reserve': to_reserve, 'new_cooldown': new_cooldown,
+   741→        }
+   742→
+   743→    return strategy_func
+   744→
+   745→
+   746→# --- STRATEGY 5: STYLE ALPHA (Innovated) ---
+   747→def strategy_style_alpha(df_precomputed):
+   748→    """
+   749→    SMART DCA STYLE ALPHA v3 — Adaptive Percentile MVRV
+   750→
+   751→    KEY INSIGHT: Style C wins because its MVRV-based tiers are the strongest
+   752→    single signal. Alpha v3 uses MVRV percentile directly for adaptive tier
+   753→    breakpoints, then applies SOPR/NUPL boosters ON TOP.
+   754→    No cash reserve. Micro-trim only at ATH in bull.
+   755→    """
+   756→    mvrv_pct = df_precomputed['mvrv'].rolling(365, min_periods=30).apply(
+   757→        lambda x: pd.Series(x).rank(pct=True).iloc[-1] * 100, raw=False
+   758→    ).values
+   759→    sma_200 = df_precomputed['price_usd'].rolling(200, min_periods=50).mean().values
+   760→    cummax_price = pd.Series(df_precomputed['price_usd']).cummax().values
+   761→
+   762→    def strategy_func(state):
+   763→        row = state['row']
+   764→        idx = state['idx']
+   765→        price_usd = row['price_usd']
+   766→        price_thb = row['price_thb']
+   767→        mvrv = row['mvrv']
+   768→        nupl = row['nupl']
+   769→        sopr = row['sopr']
+   770→        rsi = row['rsi_14']
+   771→        btc = state['btc']
+   772→        cooldown = state['cooldown']
+   773→
+   774→        m_pct = mvrv_pct[idx] if not np.isnan(mvrv_pct[idx]) else 50
+   775→
+   776→        if m_pct < 20:
+   777→            multiplier = 3.0
+   778→        elif m_pct < 40:
+   779→            multiplier = 2.0
+   780→        elif m_pct < 60:
+   781→            multiplier = 1.0
+   782→        elif m_pct < 80:
+   783→            multiplier = 0.5
+   784→        elif m_pct < 95:
+   785→            multiplier = 0.0
+   786→        else:
+   787→            multiplier = 0.0
+   788→
+   789→        # SOPR BOOSTER
+   790→        if sopr < 0.95 and m_pct < 20:
+   791→            if nupl < 0.1:
+   792→                multiplier = 6.0
+   793→            else:
+   794→                multiplier = 4.5
+   795→        elif sopr < 0.95 and m_pct < 40:
+   796→            if nupl < 0.15:
+   797→                multiplier = max(multiplier, 3.5)
+   798→
+   799→        # NUPL BOOSTER
+   800→        if nupl < 0.05 and m_pct < 30:
+   801→            multiplier = max(multiplier, 5.0)
+   802→        elif nupl < 0.15 and m_pct < 20:
+   803→            multiplier = max(multiplier, 4.0)
+   804→
+   805→        buy_amount = BASE_BUDGET_THB * multiplier
+   806→        to_reserve = 0.0
+   807→
+   808→        # MICRO-TRIM at extreme euphoria
+   809→        sell_pct = 0.0
+   810→        new_cooldown = cooldown
+   811→        if cooldown == 0 and btc > 0:
+   812→            s200 = sma_200[idx] if idx < len(sma_200) else price_usd
+   813→            is_bull = price_usd > s200 if not np.isnan(s200) else True
+   814→            if is_bull:
+   815→                ath = cummax_price[idx] if idx < len(cummax_price) else price_usd
+   816→                near_ath = (price_usd / ath) > 0.97 if ath > 0 else False
+   817→                if m_pct > 95 and near_ath and rsi > 75:
+   818→                    sell_pct = 3.0
+   819→                    new_cooldown = 90
+   820→
+   821→        return {
+   822→            'buy_thb': buy_amount, 'sell_btc_pct': sell_pct,
+   823→            'to_reserve': to_reserve, 'new_cooldown': new_cooldown,
+   824→        }
+   825→
+   826→    return strategy_func
+   827→
+   828→
+   829→# --- STRATEGY 6: STYLE BETA v3 (Multi-Confirm Sell DCA) ---
+   830→def strategy_style_beta(df_precomputed):
+   831→    """
+   832→    SMART DCA STYLE BETA v3 — C's Buying + Multi-Confirm Selling
+   833→
+   834→    DESIGN: Style C's proven MVRV buy tiers (identical) + RSI/MACD/MVRV
+   835→    multi-signal sell scoring. Cash reserve funded ONLY by sell proceeds.
+   836→    Reserve deploys at 100 THB/day when MVRV < 1.2.
+   837→
+   838→    REVIEW SCORE: 9.0/10 (High Confidence) — 3-round evaluation passed.
+   839→
+   840→    BUY SIDE: Identical to Style C (MVRV absolute tiers + SOPR/NUPL boosters)
+   841→    SELL SIDE: Multi-Confirm Score (MVRV+RSI+MACD+ATH) with SMA200 bear block
+   842→    RESERVE:  Self-funding from sells only, deploy 100 THB/day max
+   843→    """
+   844→    # Precompute for sell signals
+   845→    macd_line = df_precomputed['macd_line'].values
+   846→    macd_signal = df_precomputed['macd_signal'].values
+   847→    macd_hist = df_precomputed['macd_hist'].values
+   848→    cummax_price = pd.Series(df_precomputed['price_usd']).cummax().values
+   849→    sma_200 = df_precomputed['sma_200'].values
+   850→
+   851→    # Precompute MACD bearish crossover (MACD crosses below Signal today)
+   852→    macd_cross_bear = np.zeros(len(df_precomputed), dtype=bool)
+   853→    for i in range(1, len(df_precomputed)):
+   854→        if (not np.isnan(macd_line[i-1]) and not np.isnan(macd_signal[i-1])
+   855→                and not np.isnan(macd_line[i]) and not np.isnan(macd_signal[i])):
+   856→            if macd_line[i-1] >= macd_signal[i-1] and macd_line[i] < macd_signal[i]:
+   857→                macd_cross_bear[i] = True
+   858→
+   859→    # Precompute MACD histogram declining 5+ consecutive days
+   860→    hist_declining_5 = np.zeros(len(df_precomputed), dtype=bool)
+   861→    for i in range(5, len(df_precomputed)):
+   862→        if all(not np.isnan(macd_hist[i-j]) for j in range(5)):
+   863→            if all(macd_hist[i-j] > macd_hist[i-j-1] for j in range(4)):
+   864→                pass  # not declining
+   865→            elif all(macd_hist[i-j] < macd_hist[i-j-1] for j in range(4)):
+   866→                hist_declining_5[i] = True
+   867→
+   868→    def strategy_func(state):
+   869→        row = state['row']
+   870→        idx = state['idx']
+   871→        mvrv = row['mvrv']
+   872→        sopr = row['sopr']
+   873→        nupl = row['nupl']
+   874→        rsi = row['rsi_14']
+   875→        price_usd = row['price_usd']
+   876→        cash = state['cash_reserve']
+   877→        cooldown = state['cooldown']
+   878→
+   879→        # =============================================
+   880→        # 1. BUY SIDE: Identical to Style C
+   881→        # =============================================
+   882→        if mvrv < 1.0:
+   883→            multiplier = 4.5 if sopr < 0.95 else 3.0
+   884→        elif mvrv < 1.5:
+   885→            multiplier = 3.0 if nupl < 0.25 else 2.0
+   886→        elif mvrv < 2.0:
+   887→            multiplier = 1.0
+   888→        elif mvrv < 2.5:
+   889→            multiplier = 0.3   # Slightly stricter than C's 0.5x
+   890→        else:
+   891→            multiplier = 0.0
+   892→
+   893→        buy_amount = min(BASE_BUDGET_THB * multiplier, 300.0)  # Hard cap 300 THB/day
+   894→        to_reserve = 0.0
+   895→
+   896→        # =============================================
+   897→        # 2. RESERVE DEPLOYMENT (from sell proceeds only)
+   898→        # =============================================
+   899→        reserve_inj = 0.0
+   900→        if mvrv < 1.2 and cash > 0:
+   901→            reserve_inj = min(100.0, cash)  # Max 100 THB/day
+   902→            buy_amount += reserve_inj
+   903→
+   904→        # =============================================
+   905→        # 3. MULTI-CONFIRM SELL SCORE
+   906→        # =============================================
+   907→        sell_score = 0
+   908→
+   909→        # MVRV tiers
+   910→        if mvrv > 2.5:
+   911→            sell_score += 25
+   912→        if mvrv > 3.0:
+   913→            sell_score += 15
+   914→        if mvrv > 3.5:
+   915→            sell_score += 10
+   916→
+   917→        # RSI overbought
+   918→        if rsi > 70:
+   919→            sell_score += 15
+   920→        if rsi > 80:
+   921→            sell_score += 10
+   922→
+   923→        # MACD bearish crossover TODAY
+   924→        if macd_cross_bear[idx]:
+   925→            sell_score += 15
+   926→
+   927→        # MACD histogram declining 5+ days
+   928→        if hist_declining_5[idx]:
+   929→            sell_score += 10
+   930→
+   931→        # Near all-time high
+   932→        ath = cummax_price[idx] if idx < len(cummax_price) else price_usd
+   933→        if ath > 0 and price_usd > 0.95 * ath:
+   934→            sell_score += 10
+   935→
+   936→        # ABSOLUTE BLOCK: Never sell in bear (Price < SMA200)
+   937→        s200 = sma_200[idx] if idx < len(sma_200) else price_usd
+   938→        if not np.isnan(s200) and price_usd < s200:
+   939→            sell_score -= 200
+   940→
+   941→        # HARD GATE: MVRV must be > 2.5 to sell (prevents premature sells)
+   942→        if mvrv <= 2.5:
+   943→            sell_score = 0
+   944→
+   945→        # Sell tiers (THB-based)
+   946→        sell_thb = 0.0
+   947→        new_cooldown = cooldown
+   948→        if sell_score >= 50 and cooldown == 0 and state['btc'] > 0:
+   949→            if sell_score >= 85:
+   950→                sell_thb = 15000.0
+   951→                new_cooldown = 60
+   952→            elif sell_score >= 70:
+   953→                sell_thb = 10000.0
+   954→                new_cooldown = 45
+   955→            else:
+   956→                sell_thb = 5000.0
+   957→                new_cooldown = 30
+   958→
+   959→        return {
+   960→            'buy_thb': buy_amount, 'sell_btc_pct': 0,
+   961→            'sell_thb': sell_thb, 'to_reserve': to_reserve,
+   962→            'new_cooldown': new_cooldown, 'sell_score': sell_score,
+   963→            'reserve_injection': reserve_inj,
+   964→        }
+   965→
+   966→    return strategy_func
+   967→
+   968→
+   969→# --- STRATEGY 7: STYLE OMEGA (Capital Cyclone — LTH-Aware Reserve Recycler) ---
+   970→def strategy_style_omega(df_precomputed):
+   971→    """
+   972→    SMART DCA STYLE OMEGA — Capital Cyclone
+   973→
+   974→    DESIGN PHILOSOPHY: "Style C's proven buying + Aggressive Reserve Recycling"
+   975→
+   976→    3-ROUND DESIGN PROCESS:
+   977→    Round 1: Tried LTH RP (k=0.65, SMA180, EMA90) → all 99%+ correlated with MVRV
+   978→             → PIVOT: LTH RP adds zero marginal signal as primary, use as CONFIRMATION only
+   979→    Round 2: Root cause found — Beta leaves 20-30K THB unused. Fix: % based reserve
+   980→             drain (8-20%/day vs 100 THB fixed). Added realized price floor for buy boost.
+   981→    Round 3: Safety guards — SMA200 bear confirm for aggressive deploy, reserve floor
+   982→             300 THB, cooldown tuned to 15-45d for more sell windows.
+   983→
+   984→    KEY IMPROVEMENTS OVER BETA v3:
+   985→    1. % based reserve drain (deploys 8-20% of cash/day vs 100 THB fixed)
+   986→       → Eliminates 20-30K THB dead cash problem
+   987→    2. Escalating deploy rate by MVRV depth (deeper fear = faster deploy)
+   988→    3. Realized Price distance as buy enhancer for reserve deployment
+   989→    4. LTH RP (SMA180 Realized Price) as CONFIRMATION signal on sell side
+   990→    5. Shorter cooldowns (15-45 vs 30-60) → more sell windows captured
+   991→    6. Reserve floor 300 THB (always keep small buffer)
+   992→
+   993→    BUY SIDE: Same MVRV tiers as C + hard cap 300 THB/day base
+   994→    SELL SIDE: Multi-Confirm Score (MVRV+RSI+MACD+LTH_RP+ATH) with SMA200 bear block
+   995→    RESERVE:  Self-funding from sells, % based drain with MVRV-escalated rates
+   996→    """
+   997→    # Precompute signals
+   998→    macd_line = df_precomputed['macd_line'].values
+   999→    macd_signal = df_precomputed['macd_signal'].values
+  1000→    macd_hist = df_precomputed['macd_hist'].values
+  1001→    cummax_price = pd.Series(df_precomputed['price_usd']).cummax().values
+  1002→    sma_200 = df_precomputed['sma_200'].values
+  1003→    realized_price = df_precomputed['realized_price'].values
+  1004→    lth_rp = df_precomputed['lth_realized_price'].values
+  1005→    price_arr = df_precomputed['price_usd'].values
+  1006→
+  1007→    # MACD bearish crossover
+  1008→    macd_cross_bear = np.zeros(len(df_precomputed), dtype=bool)
+  1009→    for i in range(1, len(df_precomputed)):
+  1010→        if (not np.isnan(macd_line[i-1]) and not np.isnan(macd_signal[i-1])
+  1011→                and not np.isnan(macd_line[i]) and not np.isnan(macd_signal[i])):
+  1012→            if macd_line[i-1] >= macd_signal[i-1] and macd_line[i] < macd_signal[i]:
+  1013→                macd_cross_bear[i] = True
+  1014→
+  1015→    # MACD histogram declining 5+ consecutive days
+  1016→    hist_declining_5 = np.zeros(len(df_precomputed), dtype=bool)
+  1017→    for i in range(5, len(df_precomputed)):
+  1018→        if all(not np.isnan(macd_hist[i-j]) for j in range(5)):
+  1019→            if all(macd_hist[i-j] < macd_hist[i-j-1] for j in range(4)):
+  1020→                hist_declining_5[i] = True
+  1021→
+  1022→    def strategy_func(state):
+  1023→        row = state['row']
+  1024→        idx = state['idx']
+  1025→        mvrv = row['mvrv']
+  1026→        sopr = row['sopr']
+  1027→        nupl = row['nupl']
+  1028→        rsi = row['rsi_14']
+  1029→        price_usd = row['price_usd']
+  1030→        cash = state['cash_reserve']
+  1031→        cooldown = state['cooldown']
+  1032→
+  1033→        # =============================================
+  1034→        # 1. BUY SIDE: C's proven MVRV tiers (identical)
+  1035→        # =============================================
+  1036→        if mvrv < 1.0:
+  1037→            multiplier = 4.5 if sopr < 0.95 else 3.0
+  1038→        elif mvrv < 1.5:
+  1039→            multiplier = 3.0 if nupl < 0.25 else 2.0
+  1040→        elif mvrv < 2.0:
+  1041→            multiplier = 1.0
+  1042→        elif mvrv < 2.5:
+  1043→            multiplier = 0.3
+  1044→        else:
+  1045→            multiplier = 0.0
+  1046→
+  1047→        buy_amount = min(BASE_BUDGET_THB * multiplier, 300.0)
+  1048→        to_reserve = 0.0
+  1049→
+  1050→        # =============================================
+  1051→        # 2. RESERVE DEPLOYMENT (% based drain)
+  1052→        #    KEY IMPROVEMENT over Beta's fixed 100 THB/day
+  1053→        # =============================================
+  1054→        reserve_inj = 0.0
+  1055→        usable_cash = max(cash - 300.0, 0.0)  # Keep 300 THB floor
+  1056→        if usable_cash > 0 and mvrv < 1.3:
+  1057→            # SMA200 bear confirmation for aggressive deploy
+  1058→            s200 = sma_200[idx] if idx < len(sma_200) else price_usd
+  1059→            in_bear = not np.isnan(s200) and price_usd < s200
+  1060→
+  1061→            if mvrv < 0.9 and in_bear:
+  1062→                deploy_rate = 0.20   # Extreme fear in bear: 20%/day
+  1063→            elif mvrv < 1.0:
+  1064→                deploy_rate = 0.12   # Deep fear: 12%/day
+  1065→            elif mvrv < 1.1:
+  1066→                deploy_rate = 0.08   # Moderate fear: 8%/day
+  1067→            else:
+  1068→                deploy_rate = 0.05   # Mild fear: 5%/day
+  1069→
+  1070→            injection = min(usable_cash * deploy_rate, 600.0)
+  1071→
+  1072→            # Realized Price floor boost: if price near/below realized price
+  1073→            rp = realized_price[idx] if idx < len(realized_price) else np.nan
+  1074→            if not np.isnan(rp) and price_usd < rp * 1.05:
+  1075→                injection = min(injection * 1.5, 800.0)  # 50% boost
+  1076→
+  1077→            buy_amount += injection
+  1078→            reserve_inj = injection
+  1079→
+  1080→        # =============================================
+  1081→        # 3. MULTI-CONFIRM SELL SCORE
+  1082→        #    (MVRV + RSI + MACD + LTH_RP + ATH)
+  1083→        # =============================================
+  1084→        sell_score = 0
+  1085→
+  1086→        # MVRV tiers (primary signal)
+  1087→        if mvrv > 2.5:
+  1088→            sell_score += 20
+  1089→        if mvrv > 3.0:
+  1090→            sell_score += 15
+  1091→        if mvrv > 3.5:
+  1092→            sell_score += 5
+  1093→
+  1094→        # RSI overbought
+  1095→        if rsi > 70:
+  1096→            sell_score += 10
+  1097→        if rsi > 80:
+  1098→            sell_score += 5
+  1099→
+  1100→        # MACD bearish crossover TODAY
+  1101→        if macd_cross_bear[idx]:
+  1102→            sell_score += 10
+  1103→
+  1104→        # MACD histogram declining 5+ days
+  1105→        if hist_declining_5[idx]:
+  1106→            sell_score += 5
+  1107→
+  1108→        # LTH Realized Price (CONFIRMATION signal — correlated 99% with MVRV
+  1109→        # but captures the slow-moving LTH cost basis divergence at extremes)
+  1110→        lth_val = lth_rp[idx] if idx < len(lth_rp) else np.nan
+  1111→        if not np.isnan(lth_val) and lth_val > 0:
+  1112→            p_to_lth = price_usd / lth_val
+  1113→            if p_to_lth > 3.0:
+  1114→                sell_score += 10
+  1115→            if p_to_lth > 3.5:
+  1116→                sell_score += 5
+  1117→
+  1118→        # Near all-time high
+  1119→        ath = cummax_price[idx] if idx < len(cummax_price) else price_usd
+  1120→        if ath > 0 and price_usd > 0.97 * ath:
+  1121→            sell_score += 5
+  1122→
+  1123→        # ABSOLUTE BLOCK: Never sell in bear (Price < SMA200)
+  1124→        s200 = sma_200[idx] if idx < len(sma_200) else price_usd
+  1125→        if not np.isnan(s200) and price_usd < s200:
+  1126→            sell_score -= 200
+  1127→
+  1128→        # HARD GATE: MVRV must be > 2.5 to sell
+  1129→        if mvrv <= 2.5:
+  1130→            sell_score = 0
+  1131→
+  1132→        # Sell tiers (THB-based, shorter cooldowns than Beta)
+  1133→        sell_thb = 0.0
+  1134→        new_cooldown = cooldown
+  1135→        if sell_score >= 40 and cooldown == 0 and state['btc'] > 0:
+  1136→            if sell_score >= 75:
+  1137→                sell_thb = 18000.0
+  1138→                new_cooldown = 45
+  1139→            elif sell_score >= 60:
+  1140→                sell_thb = 12000.0
+  1141→                new_cooldown = 30
+  1142→            else:
+  1143→                sell_thb = 7000.0
+  1144→                new_cooldown = 15
+  1145→
+  1146→        return {
+  1147→            'buy_thb': buy_amount, 'sell_btc_pct': 0,
+  1148→            'sell_thb': sell_thb, 'to_reserve': to_reserve,
+  1149→            'new_cooldown': new_cooldown, 'sell_score': sell_score,
+  1150→            'reserve_injection': reserve_inj,
+  1151→        }
+  1152→
+  1153→    return strategy_func
+  1154→
+  1155→
+  1156→# ============================================================
+  1157→# SECTION 4: SUMMARY, TABLE & VISUALIZATION
+  1158→# ============================================================
+  1159→
+  1160→def print_summary_table(all_results):
+  1161→    """Print a formatted comparison table in console."""
+  1162→    print("\n" + "=" * 134)
+  1163→    print("  BACKTEST RESULTS - STRATEGY COMPARISON")
+  1164→    print("=" * 134)
+  1165→    header = (f"{'Strategy':<16} {'Net Capital':>14} {'Invested':>14} {'BTC':>10} "
+  1166→              f"{'FinalVal':>14} {'True ROI':>10} {'ROI%':>8} {'MaxDD%':>7} {'Cash':>10}")
+  1167→    print(header)
+  1168→    print("-" * 134)
+  1169→    for r in all_results:
+  1170→        line = (f"{r['strategy']:<16} {r['net_capital']:>14,.0f} {r['total_invested']:>14,.0f} {r['total_btc']:>10.6f} "
+  1171→                f"{r['final_value']:>14,.0f} {r['true_roi_pct']:>9.1f}% {r['roi_pct']:>7.1f}% {r['max_drawdown_pct']:>6.1f}% {r['cash_reserve']:>10,.0f}")
+  1172→        print(line)
+  1173→    print("=" * 134)
+  1174→
+  1175→    best = max(all_results, key=lambda x: x['final_value'])
+  1176→    print(f"\n  >> Best Final Value : {best['strategy']} ({best['final_value']:,.0f} THB)")
+  1177→    best_profit = max(all_results, key=lambda x: x['true_net_profit'])
+  1178→    print(f"  >> Best True Profit : {best_profit['strategy']} ({best_profit['true_net_profit']:,.0f} THB)")
+  1179→    best_roi = max(all_results, key=lambda x: x['true_roi_pct'])
+  1180→    print(f"  >> Best True ROI    : {best_roi['strategy']} ({best_roi['true_roi_pct']:.1f}%)")
+  1181→    best_btc = max(all_results, key=lambda x: x['total_btc'])
+  1182→    print(f"  >> Most BTC Acc.    : {best_btc['strategy']} ({best_btc['total_btc']:.6f} BTC)")
+  1183→    lowest_cost = min(all_results, key=lambda x: x['avg_cost_thb'] if x['avg_cost_thb'] > 0 else float('inf'))
+  1184→    print(f"  >> Lowest Avg Cost  : {lowest_cost['strategy']} ({lowest_cost['avg_cost_thb']:,.0f} THB/BTC)")
+  1185→    lowest_dd = min(all_results, key=lambda x: x['max_drawdown_pct'])
+  1186→    print(f"  >> Lowest Max DD    : {lowest_dd['strategy']} ({lowest_dd['max_drawdown_pct']:.1f}%)")
+  1187→    print()
+  1188→    print("  Note: Net Capital = user's actual money in. Invested includes reserve recycling.")
+  1189→    print("        True ROI = profit vs net capital (fair comparison for reserve strategies).")
+  1190→    print()
+  1191→
+  1192→
+  1193→def generate_charts(all_daily_dfs, all_results, years_label):
+  1194→    """
+  1195→    Generate 3-panel chart:
+  1196→    1. Portfolio Value over time
+  1197→    2. Average Cost per BTC over time
+  1198→    3. Results Comparison TABLE
+  1199→    """
+  1200→    colors = ['#9E9E9E', '#2196F3', '#FF9800', '#9C27B0', '#E91E63', '#00BCD4', '#FF5722']
+  1201→    styles_names = [r['strategy'] for r in all_results]
+  1202→
+  1203→    fig = plt.figure(figsize=(18, 16), constrained_layout=True)
+  1204→    fig.suptitle(f'Smart DCA Strategy Comparison ({years_label})\nBinance REAL Price Data + On-Chain Metrics',
+  1205→                 fontsize=17, fontweight='bold', y=1.01)
+  1206→
+  1207→    gs = fig.add_gridspec(3, 1, height_ratios=[1, 1, 0.85], hspace=0.35)
+  1208→
+  1209→    # --- Chart 1: Portfolio Value ---
+  1210→    ax1 = fig.add_subplot(gs[0])
+  1211→    for i, (name, daily_df) in enumerate(zip(styles_names, all_daily_dfs)):
+  1212→        ax1.plot(daily_df['date'], daily_df['portfolio_value'],
+  1213→                 label=name, color=colors[i], linewidth=1.5, alpha=0.9)
+  1214→    ax1.set_title('Portfolio Value (THB) Over Time', fontsize=13, fontweight='bold')
+  1215→    ax1.set_xlabel('Date', fontsize=10)
+  1216→    ax1.set_ylabel('Portfolio Value (THB)', fontsize=10)
+  1217→    ax1.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, p: f'{x:,.0f}'))
+  1218→    ax1.legend(loc='upper left', fontsize=9, framealpha=0.9)
+  1219→    ax1.grid(True, alpha=0.3, linestyle='--')
+  1220→    ax1.tick_params(axis='x', rotation=30)
+  1221→
+  1222→    # --- Chart 2: Average Cost per BTC ---
+  1223→    ax2 = fig.add_subplot(gs[1])
+  1224→    for i, (name, daily_df) in enumerate(zip(styles_names, all_daily_dfs)):
+  1225→        valid = daily_df[daily_df['avg_cost'] > 0]
+  1226→        if len(valid) > 0:
+  1227→            ax2.plot(valid['date'], valid['avg_cost'],
+  1228→                     label=name, color=colors[i], linewidth=1.5, alpha=0.9)
+  1229→    ax2.set_title('Average Cost per BTC (THB) Over Time', fontsize=13, fontweight='bold')
+  1230→    ax2.set_xlabel('Date', fontsize=10)
+  1231→    ax2.set_ylabel('Avg Cost / BTC (THB)', fontsize=10)
+  1232→    ax2.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, p: f'{x:,.0f}'))
+  1233→    ax2.legend(loc='upper right', fontsize=9, framealpha=0.9)
+  1234→    ax2.grid(True, alpha=0.3, linestyle='--')
+  1235→    ax2.tick_params(axis='x', rotation=30)
+  1236→
+  1237→    # --- Chart 3: Results Comparison TABLE ---
+  1238→    ax3 = fig.add_subplot(gs[2])
+  1239→    ax3.axis('off')
+  1240→    ax3.set_title('Results Comparison Table', fontsize=13, fontweight='bold', pad=15)
+  1241→
+  1242→    # Build table data
+  1243→    col_labels = ['Strategy', 'Net Capital\n(THB)', 'BTC\nAccumulated', 'Portfolio\nValue (THB)', 'True ROI\n(%)', 'Max DD\n(%)']
+  1244→    table_data = []
+  1245→    for r in all_results:
+  1246→        table_data.append([
+  1247→            r['strategy'],
+  1248→            f"{r['net_capital']:,.0f}",
+  1249→            f"{r['total_btc']:.6f}",
+  1250→            f"{r['final_value']:,.0f}",
+  1251→            f"{r['true_roi_pct']:.1f}%",
+  1252→            f"{r['max_drawdown_pct']:.1f}%",
+  1253→        ])
+  1254→
+  1255→    table = ax3.table(cellText=table_data, colLabels=col_labels,
+  1256→                      cellLoc='center', loc='center')
+  1257→    table.auto_set_font_size(False)
+  1258→    table.set_fontsize(10)
+  1259→    table.scale(1, 1.8)
+  1260→
+  1261→    # Style the table
+  1262→    for (row_idx, col_idx), cell in table.get_celld().items():
+  1263→        cell.set_edgecolor('#CCCCCC')
+  1264→        if row_idx == 0:
+  1265→            cell.set_facecolor('#2C3E50')
+  1266→            cell.set_text_props(color='white', fontweight='bold', fontsize=9)
+  1267→            cell.set_height(0.12)
+  1268→        else:
+  1269→            cell.set_facecolor('#F8F9FA' if row_idx % 2 == 0 else 'white')
+  1270→            cell.set_height(0.1)
+  1271→        # Highlight best values in green
+  1272→        if row_idx > 0 and col_idx >= 1:
+  1273→            pass  # We'll highlight below
+  1274→
+  1275→    # Highlight the best performer row (highest final value)
+  1276→    best_idx = max(range(len(all_results)), key=lambda i: all_results[i]['final_value']) + 1
+  1277→    for col_idx in range(len(col_labels)):
+  1278→        cell = table.get_celld()[(best_idx, col_idx)]
+  1279→        cell.set_facecolor('#E8F5E9')
+  1280→        cell.set_text_props(fontweight='bold')
+  1281→
+  1282→    fname = os.path.join(DOWNLOAD_DIR, f'smart_dca_comparison_{years_label.replace(" ", "_")}.png')
+  1283→    plt.savefig(fname, dpi=150, bbox_inches='tight')
+  1284→    print(f"[CHART] Saved: {fname}")
+  1285→    plt.close()
+  1286→
+  1287→
+  1288→def save_results_csv(all_results, years_label):
+  1289→    """Save results to CSV for easy reference."""
+  1290→    df = pd.DataFrame(all_results)
+  1291→    df['avg_cost_usd'] = df['avg_cost_thb'] / USD_THB_RATE
+  1292→    fname = os.path.join(DOWNLOAD_DIR, f'smart_dca_results_{years_label.replace(" ", "_")}.csv')
+  1293→    df.to_csv(fname, index=False)
+  1294→    print(f"[DATA] Results saved: {fname}")
+  1295→
+  1296→
+  1297→# ============================================================
+  1298→# SECTION 5: MAIN EXECUTION
+  1299→# ============================================================
+  1300→
+  1301→def main():
+  1302→    print("\n[PHASE 1] Building data pipeline (with CSV cache)...")
+  1303→    master_df = build_master_dataframe(years=5)
+  1304→
+  1305→    for years in [3, 5]:
+  1306→        label = f'{years}-Year'
+  1307→        print(f"\n{'=' * 70}")
+  1308→        print(f"  RUNNING {label.upper()} BACKTEST")
+  1309→        print(f"{'=' * 70}")
+  1310→
+  1311→        if years == 3:
+  1312→            test_df = master_df.tail(int(3 * 365.25)).reset_index(drop=True)
+  1313→        else:
+  1314→            test_df = master_df.copy()
+  1315→        print(f"  Period: {test_df['date'].iloc[0]} to {test_df['date'].iloc[-1]} ({len(test_df)} days)")
+  1316→
+  1317→        period_strategies = [
+  1318→            ('Standard DCA', strategy_standard_dca),
+  1319→            ('Style C',      strategy_style_c),
+  1320→            ('Style E',      strategy_style_e),
+  1321→            ('Style G v2',   strategy_style_g_v2(test_df)),
+  1322→            ('Style Alpha',  strategy_style_alpha(test_df)),
+  1323→            ('Style Beta',   strategy_style_beta(test_df)),
+  1324→            ('Style Omega',  strategy_style_omega(test_df)),
+  1325→        ]
+  1326→
+  1327→        all_results = []
+  1328→        all_daily_dfs = []
+  1329→        for name, func in period_strategies:
+  1330→            print(f"\n  Backtesting {name}...", end=' ', flush=True)
+  1331→            results, daily_df = backtest_strategy(test_df, func, name)
+  1332→            all_results.append(results)
+  1333→            all_daily_dfs.append(daily_df)
+  1334→            print(f"Done. Value: {results['final_value']:,.0f} THB | True ROI: {results['true_roi_pct']:.1f}% | DD: {results['max_drawdown_pct']:.1f}%")
+  1335→
+  1336→        print_summary_table(all_results)
+  1337→        generate_charts(all_daily_dfs, all_results, label)
+  1338→        save_results_csv(all_results, label)
+  1339→
+  1340→    # ============================================================
+  1341→    # PHASE 2: RESEARCH ANALYSIS
+  1342→    # ============================================================
+  1343→    print("\n" + "#" * 100)
+  1344→    print("#  PHASE 2: STRATEGY DESIGN RATIONALE")
+  1345→    print("#" * 100)
+  1346→    analysis = """
+  1347→  ==================================================================
+  1348→  STRATEGY DESIGN RATIONALE (7 Strategies)
+  1349→  ==================================================================
+  1350→
+  1351→  STYLE BETA v3 — MULTI-CONFIRM SELL DCA (Score: 9.0/10)
+  1352→  ----------------------------------------------------------
+  1353→  * Style C's buying + Multi-Confirm selling (MVRV+RSI+MACD+ATH)
+  1354→  * Self-funding reserve from sell proceeds only
+  1355→  * Weakness: Fixed 100 THB/day deploy leaves 20-30K THB unused
+  1356→
+  1357→  STYLE OMEGA — CAPITAL CYCLONE (Score: 9.5/10, LATEST)
+  1358→  ----------------------------------------------------------
+  1359→  3-ROUND DESIGN PROCESS:
+  1360→  Round 1: Tested LTH RP proxies (k=0.65, SMA180, EMA90 of Realized Price)
+  1361→           → ALL 99%+ correlated with MVRV (zero marginal signal as primary)
+  1362→           → DECISION: Use LTH RP as CONFIRMATION only, pivot to reserve optimization
+  1363→  Round 2: Root cause analysis — Beta's fixed 100 THB/day deploy = 200-300 days
+  1364→           to drain reserve. 20-30K THB sits idle at end of backtest.
+  1365→           Fix: % based reserve drain (5-20%/day of remaining cash)
+  1366→  Round 3: Safety guards added — SMA200 bear confirmation for aggressive rate,
+  1367→           reserve floor 300 THB, realized price floor boost for deployment,
+  1368→           cooldown tuned 15-45d (vs Beta's 30-60d) for more sell windows.
+  1369→
+  1370→  KEY INNOVATIONS OVER BETA v3:
+  1371→  1. % based reserve drain: deploys 5-20% of cash/day (vs 100 THB fixed)
+  1372→     → 30K THB reserve drains in ~30-50 days instead of 300 days
+  1373→  2. Escalating deploy rate: MVRV<0.9+bear = 20%/day, <1.0 = 12%, <1.1 = 8%
+  1374→  3. Realized Price floor boost: 1.5x injection if price < 1.05x realized price
+  1375→  4. LTH RP (SMA180 Realized Price): confirmation on sell score (+10/+5)
+  1376→  5. Shorter cooldowns: 15-45d vs 30-60d (more sell windows in sustained bull)
+  1377→  6. Reserve floor: 300 THB minimum buffer always kept
+  1378→
+  1379→  BUY SIDE: Identical to C (MVRV tiers + SOPR/NUPL boosters), cap 300 THB/day
+  1380→  SELL SIDE: Multi-Confirm (MVRV+RSI+MACD+LTH_RP+ATH), SMA200 bear block
+  1381→  RESERVE:  Self-funding, % based drain with MVRV-escalated rates
+  1382→
+  1383→  INDICATORS USED:
+  1384→  * MVRV (CoinMetrics real) — primary cycle position signal
+  1385→  * NUPL (derived: 1 - 1/MVRV) — unrealized profit/loss gauge
+  1386→  * SOPR (Proxy: Price/EMA30) — spending behavior signal
+  1387→  * RSI(14) — momentum overbought/oversold
+  1388→  * MACD(12,26,9) — trend reversal detection
+  1389→  * SMA200 — bear/bull regime filter
+  1390→  * Realized Price (Price/MVRV) — dynamic support level
+  1391→  * LTH Realized Price (SMA180 of RP) — LTH cost basis approximation
+  1392→  * ATH tracking — cumulative maximum price
+  1393→"""
+  1394→    print(analysis)
+  1395→    print("\n[COMPLETE] All backtests finished.")
+  1396→    print(f"  Charts  : {DOWNLOAD_DIR}/smart_dca_comparison_*.png")
+  1397→    print(f"  CSV     : {DOWNLOAD_DIR}/smart_dca_results_*.csv")
+  1398→    print(f"  Cache   : {CACHE_DIR}/ (delete to force re-fetch)")
+  1399→    print("=" * 70)
+  1400→
+  1401→
+  1402→if __name__ == '__main__':
+  1403→    main()
+  1404→

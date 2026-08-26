@@ -1,0 +1,616 @@
+     1→#!/usr/bin/env python3
+     2→"""
+     3→Phoenix Strategy Comparison Report Generator
+     4→
+     5→Generates comprehensive charts comparing Phoenix v1, v3, v4 strategies:
+     6→- Portfolio value over time with SELL and BUY-BACK markers
+     7→- BTC price with MVRV overlay
+     8→- Full metrics comparison tables
+     9→- Dual-trigger activation zones (v4 only)
+    10→
+    11→Output: multi-panel PNG report in /home/z/my-project/download/
+    12→"""
+    13→
+    14→import sys
+    15→import os
+    16→import numpy as np
+    17→import pandas as pd
+    18→import matplotlib
+    19→import matplotlib.font_manager as fm
+    20→import matplotlib.pyplot as plt
+    21→import matplotlib.ticker as mticker
+    22→import matplotlib.dates as mdates
+    23→import matplotlib.gridspec as gridspec
+    24→from matplotlib.patches import FancyBboxPatch
+    25→from datetime import datetime
+    26→
+    27→# Add parent dir for package import
+    28→sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    29→
+    30→from smart_dca.config import DOWNLOAD_DIR, USD_THB_RATE, CACHE_DIR
+    31→from smart_dca.data_pipeline import build_master_dataframe
+    32→from smart_dca.backtest_engine import backtest_strategy
+    33→from smart_dca.strategies._shared import precompute_mvrv_percentile
+    34→
+    35→# ═══ FONT & STYLE SETUP ═══
+    36→fm.fontManager.addfont('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')
+    37→fm.fontManager.addfont('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf')
+    38→plt.rcParams.update({
+    39→    'font.sans-serif': ['DejaVu Sans'],
+    40→    'axes.unicode_minus': False,
+    41→    'figure.facecolor': '#FFFFFF',
+    42→    'axes.facecolor': '#FFFFFF',
+    43→    'axes.edgecolor': '#E5E7EB',
+    44→    'axes.linewidth': 0.8,
+    45→    'axes.spines.top': False,
+    46→    'axes.spines.right': False,
+    47→    'axes.grid': False,
+    48→    'xtick.major.size': 0,
+    49→    'ytick.major.size': 0,
+    50→    'xtick.labelsize': 9,
+    51→    'ytick.labelsize': 9,
+    52→    'axes.labelsize': 10,
+    53→    'axes.titlesize': 14,
+    54→    'axes.titleweight': 'bold',
+    55→    'axes.titlepad': 12,
+    56→    'legend.frameon': False,
+    57→    'legend.fontsize': 9,
+    58→    'figure.dpi': 200,
+    59→    'savefig.dpi': 200,
+    60→    'savefig.bbox': 'tight',
+    61→    'savefig.facecolor': '#FFFFFF',
+    62→    'savefig.pad_inches': 0.3,
+    63→})
+    64→
+    65→# ═══ COLOR PALETTE ═══
+    66→C_PHOENIX_V1 = '#0077BB'   # Blue
+    67→C_PHOENIX_V3 = '#EE7733'   # Orange
+    68→C_PHOENIX_V4 = '#CC3311'   # Red
+    69→C_STD_DCA = '#9CA3AF'      # Gray
+    70→C_SELL = '#EF4444'
+    71→C_BUYBACK = '#10B981'
+    72→C_MVRV_ZONE = '#FBBF24'
+    73→C_PRICE = '#374151'
+    74→G900 = '#111827'
+    75→G700 = '#374151'
+    76→G500 = '#6B7280'
+    77→G400 = '#9CA3AF'
+    78→G300 = '#D1D5DB'
+    79→G200 = '#E5E7EB'
+    80→G100 = '#F3F4F6'
+    81→G50 = '#F9FAFB'
+    82→
+    83→STRAT_COLORS = {
+    84→    'Standard DCA': C_STD_DCA,
+    85→    'Phoenix v1': C_PHOENIX_V1,
+    86→    'Phoenix v3': C_PHOENIX_V3,
+    87→    'Phoenix v4': C_PHOENIX_V4,
+    88→}
+    89→
+    90→# Selected strategies to compare
+    91→SELECTED = [
+    92→    ('Standard DCA', False),
+    93→    ('Phoenix v1', True),
+    94→    ('Phoenix v3', True),
+    95→    ('Phoenix v4', True),
+    96→]
+    97→
+    98→
+    99→# Import strategies
+   100→from smart_dca.strategies.standard_dca import strategy_standard_dca
+   101→from smart_dca.strategies.style_phoenix import strategy_style_phoenix
+   102→from smart_dca.strategies.style_phoenix_v3 import strategy_style_phoenix_v3
+   103→from smart_dca.strategies.style_phoenix_v4 import strategy_style_phoenix_v4
+   104→
+   105→STRAT_MAP = {
+   106→    'Standard DCA': (strategy_standard_dca, False),
+   107→    'Phoenix v1': (strategy_style_phoenix, True),
+   108→    'Phoenix v3': (strategy_style_phoenix_v3, True),
+   109→    'Phoenix v4': (strategy_style_phoenix_v4, True),
+   110→}
+   111→
+   112→
+   113→def clean_axis(ax, grid=True):
+   114→    ax.spines['top'].set_visible(False)
+   115→    ax.spines['right'].set_visible(False)
+   116→    if grid:
+   117→        ax.yaxis.grid(True, alpha=0.08, color=G300)
+   118→        ax.xaxis.grid(True, alpha=0.08, color=G300)
+   119→        ax.set_axisbelow(True)
+   120→
+   121→
+   122→def extract_events(daily_df, prev_sell_total=None):
+   123→    """Extract sell events and reserve buy-back events from daily log."""
+   124→    events = {'sell': [], 'buyback': []}
+   125→    prev_st = 0.0
+   126→    for i, row in daily_df.iterrows():
+   127→        cur_st = row['sell_event_thb']
+   128→        if prev_st is not None and cur_st > prev_st:
+   129→            sell_amt = cur_st - prev_st
+   130→            events['sell'].append({
+   131→                'date': row['date'],
+   132→                'price_thb': row['price_thb'],
+   133→                'price_usd': row['price_usd'],
+   134→                'amount_thb': sell_amt,
+   135→                'portfolio': row['portfolio_value'],
+   136→            })
+   137→        if row['reserve_event_thb'] > 0:
+   138→            events['buyback'].append({
+   139→                'date': row['date'],
+   140→                'price_thb': row['price_thb'],
+   141→                'price_usd': row['price_usd'],
+   142→                'amount_thb': row['reserve_event_thb'],
+   143→                'portfolio': row['portfolio_value'],
+   144→            })
+   145→        prev_st = cur_st
+   146→    return events
+   147→
+   148→
+   149→def make_portfolio_chart(ax, all_data, dates, years_label):
+   150→    """Panel 1: Portfolio value over time with sell/buy markers."""
+   151→    ax.set_title('Portfolio Value (THB) with Sell & Buy-Back Events', loc='left', fontsize=13, fontweight='bold')
+   152→
+   153→    for name, daily_df, results in all_data:
+   154→        color = STRAT_COLORS.get(name, G400)
+   155→        lw = 2.2 if 'v1' in name.lower() or 'v4' in name.lower() else 1.0
+   156→        alpha = 1.0 if 'v1' in name.lower() or 'v4' in name.lower() else 0.5
+   157→        ax.plot(daily_df['date'], daily_df['portfolio_value'],
+   158→                label=name, color=color, linewidth=lw, alpha=alpha, zorder=2)
+   159→
+   160→        # Sell markers (only for Phoenix strategies)
+   161→        if 'Standard' not in name:
+   162→            events = extract_events(daily_df)
+   163→            if events['sell']:
+   164→                sell_dates = [e['date'] for e in events['sell']]
+   165→                sell_prices = [e['price_thb'] for e in events['sell']]
+   166→                # Plot on secondary x-axis conceptually — use portfolio value at sell time
+   167→                sell_port_vals = [e['portfolio'] for e in events['sell']]
+   168→                marker_size = max(15, min(60, 3000 // max(len(sell_dates), 1)))
+   169→                ax.scatter(sell_dates, sell_port_vals, color=C_SELL, s=marker_size,
+   170→                           marker='v', zorder=5, alpha=0.8, edgecolors='white', linewidths=0.5)
+   171→
+   172→    ax.set_ylabel('Portfolio Value (THB)', fontsize=10)
+   173→    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, p: f'{x/1000:.0f}K'))
+   174→    ax.legend(loc='upper left', fontsize=9, framealpha=0.95)
+   175→    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+   176→    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=max(3, years_label // 3)))
+   177→    plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right')
+   178→    clean_axis(ax)
+   179→
+   180→
+   181→def make_price_mvrv_chart(ax, df, mvrv_pct_arr, years_label):
+   182→    """Panel 2: BTC price (THB) + MVRV with dual-trigger zones."""
+   183→    ax.set_title('BTC Price (THB) & MVRV Ratio with Dual-Trigger Zones', loc='left', fontsize=13, fontweight='bold')
+   184→
+   185→    # Price on left y-axis
+   186→    color_price = C_PRICE
+   187→    ax.plot(df['date'], df['price_thb'], color=color_price, linewidth=1.5, zorder=2)
+   188→    ax.set_ylabel('BTC Price (THB)', fontsize=10, color=color_price)
+   189→    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, p: f'{x/1000:.0f}K'))
+   190→    ax.tick_params(axis='y', labelcolor=color_price)
+   191→
+   192→    # MVRV on right y-axis
+   193→    ax2 = ax.twinx()
+   194→    ax2.spines['top'].set_visible(False)
+   195→    color_mvrv = '#8B5CF6'
+   196→    ax2.plot(df['date'], df['mvrv'], color=color_mvrv, linewidth=1.2, alpha=0.8, zorder=3)
+   197→    ax2.set_ylabel('MVRV', fontsize=10, color=color_mvrv)
+   198→    ax2.tick_params(axis='y', labelcolor=color_mvrv)
+   199→
+   200→    # Highlight dual-trigger zones (v4)
+   201→    # Path A: MVRV > 2.5
+   202→    path_a = df['mvrv'] > 2.5
+   203→    ax2.fill_between(df['date'], 0, df['mvrv'].values,
+   204→                     where=path_a.values, alpha=0.15, color=C_SELL, zorder=1,
+   205→                     label='Path A: MVRV > 2.5')
+   206→
+   207→    # Path B: MVRV percentile >= 92% AND MVRV > 1.8
+   208→    if mvrv_pct_arr is not None:
+   209→        path_b = (mvrv_pct_arr >= 0.92) & (df['mvrv'] > 1.8) & (~path_a.values)
+   210→        ax2.fill_between(df['date'], 0, df['mvrv'].values,
+   211→                         where=path_b, alpha=0.20, color=C_MVRV_ZONE, zorder=1,
+   212→                         label='Path B: MVRV Pct >= 92% & MVRV > 1.8')
+   213→
+   214→    # MVRV threshold lines
+   215→    ax2.axhline(y=2.5, color=C_SELL, linewidth=0.8, linestyle='--', alpha=0.5)
+   216→    ax2.axhline(y=1.8, color=C_MVRV_ZONE, linewidth=0.8, linestyle='--', alpha=0.5)
+   217→
+   218→    # Combined legend
+   219→    lines1, labels1 = ax.get_legend_handles_labels()
+   220→    lines2, labels2 = ax2.get_legend_handles_labels()
+   221→    all_lines = lines1 + lines2
+   222→    all_labels = labels1 + labels2
+   223→    if all_lines:
+   224→        ax.legend(all_lines, all_labels, loc='upper left', fontsize=8, framealpha=0.95)
+   225→
+   226→    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+   227→    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=max(3, years_label // 3)))
+   228→    plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right')
+   229→    ax.grid(True, alpha=0.05)
+   230→
+   231→
+   232→def make_avg_cost_chart(ax, all_data, years_label):
+   233→    """Panel 3: Average cost per BTC."""
+   234→    ax.set_title('Average Cost per BTC (THB) - Lower is Better', loc='left', fontsize=13, fontweight='bold')
+   235→
+   236→    for name, daily_df, results in all_data:
+   237→        valid = daily_df[daily_df['avg_cost'] > 0]
+   238→        if len(valid) > 1:
+   239→            color = STRAT_COLORS.get(name, G400)
+   240→            lw = 2.0 if 'v4' in name.lower() else 1.0
+   241→            alpha = 1.0 if 'v4' in name.lower() else 0.5
+   242→            ax.plot(valid['date'], valid['avg_cost'],
+   243→                    label=name, color=color, linewidth=lw, alpha=alpha, zorder=2)
+   244→
+   245→    ax.set_ylabel('Avg Cost / BTC (THB)', fontsize=10)
+   246→    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, p: f'{x/1000:.1f}K'))
+   247→    ax.legend(loc='upper right', fontsize=9, framealpha=0.95)
+   248→    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+   249→    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=max(3, years_label // 3)))
+   250→    plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right')
+   251→    clean_axis(ax)
+   252→
+   253→
+   254→def make_drawdown_chart(ax, all_data, years_label):
+   255→    """Panel 4: Drawdown over time."""
+   256→    ax.set_title('Drawdown (%) Over Time - Lower is Better', loc='left', fontsize=13, fontweight='bold')
+   257→
+   258→    for name, daily_df, results in all_data:
+   259→        dd = daily_df['max_drawdown_so_far'] * 100
+   260→        color = STRAT_COLORS.get(name, G400)
+   261→        lw = 1.5 if 'v1' in name.lower() or 'v4' in name.lower() else 0.8
+   262→        alpha = 1.0 if 'v1' in name.lower() or 'v4' in name.lower() else 0.4
+   263→        ax.fill_between(daily_df['date'], 0, -dd, color=color, alpha=alpha * 0.3, zorder=1)
+   264→        ax.plot(daily_df['date'], -dd, label=name, color=color, linewidth=lw, alpha=alpha, zorder=2)
+   265→
+   266→    ax.set_ylabel('Drawdown (%)', fontsize=10)
+   267→    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, p: f'{x:.0f}%'))
+   268→    ax.legend(loc='lower left', fontsize=9, framealpha=0.95)
+   269→    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+   270→    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=max(3, years_label // 3)))
+   271→    plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right')
+   272→    clean_axis(ax)
+   273→
+   274→
+   275→def make_sell_detail_chart(ax, all_data, years_label):
+   276→    """Panel 5: Sell events timeline (scatter) with MVRV context."""
+   277→    ax.set_title('Sell Events: Price at Sell vs MVRV (Higher = Sold at Better Price)',
+   278→                 loc='left', fontsize=13, fontweight='bold')
+   279→
+   280→    for name, daily_df, results in all_data:
+   281→        if 'Standard' in name:
+   282→            continue
+   283→        events = extract_events(daily_df)
+   284→        if events['sell']:
+   285→            sell_dates = [e['date'] for e in events['sell']]
+   286→            sell_prices = [e['price_usd'] for e in events['sell']]
+   287→            color = STRAT_COLORS.get(name, G400)
+   288→            marker_size = max(30, min(80, 4000 // max(len(sell_dates), 1)))
+   289→            ax.scatter(sell_dates, sell_prices, color=color, s=marker_size,
+   290→                       label=f"{name} ({len(sell_dates)} sells)",
+   291→                       alpha=0.7, edgecolors='white', linewidths=0.5, zorder=3)
+   292→
+   293→    # Overlay BTC price line faintly
+   294→    for name, daily_df, results in all_data:
+   295→        if 'Phoenix v1' in name:
+   296→            ax.plot(daily_df['date'], daily_df['price_usd'],
+   297→                    color=G300, linewidth=0.8, zorder=1, alpha=0.6)
+   298→            break
+   299→
+   300→    ax.set_ylabel('BTC Price (USD) at Sell', fontsize=10)
+   301→    ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, p: f'${x:,.0f}'))
+   302→    ax.legend(loc='upper left', fontsize=9, framealpha=0.95)
+   303→    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+   304→    ax.xaxis.set_major_locator(mdates.MonthLocator(interval=max(3, years_label // 3)))
+   305→    plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right')
+   306→    clean_axis(ax)
+   307→
+   308→
+   309→def make_metrics_table(ax, all_results, years_label):
+   310→    """Panel 6: Comprehensive metrics comparison table."""
+   311→    ax.axis('off')
+   312→    ax.set_title(f'Complete Metrics Comparison ({years_label})', loc='left', fontsize=13, fontweight='bold', pad=15)
+   313→
+   314→    col_labels = [
+   315→        'Metric', 'Standard\nDCA', 'Phoenix\nv1', 'Phoenix\nv3', 'Phoenix\nv4'
+   316→    ]
+   317→    cell_data = []
+   318→    row_labels_raw = [
+   319→        ('Portfolio Value (THB)', lambda r: f"{r['final_value']:,.0f}", 'final_value', True),
+   320→        ('True ROI (%)', lambda r: f"{r['true_roi_pct']:.1f}%", 'true_roi_pct', True),
+   321→        ('Max Drawdown (%)', lambda r: f"{r['max_drawdown_pct']:.1f}%", 'max_drawdown_pct', False),
+   322→        ('Calmar Ratio', lambda r: f"{r['calmar_ratio']:.2f}", 'calmar_ratio', True),
+   323→        ('BTC Held', lambda r: f"{r['total_btc']:.6f}", 'total_btc', True),
+   324→        ('BTC Sold (%)', lambda r: f"{r['btc_sell_pct']:.1f}%", 'btc_sell_pct', None),
+   325→        ('Avg Cost (THB/BTC)', lambda r: f"{r['avg_cost_thb']:,.0f}" if r['avg_cost_thb'] > 0 else '-', 'avg_cost_thb', False),
+   326→        ('Sell Count', lambda r: f"{r['sell_count']}", 'sell_count', None),
+   327→        ('Avg Sell Price (THB)', lambda r: f"{r['avg_sell_price_thb']:,.0f}" if r['avg_sell_price_thb'] > 0 else '-', 'avg_sell_price_thb', True),
+   328→        ('Sell P/L Ratio', lambda r: f"{r['sell_profit_ratio']:.2f}x" if r['sell_profit_ratio'] > 0 else '-', 'sell_profit_ratio', True),
+   329→        ('DD Days (%)', lambda r: f"{r['days_in_drawdown_pct']:.1f}%", 'days_in_drawdown_pct', False),
+   330→        ('Worst Recovery (d)', lambda r: f"{r['worst_recovery_days']}", 'worst_recovery_days', False),
+   331→        ('DCA Money (THB)', lambda r: f"{r['net_capital']:,.0f}", 'net_capital', None),
+   332→        ('Sell Profit (THB)', lambda r: f"{r['total_sell_proceeds']:,.0f}", 'total_sell_proceeds', True),
+   333→        ('Reserve Used (THB)', lambda r: f"{r['total_reserve_injected']:,.0f}", 'total_reserve_injected', None),
+   334→        ('Reserve Left (THB)', lambda r: f"{r['cash_reserve']:,.0f}", 'cash_reserve', None),
+   335→        ('Reserve Use (%)', lambda r: f"{r['reserve_utilization_pct']:.1f}%", 'reserve_utilization_pct', True),
+   336→        ('Total Fees (THB)', lambda r: f"{r['total_fees_paid']:,.0f}", 'total_fees_paid', False),
+   337→    ]
+   338→
+   339→    # Build data array
+   340→    results_map = {r['strategy']: r for r in all_results}
+   341→    for label, fmt, key, best_is_max in row_labels_raw:
+   342→        row = [label]
+   343→        for strat_name in ['Standard DCA', 'Phoenix v1', 'Phoenix v3', 'Phoenix v4']:
+   344→            r = results_map.get(strat_name, {})
+   345→            row.append(fmt(r))
+   346→        cell_data.append(row)
+   347→
+   348→    table = ax.table(cellText=cell_data, colLabels=col_labels, cellLoc='center', loc='center')
+   349→    table.auto_set_font_size(False)
+   350→    table.set_fontsize(8.5)
+   351→    table.scale(1, 1.55)
+   352→
+   353→    for (row_idx, col_idx), cell in table.get_celld().items():
+   354→        cell.set_edgecolor('#E5E7EB')
+   355→        if row_idx == 0:
+   356→            cell.set_facecolor('#1E293B')
+   357→            cell.set_text_props(color='white', fontweight='bold', fontsize=8.5)
+   358→            cell.set_height(0.055)
+   359→        else:
+   360→            cell.set_facecolor('#F8FAFC' if row_idx % 2 == 0 else 'white')
+   361→            cell.set_height(0.048)
+   362→            # First column (metric name) left-aligned and bold
+   363→            if col_idx == 0:
+   364→                cell.set_text_props(ha='left', fontweight='bold', fontsize=8.5, color=G700)
+   365→
+   366→    # Highlight best values per row (green for best, light red for worst DD)
+   367→    for row_idx, (label, fmt, key, best_is_max) in enumerate(row_labels_raw, 1):
+   368→        if key is None or best_is_max is None:
+   369→            continue
+   370→        vals = {}
+   371→        for ci, sn in enumerate(['Standard DCA', 'Phoenix v1', 'Phoenix v3', 'Phoenix v4'], 1):
+   372→            r = results_map.get(sn, {})
+   373→            v = r.get(key, 0)
+   374→            if isinstance(v, (int, float)) and not np.isnan(v):
+   375→                vals[ci] = v
+   376→        if vals:
+   377→            if best_is_max:
+   378→                best_ci = max(vals, key=vals.get)
+   379→                table.get_celld()[(row_idx, best_ci)].set_facecolor('#DCFCE7')
+   380→                table.get_celld()[(row_idx, best_ci)].set_text_props(fontweight='bold', fontsize=8.5)
+   381→            else:
+   382→                best_ci = min(vals, key=vals.get)
+   383→                table.get_celld()[(row_idx, best_ci)].set_facecolor('#DCFCE7')
+   384→                table.get_celld()[(row_idx, best_ci)].set_text_props(fontweight='bold', fontsize=8.5)
+   385→
+   386→    return table
+   387→
+   388→
+   389→def make_dual_trigger_info(ax):
+   390→    """Info box explaining dual-trigger system."""
+   391→    ax.axis('off')
+   392→    ax.set_title('Phoenix v4 Dual-Trigger System (Future-Proof for Diminishing MVRV Cycles)',
+   393→                 loc='left', fontsize=13, fontweight='bold', pad=15)
+   394→
+   395→    info_text = (
+   396→        "PROBLEM: MVRV peaks diminish each BTC cycle: 7.0 -> 5.0 -> 4.0 -> 2.78"
+   397→        "\nFixed MVRV > 2.5 gate may fail in future cycles if peak drops below 2.5."
+   398→        "\n"
+   399→        "\nSOLUTION: Dual-Trigger Sell Activation"
+   400→        "\n  Path A (Absolute):    MVRV > 2.5 + Score >= 40"
+   401→        "\n         -> Proven gate from v3, catches normal cycle tops"
+   402→        "\n"
+   403→        "\n  Path B (Adaptive):    MVRV Percentile >= 92% of 365-day rolling window"
+   404→        "\n                         AND MVRV > 1.8 + Score >= 40"
+   405→        "\n         -> Activates when MVRV is at cycle extreme even if absolute value is lower"
+   406→        "\n         -> Example: If cycle 5 peaks at MVRV 2.2, percentile 92% still triggers"
+   407→        "\n"
+   408→        "\nSell Tiers (shared by v3 & v4):"
+   409→        "\n  Score >= 75  -> Sell 50% of portfolio (was 8% in v1), Cooldown 50d"
+   410→        "\n  Score >= 55  -> Sell 15% of portfolio (was 6% in v1), Cooldown 35d"
+   411→        "\n  Score >= 40  -> Sell  4% of portfolio (was 4% in v1), Cooldown 20d"
+   412→        "\n"
+   413→        "\nKey Differences:"
+   414→        "\n  v1: MVRV > 2.5 only, small sells (4/6/8%), has short-trend sell (2% port)"
+   415→        "\n  v3: MVRV > 2.5 only, larger sells (4/15/50%), boosted reserve deploy"
+   416→        "\n  v4: Dual-trigger (Path A + Path B), same sells as v3, no short-trend sell"
+   417→    )
+   418→    ax.text(0.03, 0.97, info_text, transform=ax.transAxes, fontsize=9.5,
+   419→            verticalalignment='top', fontfamily='monospace', color=G700,
+   420→            bbox=dict(boxstyle='round,pad=0.8', facecolor='#F8FAFC', edgecolor=G200, linewidth=1))
+   421→
+   422→
+   423→def generate_report(years):
+   424→    """Generate full comparison report for given year range."""
+   425→    label = f'{years}-Year'
+   426→
+   427→    print(f"\n{'=' * 70}")
+   428→    print(f"  GENERATING COMPARISON REPORT: {label}")
+   429→    print(f"{'=' * 70}")
+   430→
+   431→    # Load data
+   432→    print("\n[1/3] Loading data pipeline...")
+   433→    master_df = build_master_dataframe(years=5)
+   434→
+   435→    if years == 3:
+   436→        test_df = master_df.tail(int(3 * 365.25)).reset_index(drop=True)
+   437→    else:
+   438→        test_df = master_df.copy()
+   439→    print(f"  Period: {test_df['date'].iloc[0]} to {test_df['date'].iloc[-1]} ({len(test_df)} days)")
+   440→
+   441→    # Precompute MVRV percentile for chart overlay
+   442→    print("\n[2/3] Running backtests...")
+   443→    mvrv_pct = precompute_mvrv_percentile(test_df, window=365)
+   444→
+   445→    all_results = []
+   446→    all_daily_dfs = []
+   447→    all_data = []  # (name, daily_df, results)
+   448→
+   449→    for name, (func, needs_precompute) in STRAT_MAP.items():
+   450→        if needs_precompute:
+   451→            strategy_func = func(test_df)
+   452→        else:
+   453→            strategy_func = func
+   454→
+   455→        print(f"  Backtesting {name}...", end=' ', flush=True)
+   456→        results, daily_df = backtest_strategy(test_df, strategy_func, name)
+   457→        all_results.append(results)
+   458→        all_daily_dfs.append(daily_df)
+   459→        all_data.append((name, daily_df, results))
+   460→        print(f"Done. Value: {results['final_value']:,.0f} | ROI: {results['true_roi_pct']:.1f}% | DD: {results['max_drawdown_pct']:.1f}% | Sells: {results['sell_count']}")
+   461→
+   462→    # Generate charts
+   463→    print(f"\n[3/3] Generating {label} comparison charts...")
+   464→
+   465→    # ═══ CHART 1: Main comparison (6 panels) ═══
+   466→    fig = plt.figure(figsize=(22, 34), constrained_layout=True)
+   467→    fig.suptitle(
+   468→        f'Smart DCA Strategy Comparison Report ({label})\n'
+   469→        f'Binance Real Price Data + On-Chain Metrics (MVRV, SOPR, NUPL) | Daily Budget: 100 THB',
+   470→        fontsize=18, fontweight='bold', y=1.005
+   471→    )
+   472→
+   473→    gs = gridspec.GridSpec(7, 1, figure=fig, height_ratios=[1.2, 0.8, 0.8, 0.8, 0.8, 2.5, 1.2],
+   474→                           hspace=0.30)
+   475→
+   476→    ax1 = fig.add_subplot(gs[0])
+   477→    make_portfolio_chart(ax1, all_data, test_df['date'].tolist(), years)
+   478→
+   479→    ax2 = fig.add_subplot(gs[1])
+   480→    make_price_mvrv_chart(ax2, test_df, mvrv_pct, years)
+   481→
+   482→    ax3 = fig.add_subplot(gs[2])
+   483→    make_avg_cost_chart(ax3, all_data, years)
+   484→
+   485→    ax4 = fig.add_subplot(gs[3])
+   486→    make_drawdown_chart(ax4, all_data, years)
+   487→
+   488→    ax5 = fig.add_subplot(gs[4])
+   489→    make_sell_detail_chart(ax5, all_data, years)
+   490→
+   491→    ax6 = fig.add_subplot(gs[5])
+   492→    make_metrics_table(ax6, all_results, label)
+   493→
+   494→    ax7 = fig.add_subplot(gs[6])
+   495→    make_dual_trigger_info(ax7)
+   496→
+   497→    fname = os.path.join(DOWNLOAD_DIR, f'phoenix_comparison_report_{years}yr.png')
+   498→    plt.savefig(fname, dpi=180, facecolor='white', bbox_inches='tight')
+   499→    plt.close()
+   500→    print(f"\n  [CHART] Full report saved: {fname}")
+   501→
+   502→    # ═══ CHART 2: Focused v1 vs v4 comparison ═══
+   503→    fig2, axes2 = plt.subplots(2, 2, figsize=(20, 14), constrained_layout=True)
+   504→    fig2.suptitle(f'Phoenix v1 vs v4 Head-to-Head ({label})', fontsize=17, fontweight='bold', y=1.01)
+   505→
+   506→    v1_data = next((d for d in all_data if d[0] == 'Phoenix v1'), None)
+   507→    v4_data = next((d for d in all_data if d[0] == 'Phoenix v4'), None)
+   508→
+   509→    if v1_data and v4_data:
+   510→        # Portfolio comparison
+   511→        ax_a = axes2[0, 0]
+   512→        ax_a.set_title('Portfolio Value', loc='left', fontsize=12, fontweight='bold')
+   513→        ax_a.plot(v1_data[1]['date'], v1_data[1]['portfolio_value'],
+   514→                  color=C_PHOENIX_V1, linewidth=2, label='Phoenix v1', zorder=2)
+   515→        ax_a.plot(v4_data[1]['date'], v4_data[1]['portfolio_value'],
+   516→                  color=C_PHOENIX_V4, linewidth=2, label='Phoenix v4', zorder=2)
+   517→        ax_a.fill_between(v1_data[1]['date'],
+   518→                          v1_data[1]['portfolio_value'], v4_data[1]['portfolio_value'],
+   519→                          alpha=0.1, color=G400)
+   520→        ax_a.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, p: f'{x/1000:.0f}K'))
+   521→        ax_a.legend(fontsize=10)
+   522→        ax_a.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+   523→        plt.setp(ax_a.xaxis.get_majorticklabels(), rotation=30, ha='right')
+   524→        clean_axis(ax_a)
+   525→
+   526→        # Sell events comparison
+   527→        ax_b = axes2[0, 1]
+   528→        ax_b.set_title('Sell Event Prices (USD)', loc='left', fontsize=12, fontweight='bold')
+   529→        for name, daily_df, color in [('v1', v1_data[1], C_PHOENIX_V1), ('v4', v4_data[1], C_PHOENIX_V4)]:
+   530→            events = extract_events(daily_df)
+   531→            if events['sell']:
+   532→                sd = [e['date'] for e in events['sell']]
+   533→                sp = [e['price_usd'] for e in events['sell']]
+   534→                ms = max(25, min(70, 3000 // max(len(sd), 1)))
+   535→                ax_b.scatter(sd, sp, color=color, s=ms,
+   536→                             label=f'Phoenix {name} ({len(sd)} sells)',
+   537→                             alpha=0.7, edgecolors='white', linewidths=0.5, zorder=3)
+   538→        ax_b.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, p: f'${x:,.0f}'))
+   539→        ax_b.legend(fontsize=10)
+   540→        ax_b.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+   541→        plt.setp(ax_b.xaxis.get_majorticklabels(), rotation=30, ha='right')
+   542→        clean_axis(ax_b)
+   543→
+   544→        # Drawdown comparison
+   545→        ax_c = axes2[1, 0]
+   546→        ax_c.set_title('Drawdown Over Time', loc='left', fontsize=12, fontweight='bold')
+   547→        for name, daily_df, color in [('v1', v1_data[1], C_PHOENIX_V1), ('v4', v4_data[1], C_PHOENIX_V4)]:
+   548→            dd = daily_df['max_drawdown_so_far'] * 100
+   549→            ax_c.fill_between(daily_df['date'], 0, -dd, color=color, alpha=0.2)
+   550→            ax_c.plot(daily_df['date'], -dd, color=color, linewidth=1.8, label=f'Phoenix {name}')
+   551→        ax_c.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, p: f'{x:.0f}%'))
+   552→        ax_c.legend(fontsize=10)
+   553→        ax_c.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+   554→        plt.setp(ax_c.xaxis.get_majorticklabels(), rotation=30, ha='right')
+   555→        clean_axis(ax_c)
+   556→
+   557→        # Key metrics bar comparison
+   558→        ax_d = axes2[1, 1]
+   559→        ax_d.set_title('Key Metrics: v1 vs v4', loc='left', fontsize=12, fontweight='bold')
+   560→        r1 = next(r for r in all_results if r['strategy'] == 'Phoenix v1')
+   561→        r4 = next(r for r in all_results if r['strategy'] == 'Phoenix v4')
+   562→
+   563→        metrics_names = ['Portfolio\n(THB)', 'True ROI\n(%)', 'Max DD\n(%)', 'Calmar', 'Sell\nCount', 'BTC\nHeld']
+   564→        v1_vals = [r1['final_value']/1000, r1['true_roi_pct'], r1['max_drawdown_pct'],
+   565→                   r1['calmar_ratio'], r1['sell_count'], r1['total_btc']*1000]
+   566→        v4_vals = [r4['final_value']/1000, r4['true_roi_pct'], r4['max_drawdown_pct'],
+   567→                   r4['calmar_ratio'], r4['sell_count'], r4['total_btc']*1000]
+   568→
+   569→        x = np.arange(len(metrics_names))
+   570→        width = 0.35
+   571→        bars1 = ax_d.bar(x - width/2, v1_vals, width, color=C_PHOENIX_V1, alpha=0.85, label='Phoenix v1')
+   572→        bars2 = ax_d.bar(x + width/2, v4_vals, width, color=C_PHOENIX_V4, alpha=0.85, label='Phoenix v4')
+   573→
+   574→        ax_d.set_xticks(x)
+   575→        ax_d.set_xticklabels(metrics_names, fontsize=8.5)
+   576→        ax_d.legend(fontsize=10)
+   577→        clean_axis(ax_d)
+   578→
+   579→    fname2 = os.path.join(DOWNLOAD_DIR, f'phoenix_v1_vs_v4_{years}yr.png')
+   580→    plt.savefig(fname2, dpi=180, facecolor='white', bbox_inches='tight')
+   581→    plt.close()
+   582→    print(f"  [CHART] v1 vs v4 saved: {fname2}")
+   583→
+   584→    # ═══ Print summary ═══
+   585→    print(f"\n{'='*80}")
+   586→    print(f"  SUMMARY: {label} COMPARISON")
+   587→    print(f"{'='*80}")
+   588→    for r in all_results:
+   589→        print(f"  {r['strategy']:<16} | Portfolio: {r['final_value']:>10,.0f} THB | "
+   590→              f"True ROI: {r['true_roi_pct']:>7.1f}% | DD: {r['max_drawdown_pct']:>5.1f}% | "
+   591→              f"Calmar: {r['calmar_ratio']:>6.2f} | Sells: {r['sell_count']:>3} | "
+   592→              f"BTC: {r['total_btc']:.6f}")
+   593→    print(f"{'='*80}\n")
+   594→
+   595→    return all_results
+   596→
+   597→
+   598→def main():
+   599→    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+   600→    print("\n" + "=" * 70)
+   601→    print("  PHOENIX STRATEGY COMPARISON REPORT GENERATOR")
+   602→    print("  Strategies: Standard DCA | Phoenix v1 | Phoenix v3 | Phoenix v4")
+   603→    print("=" * 70)
+   604→
+   605→    results_3yr = generate_report(years=3)
+   606→    results_5yr = generate_report(years=5)
+   607→
+   608→    print("\n[COMPLETE] All comparison reports generated.")
+   609→    print(f"  Full reports : {DOWNLOAD_DIR}/phoenix_comparison_report_*.png")
+   610→    print(f"  v1 vs v4     : {DOWNLOAD_DIR}/phoenix_v1_vs_v4_*.png")
+   611→    print("=" * 70)
+   612→
+   613→
+   614→if __name__ == '__main__':
+   615→    main()
+   616→

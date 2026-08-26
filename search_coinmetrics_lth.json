@@ -1,0 +1,74 @@
+[
+  {
+    "url": "https://docs.coinmetrics.io/api/v4",
+    "name": "Coin Metrics API v4",
+    "snippet": "The Community HTTP API root endpoint URL is https:// community - api . coinmetrics .io/v4 . API key is not required when accessing community endpoints. Available to ... Read more\nThe paid and community versions of the API have a limit of 10 parallel REST API requests. After this limit is reached, further parallel requests will be queued, so performance will be slower.",
+    "host_name": "docs.coinmetrics.io",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://gitbook-docs.coinmetrics.io/access-our-data/api",
+    "name": "API Conventions | Product Docs",
+    "snippet": "Oct 28, 2024 — Access Free Tier (Community API ) Our community data can be accessed without an API key. This data is available for free for non-commercial use ...",
+    "host_name": "gitbook-docs.coinmetrics.io",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.talos.com/our-solutions/data/community-resources",
+    "name": "Digital Asset Data Community Resources - Talos",
+    "snippet": "Explore free digital asset data, tools, and research resources from Talos and Coin Metrics, including charts, community API access, academic programs",
+    "host_name": "www.talos.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://gitbook-docs.coinmetrics.io/packages/coin-metrics-community-data",
+    "name": "Coin Metrics Community Data | Product Docs",
+    "snippet": "Jun 8, 2026 — Coin Metrics Community Metrics ( Community API is a subset of our Network Data Pro and Market Data Pro data available for free for community use. ...\nCoin Metrics Community Metrics (Community API, Data Visualization) is a subset of our Network Data Pro and Market Data Pro data available for free for community use.",
+    "host_name": "gitbook-docs.coinmetrics.io",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=z-MuligFASc",
+    "name": "Fetch data with Coin Metrics API and visualize",
+    "snippet": "Load data with Coin Metrics API ! Visualize historical stock prices with Matplotlib. SUBSCRIBE and LIKE for more FREE tutorials.",
+    "host_name": "www.youtube.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://gitbook-docs.coinmetrics.io/getting-started",
+    "name": "Getting Started with Coin Metrics Data | Product Docs",
+    "snippet": "We offer some data for free under our Community Data. etrics Community Data Data coverage can be seen by plugging in your API key at coverage. coinmetrics .io. ...",
+    "host_name": "gitbook-docs.coinmetrics.io",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/coinmetrics/data",
+    "name": "Archives of data produced by coinmetrics.io",
+    "snippet": "These data archives are produced using free Community tier of Coin Metrics API . Scripts for data generation are in scripts directory. Read more\nFree Coin Metrics data archives These data archives are produced using free Community tier of Coin Metrics API. Scripts for data generation are in scripts directory.",
+    "host_name": "github.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://gitbook-docs.coinmetrics.io/tutorials-and-examples/tutorials/ndp_marketcap_metrics",
+    "name": "Applying Different Types of Marketcap Metrics | Product Docs",
+    "snippet": "May 6, 2026 — Coin Metrics offers a vast assortment of data for hundreds of cryptoassets. The API Spec contains a full list of functions.",
+    "host_name": "gitbook-docs.coinmetrics.io",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  }
+]

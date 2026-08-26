@@ -1,57 +1,54 @@
-# Skills (internal)
-skills/
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
+# dependencies
+node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
 
-# Data cache (fetched from APIs)
-cache/
+# testing
+/coverage
 
-# Output deliverables
-download/
+# next.js
+/.next/
+/out/
 
-# Environment / secrets
-.env
-.git-credentials
-*.pem
-*.key
-credentials*
+# production
+/build
 
-# Tool intermediate files
-tool-results/
-search_*.json
-
-# Upload staging
-upload/
-
-# Debug / one-off scripts
-diagnose_*.py
-check_*.py
-dump_*.py
-test_*.py
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
+# misc
 .DS_Store
-Thumbs.db
+*.pem
 
-# Work log (internal)
-worklog.md
-Smart-dca/
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 
-# Demo portfolio (committed by workflow, not locally)
-# Uncomment below if you want to ignore demo files locally:
-# demo_state*.json
-# demo_trades*.json
-# demo_report*.json
-.bot_lock
-*.lock
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+local-*
+.claude
+.z-ai-config
+*.log
+dev.log
+dev.out.log
+test
+prompt
+
+server.log
+# Skills directory
+/skills/

@@ -1,0 +1,74 @@
+[
+  {
+    "url": "https://tr.tradingview.com/scripts/dca",
+    "name": "DCA — Göstergeler ve Stratejiler",
+    "snippet": "This indicator backtests whether buying at all-time highs, waiting for pullbacks, or regular DCA builds more wealth over time.\nSmartDCA is a single-direction (Long or Short) step-based DCA strategy with adaptive take-profit and structured risk management. designed to help traders ...",
+    "host_name": "tr.tradingview.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.reddit.com/r/CryptoCurrency/comments/xp5ldr/a_more_profitable_and_less_nervewracking_strategy",
+    "name": "A more profitable and less nerve-wracking strategy than",
+    "snippet": "RSI and MACD , when that trend reverses … this might strategy might be a good indicator when to sell and take some profit and buy in again.\nMACD stands for Moving Average Convergence Divergence . Other than RSI and MACD, this might strategy might be a good indicator when to sell and  ...",
+    "host_name": "www.reddit.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://medium.com/@alsgladkikh/integration-of-technical-indicators-into-the-dca-bot-rsi-sma-and-etc-4279fe229012",
+    "name": "Integration of Technical Indicators into the DCA Bot: RSI,",
+    "snippet": "Backtesting System. Without backtesting , a trading strategy is just a pretty theory. We must check how it would have performed in real ... Read more\nWhen RSI shows oversold (< 30) and BB% is below 20 — that's a “buy without thinking” signal. These moments are rare but deliver the biggest ...",
+    "host_name": "medium.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=pD1gDYnLRu0",
+    "name": "I Built a BTC Strategy Using AI in CoinQuant [Full Backtest]",
+    "snippet": "A regime-adaptive BTC strategy stayed positive across nearly every tested year, and the full 2018–2026 backtest reached 215% with a 22% max ...",
+    "host_name": "www.youtube.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.quantifiedstrategies.com/rsi-trading-strategy",
+    "name": "RSI Trading Strategy (91% Win Rate): Backtest, Indicator,",
+    "snippet": "The RSI trading strategy identifies overbought and oversold conditions in markets , measuring momentum on a scale. Read more",
+    "host_name": "www.quantifiedstrategies.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://menthorq.com/guide/backtesting-results-crypto-quant-models",
+    "name": "Backtesting Results - Crypto Quant Models Guide",
+    "snippet": "This post presents a backtest overview of three distinct Crypto Quant Models — Q- Crypto Risk On-Off, Q- RSI , and Q- Crypto Direction — each designed to capture ... Read more",
+    "host_name": "menthorq.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.coinquant.ai/blog/macd-on-bitcoin-what-6-years-of-backtesting-actually-shows",
+    "name": "MACD on Bitcoin: What 6 Years of Backtesting Actually",
+    "snippet": "May 14, 2026 — A daily MACD strategy with RSI above 50 confirmation typically yields 30 to 40 trades per year, fewer but each with a larger expected move.",
+    "host_name": "www.coinquant.ai",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://coinrule.com/blog/crypto-automated-trading/guide-crypto-bot-rsi-ma",
+    "name": "How to Make a Profitable RSI and MA Strategy",
+    "snippet": "Dec 11, 2025 — This tutorial breaks down Coinrule's RSI and M-A strategy , showing how to use the template, backtest it on TradingView and launch it.",
+    "host_name": "coinrule.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  }
+]

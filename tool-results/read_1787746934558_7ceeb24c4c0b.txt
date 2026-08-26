@@ -1,0 +1,1820 @@
+     1→#!/usr/bin/env python3
+     2→'''Generate Phoenix v5.1 Dashboard HTML.
+     3→
+     4→Reads state.json, trade_log.json, kill_switch.json → produces dashboard.html
+     5→Deployed to Netlify for password-protected viewing.
+     6→'''
+     7→
+     8→import html as html_mod
+     9→import json
+    10→import os
+    11→import sys
+    12→import time as time_mod
+    13→from datetime import datetime, date
+    14→
+    15→PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    16→if PROJECT_ROOT not in sys.path:
+    17→    sys.path.insert(0, PROJECT_ROOT)
+    18→
+    19→from live_bot.kill_switch import get_full_status
+    20→from live_bot.state import load_state, load_trade_log, load_indicator_history
+    21→from live_bot import config as cfg
+    22→
+    23→
+    24→def fmt_num(n, decimals=2):
+    25→    """Format number with commas."""
+    26→    if n is None:
+    27→        return '—'
+    28→    if abs(n) >= 1_000_000:
+    29→        return f'{n:,.{decimals}f}'
+    30→    if abs(n) >= 100:
+    31→        return f'{n:,.{decimals}f}'
+    32→    return f'{n:.{decimals}f}'
+    33→
+    34→
+    35→def fmt_pct(n):
+    36→    """Format percentage."""
+    37→    if n is None:
+    38→        return '—'
+    39→    return f'{n * 100:.1f}%'
+    40→
+    41→
+    42→def fmt_btc(n, decimals=8):
+    43→    """Format BTC with smart decimal places (U6)."""
+    44→    if n is None or n == 0:
+    45→        return '0 BTC'
+    46→    if abs(n) >= 1:
+    47→        return f'{n:.4f} BTC'
+    48→    if abs(n) >= 0.001:
+    49→        return f'{n:.6f} BTC'
+    50→    return f'{n:.8f} BTC'
+    51→
+    52→
+    53→def color_for_value(val, thresholds):
+    54→    """Return color class based on thresholds.
+    55→    thresholds: [(threshold, color_class), ...] ascending order.
+    56→    """
+    57→    if val is None:
+    58→        return 'neutral'
+    59→    for threshold, color in thresholds:
+    60→        if val < threshold:
+    61→            return color
+    62→    return thresholds[-1][1]
+    63→
+    64→
+    65→def mvrv_color(mvrv):
+    66→    if mvrv is None:
+    67→        return 'neutral'
+    68→    if mvrv < 1.0:
+    69→        return 'green'
+    70→    if mvrv < 2.0:
+    71→        return 'blue'
+    72→    if mvrv < 3.0:
+    73→        return 'yellow'
+    74→    return 'red'
+    75→
+    76→
+    77→def rsi_color(rsi):
+    78→    if rsi is None:
+    79→        return 'neutral'
+    80→    if rsi < 30:
+    81→        return 'green'
+    82→    if rsi < 70:
+    83→        return 'blue'
+    84→    return 'red'
+    85→
+    86→
+    87→def generate_dashboard(state_path='live_bot/state.json',
+    88→                       trade_log_path='trade_log.json',
+    89→                       kill_switch_path='kill_switch.json',
+    90→                       output_path='dashboard/dist/index.html'):
+    91→    """Generate complete dashboard HTML."""
+    92→    # Load data
+    93→    state = load_state(state_path)
+    94→    trade_log = load_trade_log(trade_log_path)
+    95→    # Filter out dry-run trades — only show live trades on dashboard
+    96→    # D1: Use strict check: require explicit dry_run=False to include.
+    97→    # Entries with missing dry_run field (old format) are treated as dry-run.
+    98→    trade_log = [t for t in trade_log if t.get('dry_run') is False]
+    99→    ks_status = get_full_status(kill_switch_path)
+   100→    indicators = state.get('last_indicators', {})
+   101→    exchange_name = state.get('last_exchange_name', '')
+   102→
+   103→    # B22: Load indicator history for time-series charts
+   104→    ih_path = os.path.join(os.path.dirname(trade_log_path), 'indicator_history.json')
+   105→    indicator_history = load_indicator_history(ih_path)
+   106→    # Prepare time-series data for charts
+   107→    ih_dates = []
+   108→    ih_price = []
+   109→    ih_mvrv = []
+   110→    ih_rsi = []
+   111→    ih_sopr = []
+   112→    ih_nupl = []
+   113→    for entry in indicator_history:
+   114→        dt = entry.get('date', '')
+   115→        if not dt:
+   116→            continue
+   117→        ih_dates.append(dt[:10])  # YYYY-MM-DD
+   118→        ih_price.append(entry.get('price'))
+   119→        ih_mvrv.append(entry.get('mvrv'))
+   120→        ih_rsi.append(entry.get('rsi'))
+   121→        ih_sopr.append(entry.get('sopr'))
+   122→        ih_nupl.append(entry.get('nupl'))
+   123→    # Truncate to last 90 days for chart readability
+   124→    _max_chart_points = 90
+   125→    if len(ih_dates) > _max_chart_points:
+   126→        ih_dates = ih_dates[-_max_chart_points:]
+   127→        ih_price = ih_price[-_max_chart_points:]
+   128→        ih_mvrv = ih_mvrv[-_max_chart_points:]
+   129→        ih_rsi = ih_rsi[-_max_chart_points:]
+   130→        ih_sopr = ih_sopr[-_max_chart_points:]
+   131→        ih_nupl = ih_nupl[-_max_chart_points:]
+   132→    # Derive currency from exchange name (more reliable than stale state)
+   133→    _EXCHANGE_CURRENCY = {'BITKUB': 'THB', 'BINANCE': 'USDT'}
+   134→    currency = _EXCHANGE_CURRENCY.get(exchange_name, state.get('last_exchange_currency', 'USDT'))
+   135→
+   136→    # Computed values from state (for portfolio snapshot)
+   137→    portfolio = state.get('last_portfolio_value', 0)
+   138→    current_price = state.get('last_price', 0)
+   139→    btc_bal = state.get('last_btc_balance', 0)
+   140→    cash_bal = state.get('last_cash_balance', 0)
+   141→    last_run = state.get('last_run_date', '—') or '—'
+   142→    run_count = state.get('run_count', 0)
+   143→    dry_run = state.get('last_dry_run', False)
+   144→    peak = state.get('peak_value', 0)
+   145→    max_dd = state.get('max_drawdown', 0)
+   146→
+   147→    # Trade statistics — computed from trade_log (source of truth)
+   148→    tl_buys = [t for t in trade_log if t['type'] == 'buy']
+   149→    tl_sells = [t for t in trade_log if t['type'] == 'sell']
+   150→    buy_count = len(tl_buys)
+   151→    sell_count = len(tl_sells)
+   152→    total_btc_bought = sum(t['btc'] for t in tl_buys)
+   153→    total_btc_sold = sum(t['btc'] for t in tl_sells)
+   154→    invested = sum(t['amount'] for t in tl_buys)
+   155→    total_sell_proceeds = sum(t['amount'] for t in tl_sells)
+   156→    total_fees = sum(t.get('fee', 0) for t in trade_log)
+   157→    total_reserve = sum(t.get('reserve', 0) for t in tl_buys)
+   158→    last_trade_date = trade_log[-1]['date'] if trade_log else '—'
+   159→    # ROI should be on BTC position only, not total exchange balance
+   160→    btc_value = btc_bal * current_price if current_price > 0 else 0
+   161→    if invested > 0:
+   162→        roi = ((btc_value - invested) / invested * 100)
+   163→    else:
+   164→        roi = 0
+   165→
+   166→    # --- Investment control metrics ---
+   167→    net_btc = total_btc_bought - total_btc_sold
+   168→    adjusted_invested = state.get('adjusted_invested', invested)
+   169→    avg_buy_price = (adjusted_invested / net_btc) if net_btc > 0 else 0
+   170→    unrealized_pnl = (current_price - avg_buy_price) * btc_bal if avg_buy_price > 0 else 0
+   171→    unrealized_pnl_pct = (unrealized_pnl / invested * 100) if invested > 0 else 0
+   172→    avg_buy_size = (invested / buy_count) if buy_count > 0 else 0
+   173→
+   174→    # Time series for chart — value BTC at current price for accurate P&L
+   175→    portfolio_series = []
+   176→    if trade_log and current_price > 0:
+   177→        running_btc = 0.0
+   178→        net_cash_out = 0.0
+   179→        for trade in trade_log:
+   180→            if trade['type'] == 'buy':
+   181→                running_btc += trade['btc']
+   182→                net_cash_out += trade['amount']  # fee embedded (less BTC received)
+   183→            else:
+   184→                running_btc -= trade['btc']
+   185→                net_cash_out -= trade['amount']  # amount is already net of fees for Bitkub sells
+   186→            # Value BTC at current price (realistic P&L)
+   187→            pv = running_btc * current_price - net_cash_out
+   188→            portfolio_series.append({
+   189→                'date': trade['date'],
+   190→                'value': round(pv, 2),
+   191→                'type': trade['type']
+   192→            })
+   193→        # Add current snapshot point
+   194→        if portfolio > 0 and (not portfolio_series or portfolio_series[-1]['date'] != last_run):
+   195→            portfolio_series.append({
+   196→                'date': last_run,
+   197→                'value': round(portfolio, 2),
+   198→                'type': 'current'
+   199→            })
+   200→
+   201→    # Recent trades (last 10)
+   202→    recent_trades = trade_log[-10:][::-1]  # newest first
+   203→
+   204→    # 24h / since-last-trade change
+   205→    change_pct = None
+   206→    change_abs = None
+   207→    change_label = '24h Change'
+   208→    if len(portfolio_series) >= 2:
+   209→        prev_val = portfolio_series[-2]['value']
+   210→        if prev_val > 0:
+   211→            change_abs = portfolio - prev_val
+   212→            change_pct = (change_abs / prev_val) * 100
+   213→            from datetime import datetime as dt
+   214→            try:
+   215→                last_dt = dt.strptime(portfolio_series[-2]['date'], '%Y-%m-%d %H:%M')
+   216→                now_dt = dt.now()
+   217→                diff_days = (now_dt - last_dt).total_seconds() / 86400
+   218→                if diff_days > 2:
+   219→                    change_label = 'Since Last Trade'
+   220→            except Exception:
+   221→                pass
+   222→
+   223→    # Kill switch status
+   224→    # H3: L1 (BOT_ENABLED env var) IS available at dashboard gen time
+   225→    # because generate_dashboard.py runs inside the same GitHub Actions job.
+   226→    l1_ok = os.environ.get('BOT_ENABLED', 'true').lower() == 'true'
+   227→    bot_alive = l1_ok and ks_status['l2_enabled']
+   228→    l2_ok = ks_status['l2_enabled']
+   229→    ks_reason = html_mod.escape(ks_status.get('l2_reason') or '')
+   230→    ks_time = html_mod.escape(ks_status.get('l2_activated_at') or '')
+   231→    ks_by = html_mod.escape(ks_status.get('l2_activated_by') or '')
+   232→
+   233→    # Indicators
+   234→    mvrv = indicators.get('mvrv')
+   235→    mvrv_pct = indicators.get('mvrv_pct', 0)
+   236→    mvrv_z = indicators.get('mvrv_z', 0)
+   237→    rsi_val = indicators.get('rsi')
+   238→    macd_h = indicators.get('macd_h')
+   239→    nupl = indicators.get('nupl', 0)
+   240→    sopr = indicators.get('sopr', 0)
+   241→    sopr_source = indicators.get('sopr_source', 'proxy')
+   242→    sma200 = indicators.get('sma_200')
+   243→    sma365 = indicators.get('sma_365')
+   244→    sell_score = indicators.get('sell_score', 0)
+   245→    path_taken = indicators.get('path_taken', 'none')
+   246→    in_bear = indicators.get('in_bear', False)
+   247→    cooldown = indicators.get('cooldown', 0)
+   248→    ath = indicators.get('ath', 0)
+   249→
+   250→    # U2: Empty state detection
+   251→    is_empty = (buy_count == 0 and sell_count == 0 and invested == 0)
+   252→
+   253→    # U11: Next expected run time (cron: '0 13 * * *' UTC = 20:00 THB)
+   254→    from datetime import timezone, timedelta
+   255→    tz_thai = timezone(timedelta(hours=7))
+   256→    now_thai = datetime.now(tz_thai)
+   257→    # Next 20:00 THB
+   258→    next_run_date = now_thai.replace(hour=20, minute=0, second=0, microsecond=0)
+   259→    if now_thai.hour >= 20:
+   260→        next_run_date += timedelta(days=1)
+   261→    next_run_str = next_run_date.strftime('%H:%M')
+   262→    next_run_day = next_run_date.strftime('%d %b')
+   263→
+   264→    # U5: Max drawdown conditional color
+   265→    if max_dd == 0:
+   266→        max_dd_class = 'dim'
+   267→    elif max_dd < 0.05:
+   268→        max_dd_class = 'yellow'
+   269→    else:
+   270→        max_dd_class = 'red'
+   271→
+   272→    # Next expected action
+   273→    next_action = ''
+   274→    next_action_class = 'neutral'
+   275→    if cooldown > 0:
+   276→        next_action = f'COOLDOWN — ขายแล้ว รอ {cooldown} วัน'
+   277→        next_action_class = 'yellow'
+   278→    elif sell_score >= 50:
+   279→        next_action = f'SELL WATCHING — score {sell_score}/100 (need 50+ to trigger)'
+   280→        next_action_class = 'red'
+   281→    elif mvrv is not None and mvrv < 1.0:
+   282→        next_action = 'BUY EXPECTED — MVRV accumulation zone'
+   283→        next_action_class = 'green'
+   284→    elif rsi_val is not None and rsi_val < 35:
+   285→        next_action = 'BUY LIKELY — RSI oversold zone'
+   286→        next_action_class = 'green'
+   287→    elif in_bear and mvrv is not None and mvrv < 1.5:
+   288→        next_action = 'BUY EXPECTED — Bear + low MVRV = good accumulation'
+   289→        next_action_class = 'green'
+   290→    elif sell_score >= 30:
+   291→        next_action = f'HOLD — sell score rising ({sell_score}/100), watching'
+   292→        next_action_class = 'yellow'
+   293→    else:
+   294→        next_action = 'HOLD — ไม่มีสัญญาณชัดเจน รอรอบถัดไป'
+   295→        next_action_class = 'blue'
+   296→
+   297→    # ── DCA Decision Info ──
+   298→    last_decision = state.get('last_decision', {})
+   299→    ld_buy = last_decision.get('buy_amount', 0)
+   300→    ld_sell = last_decision.get('sell_amount', 0)
+   301→    ld_mult = last_decision.get('multiplier', 0)
+   302→    ld_budget = last_decision.get('base_budget', 0)
+   303→    ld_reserve = last_decision.get('reserve_injection', 0)
+   304→
+   305→    # Estimate next round multiplier from current indicators
+   306→    est_mult = 0.0
+   307→    est_label = ''
+   308→    if mvrv is not None:
+   309→        if mvrv < 1.0:
+   310→            if sopr is not None and sopr < 0.95:
+   311→                est_mult = 4.5
+   312→                est_label = 'MVRV<1 + SOPR<0.95'
+   313→            else:
+   314→                est_mult = 3.0
+   315→                est_label = 'MVRV<1'
+   316→        elif mvrv < 1.5:
+   317→            if nupl is not None and nupl < 0.25:
+   318→                est_mult = 3.0
+   319→                est_label = 'MVRV 1-1.5 + NUPL<0.25'
+   320→            else:
+   321→                est_mult = 2.0
+   322→                est_label = 'MVRV 1-1.5'
+   323→        elif mvrv < 2.0:
+   324→            est_mult = 1.0
+   325→            est_label = 'MVRV 1.5-2'
+   326→        elif mvrv < 2.5:
+   327→            est_mult = 0.3
+   328→            est_label = 'MVRV 2-2.5'
+   329→        else:
+   330→            est_mult = 0.0
+   331→            est_label = 'MVRV>2.5'
+   332→    est_buy = ld_budget * est_mult if ld_budget > 0 else 0
+   333→
+   334→    # Build DCA info card HTML
+   335→    def _dca_card_html():
+   336→        # Today's DCA
+   337→        if ld_buy > 0:
+   338→            mult_color = 'green' if ld_mult >= 2 else ('blue' if ld_mult >= 1 else 'yellow')
+   339→            today_html = (
+   340→                '<div style="margin-bottom:16px;">'
+   341→                '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">DCA รอบล่าสุด</div>'
+   342→                '<div class="dca-grid">'
+   343→                f'<div style="text-align:center;padding:8px;border-radius:8px;background:rgba({"63,185,80" if ld_mult >= 2 else "88,166,255" if ld_mult >= 1 else "210,153,34"},0.1);border:1px solid var(--border);">'
+   344→                f'<div style="font-size:1.4rem;font-weight:700;color:var(--{mult_color});">{ld_mult}x</div>'
+   345→                f'<div style="font-size:10px;color:var(--text-dim);">Multiplier</div></div>'
+   346→                f'<div style="text-align:center;padding:8px;border-radius:8px;background:var(--card);border:1px solid var(--border);">'
+   347→                f'<div style="font-size:1.1rem;font-weight:600;">{fmt_num(ld_buy)} <span style="font-size:0.75rem;color:var(--text-dim);">{currency}</span></div>'
+   348→                f'<div style="font-size:10px;color:var(--text-dim);">ซื้อรวม</div></div>'
+   349→                f'<div style="text-align:center;padding:8px;border-radius:8px;background:var(--card);border:1px solid var(--border);">'
+   350→                f'<div style="font-size:1.1rem;font-weight:600;">{fmt_num(ld_budget)} <span style="font-size:0.75rem;color:var(--text-dim);">{currency}</span></div>'
+   351→                f'<div style="font-size:10px;color:var(--text-dim);">Base Budget</div></div>'
+   352→                '</div>'
+   353→                + (f'<div style="margin-top:4px;font-size:10px;color:var(--text-dim);">+ Reserve injection: {fmt_num(ld_reserve)} {currency}</div>' if ld_reserve > 0 else '')
+   354→                + (f'<div style="margin-top:2px;font-size:10px;color:var(--red);">ขาย: {fmt_num(ld_sell)} {currency}</div>' if ld_sell > 0 else '')
+   355→                + '</div>'
+   356→            )
+   357→        else:
+   358→            today_html = (
+   359→                '<div style="margin-bottom:16px;">'
+   360→                '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">DCA รอบล่าสุด</div>'
+   361→                '<div style="text-align:center;padding:12px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--text-dim);font-size:0.85rem;">'
+   362→                'ยังไม่มีการซื้อขาย (ยังไม่ถึงเวลารัน หรือ multipler = 0)'
+   363→                '</div></div>'
+   364→            )
+   365→
+   366→        # Next round estimate
+   367→        if est_mult > 0 and ld_budget > 0:
+   368→            est_color = 'green' if est_mult >= 2 else ('blue' if est_mult >= 1 else 'yellow')
+   369→            next_html = (
+   370→                '<div style="margin-bottom:16px;">'
+   371→                '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">ประเมินรอบถัดไป <span style="font-size:9px;opacity:0.6;">(จาก indicators ปัจจุบัน)</span></div>'
+   372→                '<div class="dca-grid">'
+   373→                f'<div style="text-align:center;padding:8px;border-radius:8px;background:rgba({"63,185,80" if est_mult >= 2 else "88,166,255" if est_mult >= 1 else "210,153,34"},0.1);border:1px solid var(--border);">'
+   374→                f'<div style="font-size:1.4rem;font-weight:700;color:var(--{est_color});">{est_mult}x</div>'
+   375→                f'<div style="font-size:10px;color:var(--text-dim);">Multiplier</div></div>'
+   376→                f'<div style="text-align:center;padding:8px;border-radius:8px;background:var(--card);border:1px solid var(--border);">'
+   377→                f'<div style="font-size:1.1rem;font-weight:600;">{fmt_num(est_buy)} <span style="font-size:0.75rem;color:var(--text-dim);">{currency}</span></div>'
+   378→                f'<div style="font-size:10px;color:var(--text-dim);">ประมาณการซื้อ</div></div>'
+   379→                f'<div style="text-align:center;padding:8px;border-radius:8px;background:var(--card);border:1px solid var(--border);">'
+   380→                f'<div style="font-size:0.75rem;color:var(--text-dim);padding-top:4px;">{est_label}</div>'
+   381→                f'<div style="font-size:10px;color:var(--text-dim);">เงื่อนไข</div></div>'
+   382→                '</div></div>'
+   383→            )
+   384→        else:
+   385→            if mvrv is None:
+   386→                next_html = (
+   387→                    '<div style="margin-bottom:16px;">'
+   388→                    '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">ประเมินรอบถัดไป</div>'
+   389→                    '<div style="text-align:center;padding:12px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--text-dim);font-size:0.85rem;">'
+   390→                    'MVRV ยังไม่มีข้อมูล — รอรันครั้งแรก'
+   391→                    '</div></div>'
+   392→                )
+   393→            else:
+   394→                next_html = (
+   395→                    '<div style="margin-bottom:16px;">'
+   396→                    '<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">ประเมินรอบถัดไป</div>'
+   397→                    '<div style="text-align:center;padding:12px;border-radius:8px;background:var(--card);border:1px solid var(--border);color:var(--text-dim);font-size:0.85rem;">'
+   398→                    f'MVRV สูง ({fmt_num(mvrv, 2)}) - ไม่ซื้อรอบนี้ (0x)'
+   399→                    '</div></div>'
+   400→                )
+   401→
+   402→        return today_html + next_html
+   403→
+   404→    dca_card_html = _dca_card_html()
+   405→
+   406→    # Build HTML
+   407→    # Demo section removed — bot is now live, no demo data needed
+   408→
+   409→    # ── Config settings for dashboard display ──
+   410→    # Fetch live USD/THB rate for dashboard display
+   411→    try:
+   412→        live_usd_thb = cfg.get_usd_thb_rate()
+   413→    except Exception:
+   414→        live_usd_thb = cfg.USD_THB_RATE
+   415→    # Show effective values (after THB→local conversion)
+   416→    # Use exchange_name from state.json (set by engine.py during live runs)
+   417→    # Fallback to cfg.EXCHANGE only if state has no exchange info yet.
+   418→    _display_exchange = exchange_name if exchange_name else cfg.EXCHANGE.upper()
+   419→    cfg_items = [
+   420→        ('Exchange', _display_exchange),
+   421→        ('Currency', currency),
+   422→        ('USD/THB Rate', f'{live_usd_thb:.3f}'),
+   423→        ('Daily DCA Budget', f'{cfg.DAILY_BUDGET_THB:,.0f} THB = {cfg.get_daily_budget():.2f} {cfg.CURRENCY}'),
+   424→        ('Max Buy/Trade', f'{cfg.MAX_BUY_THB:,.0f} THB = {cfg.get_max_buy():.2f} {cfg.CURRENCY}'),
+   425→        ('Max DCA Buys/Day', str(cfg.MAX_DCA_BUYS_PER_DAY)),
+   426→        ('Reserve Floor', f'{cfg.get_reserve_floor():.2f} {cfg.CURRENCY}'),
+   427→        ('Max Reserve Inject', f'{cfg.get_max_reserve_injection():.2f} {cfg.CURRENCY}'),
+   428→        ('Max Boosted Inject', f'{cfg.get_max_reserve_boosted():.2f} {cfg.CURRENCY}'),
+   429→        ('Boost Multiplier', f'{cfg.RESERVE_BOOST_MULTIPLIER}x'),
+   430→        ('Boost Price Ratio', f'{cfg.RESERVE_BOOST_PRICE_RATIO}x realized'),
+   431→        ('Low Balance Alert', f'< {cfg.LOW_BALANCE_DAYS} days remaining'),
+   432→        ('Buy Fee', f'{cfg.BUY_FEE_PCT*100:.2f}%'),
+   433→        ('Sell Fee', f'{cfg.SELL_FEE_PCT*100:.2f}%'),
+   434→    ]
+   435→    cfg_grid_rows = ''
+   436→    for label, val in cfg_items:
+   437→        cfg_grid_rows += f'<div class="ind-item"><span class="label">{label}</span><span class="val">{val}</span></div>\n'
+   438→
+   439→    config_html = f'''
+   440→    <!-- U10: Config Section (collapsible) -->
+   441→    <div class="card" style="margin-bottom:16px;border-left:3px solid var(--purple);">
+   442→        <div class="collapsible-header" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open');">
+   443→            <div class="card-title" style="margin-bottom:0;">Configuration (Active)</div>
+   444→            <div style="display:flex;align-items:center;gap:8px;">
+   445→                <button class="ctrl-btn" onclick="event.stopPropagation();toggleHelp()" style="padding:4px 12px;font-size:0.7rem;">
+   446→                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+   447→                    วิธีตั้งค่า
+   448→                </button>
+   449→                <span class="chevron">&#9660;</span>
+   450→            </div>
+   451→        </div>
+   452→        <div class="collapsible-body">
+   453→            <div class="ind-grid" style="margin-top:12px;">
+   454→                {cfg_grid_rows}
+   455→            </div>
+   456→        </div>
+   457→    </div>
+   458→
+   459→    <!-- Help Modal -->
+   460→    <div class="confirm-overlay" id="helpOverlay" style="z-index:10000;">
+   461→        <div class="confirm-box" style="max-width:520px;">
+   462→            <h3 style="margin-bottom:12px;">วิธีตั้งค่า Config</h3>
+   463→            <div style="font-size:0.82rem;color:var(--text-dim);line-height:1.7;">
+   464→                <p style="margin-bottom:10px;">ตั้งค่าผ่าน <b style="color:var(--text);">GitHub Secrets</b> ใน repo Settings → Secrets and variables → Actions</p>
+   465→                <table style="width:100%;font-size:0.78rem;margin-bottom:12px;">
+   466→                    <tr style="border-bottom:1px solid var(--border);"><th style="text-align:left;padding:4px 0;">Secret Name</th><th style="text-align:left;padding:4px 0;">ค่าเริ่มต้น</th><th style="text-align:left;padding:4px 0;">อธิบาย</th></tr>
+   467→                    <tr><td style="padding:4px 0;font-family:monospace;">DAILY_BUDGET_THB</td><td>100</td><td>งบ DCA ต่อรอบ (THB)</td></tr>
+   468→                    <tr><td style="padding:4px 0;font-family:monospace;">MAX_BUY_THB</td><td>1000</td><td>ซื้อสูงสุด/trade (THB)</td></tr>
+   469→                    <tr><td style="padding:4px 0;font-family:monospace;">MAX_DCA_BUYS_PER_DAY</td><td>1</td><td>ซื้อ DCA สูงสุด/วัน</td></tr>
+   470→                    <tr><td style="padding:4px 0;font-family:monospace;">RESERVE_FLOOR</td><td>auto</td><td>จำนวนเงิน reserve ขั้นต่ำ (สกุลเงินเดียวกับ exchange)</td></tr>
+   471→                    <tr><td style="padding:4px 0;font-family:monospace;">MAX_RESERVE_INJECTION</td><td>auto</td><td>ฉีด reserve สูงสุด/ครั้ง</td></tr>
+   472→                    <tr><td style="padding:4px 0;font-family:monospace;">RESERVE_BOOST_MULTIPLIER</td><td>1.8</td><td>boost x เมื่อราคา < realized</td></tr>
+   473→                    <tr><td style="padding:4px 0;font-family:monospace;">RESERVE_BOOST_PRICE_RATIO</td><td>1.05</td><td>เงื่อนไข boost: price < realized x นี้</td></tr>
+   474→                    <tr><td style="padding:4px 0;font-family:monospace;">LOW_BALANCE_DAYS</td><td>7</td><td>แจ้งเตือนเมื่อเงินเหลือไม่พอ N รอบ</td></tr>
+   475→                    <tr><td style="padding:4px 0;font-family:monospace;">USD_THB_RATE</td><td>33.426</td><td>อัตราแลกเปลี่ยน (สำหรับ Binance→USDT)</td></tr>
+   476→                </table>
+   477→                <p style="color:var(--yellow);"><b>หมายเหตุ:</b> ค่า DCA (DAILY_BUDGET_THB, MAX_BUY_THB) ระบุเป็น THB เสมอ ระบบจะ auto-convert เป็นสกุลเงินของ exchange ให้</p>
+   478→                <p style="margin-top:8px;">ตั้งค่าผ่าน <b style="color:var(--text);">Manual Trigger</b> ใน Actions ได้ด้วย (ช่อง budget)</p>
+   479→            </div>
+   480→            <div class="confirm-actions">
+   481→                <button class="ctrl-btn" onclick="toggleHelp()">ปิด</button>
+   482→            </div>
+   483→        </div>
+   484→    </div>
+   485→    '''
+   486→
+   487→    html = build_html(
+   488→        bot_alive=bot_alive, l1_ok=l1_ok, l2_ok=l2_ok,
+   489→        ks_reason=ks_reason, ks_time=ks_time, ks_by=ks_by,
+   490→        portfolio=portfolio, invested=invested, roi=roi,
+   491→        peak=peak, max_dd=max_dd, current_price=current_price,
+   492→        btc_bal=btc_bal, cash_bal=cash_bal, currency=currency,
+   493→        exchange_name=exchange_name,
+   494→        last_run=last_run, run_count=run_count, dry_run=dry_run,
+   495→        total_fees=total_fees,
+   496→        buy_count=buy_count,
+   497→        sell_count=sell_count,
+   498→        total_sell_proceeds=total_sell_proceeds,
+   499→        total_btc_bought=total_btc_bought,
+   500→        total_btc_sold=total_btc_sold,
+   501→        total_reserve=total_reserve,
+   502→        mvrv=mvrv, mvrv_pct=mvrv_pct, mvrv_z=mvrv_z,
+   503→        rsi_val=rsi_val, macd_h=macd_h, nupl=nupl, sopr=sopr,
+   504→        sopr_source=sopr_source,
+   505→        sma200=sma200, sma365=sma365, ath=ath,
+   506→        sell_score=sell_score, path_taken=path_taken,
+   507→        in_bear=in_bear, cooldown=cooldown,
+   508→        portfolio_series=portfolio_series,
+   509→        recent_trades=recent_trades,
+   510→        last_trade_date=last_trade_date,
+   511→        now_ts=int(time_mod.time()),
+   512→        now_str=datetime.now().strftime('%Y-%m-%d %H:%M'),
+   513→        # demo_html removed (bot is live)
+   514→        config_html=config_html,
+   515→        avg_buy_price=avg_buy_price,
+   516→        unrealized_pnl=unrealized_pnl,
+   517→        unrealized_pnl_pct=unrealized_pnl_pct,
+   518→        avg_buy_size=avg_buy_size,
+   519→        change_pct=change_pct,
+   520→        change_abs=change_abs,
+   521→        change_label=change_label,
+   522→        next_action=next_action,
+   523→        next_action_class=next_action_class,
+   524→        dca_card_html=dca_card_html,
+   525→        is_empty=is_empty,
+   526→        next_run_str=next_run_str,
+   527→        next_run_day=next_run_day,
+   528→        max_dd_class=max_dd_class,
+   529→        # B22: indicator history for time-series charts
+   530→        ih_dates=ih_dates, ih_price=ih_price,
+   531→        ih_mvrv=ih_mvrv, ih_rsi=ih_rsi,
+   532→        ih_sopr=ih_sopr, ih_nupl=ih_nupl,
+   533→    )
+   534→
+   535→    # Write output
+   536→    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+   537→    with open(output_path, 'w', encoding='utf-8') as f:
+   538→        f.write(html)
+   539→    print(f'[DASHBOARD] Generated {output_path} ({len(html):,} bytes)')
+   540→    return output_path
+   541→
+   542→
+   543→def _build_indicator_charts_js(ih_dates, ih_price, ih_mvrv, ih_rsi, ih_sopr, ih_nupl, currency):
+   544→    """Build JS code for indicator history charts.
+   545→
+   546→    Uses a regular (non-f) string to avoid {{/}} escaping bugs that
+   547→    plagued the original f-string approach (commit 6d4543b).
+   548→    Dynamic values are injected via str.replace().
+   549→    """
+   550→    dates_json = json.dumps(ih_dates)
+   551→    price_json = json.dumps(ih_price)
+   552→    mvrv_json = json.dumps(ih_mvrv)
+   553→    rsi_json = json.dumps(ih_rsi)
+   554→    sopr_json = json.dumps(ih_sopr)
+   555→    nupl_json = json.dumps(ih_nupl)
+   556→
+   557→    return '''\
+   558→        // B22: Indicator History Charts
+   559→        (function() {
+   560→            var ihDates = __IH_DATES__;
+   561→            var ihPrice = __IH_PRICE__;
+   562→            var ihMvrv = __IH_MVRV__;
+   563→            var ihRsi = __IH_RSI__;
+   564→            var ihSopr = __IH_SOPR__;
+   565→            var ihNupl = __IH_NUPL__;
+   566→
+   567→            if (ihDates.length < 2) {
+   568→                var box = document.getElementById('ihCharts');
+   569→                if (box) box.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:40px 20px;"><div style="font-size:0.85rem;">กราฟ indicator จะปรากฏหลัง bot ทำงาน 2 วันขึ้นไป</div></div>';
+   570→                return;
+   571→            }
+   572→
+   573→            var gridBase = { backgroundColor: 'transparent', grid: { left: 50, right: 15, top: 25, bottom: 35 } };
+   574→            var axisLabel = { color: '#8b949e', fontSize: 9 };
+   575→            var axisLine = { lineStyle: { color: '#30363d' } };
+   576→            var tooltipBase = { trigger: 'axis', backgroundColor: '#1c2128', borderColor: '#30363d', textStyle: { color: '#e6edf3', fontSize: 11 } };
+   577→
+   578→            // Price Chart
+   579→            var priceChart = echarts.init(document.getElementById('ihChartPrice'));
+   580→            priceChart.setOption(Object.assign({}, gridBase, {
+   581→                tooltip: tooltipBase,
+   582→                title: { text: '__IH_CURRENCY__', left: 'center', top: 2, textStyle: { color: '#8b949e', fontSize: 11 } },
+   583→                xAxis: { type: 'category', data: ihDates, axisLabel: Object.assign({}, axisLabel, { showMaxLabel: false }), axisLine },
+   584→                yAxis: { type: 'value', axisLabel, splitLine: { lineStyle: { color: '#21262d' } } },
+   585→                series: [{
+   586→                    type: 'line', data: ihPrice, smooth: true,
+   587→                    lineStyle: { color: '#3fb950', width: 2 },
+   588→                    areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(63,185,80,0.15)' }, { offset: 1, color: 'rgba(63,185,80,0.01)' }] } },
+   589→                    itemStyle: { color: '#3fb950' }
+   590→                }]
+   591→            }));
+   592→            window.addEventListener('resize', function() { priceChart.resize(); });
+   593→
+   594→            // MVRV Chart
+   595→            var mvrvChart = echarts.init(document.getElementById('ihChartMvrv'));
+   596→            mvrvChart.setOption(Object.assign({}, gridBase, {
+   597→                tooltip: tooltipBase,
+   598→                title: { text: 'MVRV', left: 'center', top: 2, textStyle: { color: '#8b949e', fontSize: 11 } },
+   599→                xAxis: { type: 'category', data: ihDates, axisLabel: Object.assign({}, axisLabel, { showMaxLabel: false }), axisLine },
+   600→                yAxis: { type: 'value', axisLabel, splitLine: { lineStyle: { color: '#21262d' } } },
+   601→                series: [{
+   602→                    type: 'line', data: ihMvrv, smooth: true,
+   603→                    lineStyle: { color: '#58a6ff', width: 2 },
+   604→                    areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(88,166,255,0.15)' }, { offset: 1, color: 'rgba(88,166,255,0.01)' }] } },
+   605→                    itemStyle: { color: '#58a6ff' },
+   606→                    markLine: { data: [{ yAxis: 1.0, lineStyle: { color: '#f8514980', type: 'dashed' }, label: { show: true, formatter: 'MVRV=1', color: '#f8514980', fontSize: 9 } }], [{ yAxis: 2.0, lineStyle: { color: '#d2992280', type: 'dashed' }, label: { show: true, formatter: 'MVRV=2', color: '#d2992280', fontSize: 9 } }] }
+   607→                }]
+   608→            }));
+   609→            window.addEventListener('resize', function() { mvrvChart.resize(); });
+   610→
+   611→            // RSI Chart
+   612→            var rsiChart = echarts.init(document.getElementById('ihChartRsi'));
+   613→            rsiChart.setOption(Object.assign({}, gridBase, {
+   614→                tooltip: tooltipBase,
+   615→                title: { text: 'RSI', left: 'center', top: 2, textStyle: { color: '#8b949e', fontSize: 11 } },
+   616→                xAxis: { type: 'category', data: ihDates, axisLabel: Object.assign({}, axisLabel, { showMaxLabel: false }), axisLine },
+   617→                yAxis: { type: 'value', min: 0, max: 100, axisLabel, splitLine: { lineStyle: { color: '#21262d' } } },
+   618→                series: [{
+   619→                    type: 'line', data: ihRsi, smooth: true,
+   620→                    lineStyle: { color: '#bc8cff', width: 2 },
+   621→                    areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(188,140,255,0.12)' }, { offset: 1, color: 'rgba(188,140,255,0.01)' }] } },
+   622→                    itemStyle: { color: '#bc8cff' },
+   623→                    markLine: { data: [{ yAxis: 30, lineStyle: { color: '#3fb95080', type: 'dashed' } }, { yAxis: 70, lineStyle: { color: '#f8514980', type: 'dashed' } }] }
+   624→                }]
+   625→            }));
+   626→            window.addEventListener('resize', function() { rsiChart.resize(); });
+   627→
+   628→            // SOPR Chart
+   629→            var soprChart = echarts.init(document.getElementById('ihChartSopr'));
+   630→            soprChart.setOption(Object.assign({}, gridBase, {
+   631→                tooltip: tooltipBase,
+   632→                title: { text: 'SOPR', left: 'center', top: 2, textStyle: { color: '#8b949e', fontSize: 11 } },
+   633→                xAxis: { type: 'category', data: ihDates, axisLabel: Object.assign({}, axisLabel, { showMaxLabel: false }), axisLine },
+   634→                yAxis: { type: 'value', axisLabel, splitLine: { lineStyle: { color: '#21262d' } } },
+   635→                series: [{
+   636→                    type: 'line', data: ihSopr, smooth: true,
+   637→                    lineStyle: { color: '#d29922', width: 2 },
+   638→                    areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(210,153,34,0.12)' }, { offset: 1, color: 'rgba(210,153,34,0.01)' }] } },
+   639→                    itemStyle: { color: '#d29922' },
+   640→                    markLine: { data: [{ yAxis: 1.0, lineStyle: { color: '#f8514980', type: 'dashed' }, label: { show: true, formatter: 'SOPR=1', color: '#f8514980', fontSize: 9 } }] }
+   641→                }]
+   642→            }));
+   643→            window.addEventListener('resize', function() { soprChart.resize(); });
+   644→
+   645→            // NUPL Chart
+   646→            var nuplChart = echarts.init(document.getElementById('ihChartNupl'));
+   647→            nuplChart.setOption(Object.assign({}, gridBase, {
+   648→                tooltip: tooltipBase,
+   649→                title: { text: 'NUPL', left: 'center', top: 2, textStyle: { color: '#8b949e', fontSize: 11 } },
+   650→                xAxis: { type: 'category', data: ihDates, axisLabel: Object.assign({}, axisLabel, { showMaxLabel: false }), axisLine },
+   651→                yAxis: { type: 'value', min: -0.5, max: 1, axisLabel, splitLine: { lineStyle: { color: '#21262d' } } },
+   652→                series: [{
+   653→                    type: 'line', data: ihNupl, smooth: true,
+   654→                    lineStyle: { width: 2, color: function(params) { var v = params.value; if (v < 0) return '#f85149'; if (v < 0.25) return '#d29922'; if (v < 0.5) return '#e3b341'; if (v < 0.75) return '#58a6ff'; return '#3fb950'; } },
+   655→                    itemStyle: { color: function(params) { var v = params.value; if (v < 0) return '#f85149'; if (v < 0.25) return '#d29922'; if (v < 0.5) return '#e3b341'; if (v < 0.75) return '#58a6ff'; return '#3fb950'; } },
+   656→                    areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(88,166,255,0.1)' }, { offset: 1, color: 'rgba(88,166,255,0.01)' }] } },
+   657→                    markLine: { data: [{ yAxis: 0, lineStyle: { color: '#f8514980', type: 'dashed' }, label: { show: true, formatter: '0', color: '#f8514980', fontSize: 9 } }, { yAxis: 0.75, lineStyle: { color: '#3fb95080', type: 'dashed' }, label: { show: true, formatter: 'euphoria', color: '#3fb95080', fontSize: 9 } }] }
+   658→                }]
+   659→            }));
+   660→            window.addEventListener('resize', function() { nuplChart.resize(); });
+   661→        })();'''.replace(
+   662→        '__IH_DATES__', dates_json
+   663→    ).replace(
+   664→        '__IH_PRICE__', price_json
+   665→    ).replace(
+   666→        '__IH_MVRV__', mvrv_json
+   667→    ).replace(
+   668→        '__IH_RSI__', rsi_json
+   669→    ).replace(
+   670→        '__IH_SOPR__', sopr_json
+   671→    ).replace(
+   672→        '__IH_NUPL__', nupl_json
+   673→    ).replace(
+   674→        '__IH_CURRENCY__', f'BTC Price ({currency})'
+   675→    )
+   676→
+   677→
+   678→def build_html(**kw) -> str:
+   679→    """Build the complete HTML dashboard string."""
+   680→    # Unpack all needed variables from kw
+   681→    bot_alive = kw['bot_alive']
+   682→    l1_ok = kw['l1_ok']
+   683→    l2_ok = kw['l2_ok']
+   684→    ks_reason = kw.get('ks_reason', '')
+   685→    ks_time = kw.get('ks_time', '')
+   686→    ks_by = kw.get('ks_by', '')
+   687→    portfolio = kw['portfolio']
+   688→    invested = kw['invested']
+   689→    roi = kw['roi']
+   690→    peak = kw['peak']
+   691→    max_dd = kw['max_dd']
+   692→    current_price = kw['current_price']
+   693→    btc_bal = kw['btc_bal']
+   694→    cash_bal = kw['cash_bal']
+   695→    currency = kw['currency']
+   696→    exchange_name = kw.get('exchange_name', '')
+   697→    last_run = kw['last_run']
+   698→    run_count = kw['run_count']
+   699→    dry_run = kw['dry_run']
+   700→    total_fees = kw['total_fees']
+   701→    buy_count = kw['buy_count']
+   702→    sell_count = kw['sell_count']
+   703→    total_sell_proceeds = kw['total_sell_proceeds']
+   704→    total_btc_bought = kw['total_btc_bought']
+   705→    total_btc_sold = kw['total_btc_sold']
+   706→    total_reserve = kw['total_reserve']
+   707→    mvrv = kw['mvrv']
+   708→    mvrv_pct = kw['mvrv_pct']
+   709→    mvrv_z = kw['mvrv_z']
+   710→    rsi_val = kw['rsi_val']
+   711→    macd_h = kw['macd_h']
+   712→    nupl = kw['nupl']
+   713→    sopr = kw['sopr']
+   714→    sopr_source = kw.get('sopr_source', 'proxy')
+   715→    sma200 = kw['sma200']
+   716→    sma365 = kw['sma365']
+   717→    ath = kw['ath']
+   718→    sell_score = kw['sell_score']
+   719→    path_taken = kw['path_taken']
+   720→    in_bear = kw['in_bear']
+   721→    cooldown = kw['cooldown']
+   722→    state = kw.get('state', {})
+   723→    recent_trades = kw['recent_trades']
+   724→    portfolio_series = kw['portfolio_series']
+   725→    now_ts = kw['now_ts']
+   726→    now_str = kw['now_str']
+   727→    last_trade_date = kw.get('last_trade_date', '—')
+   728→    # demo_html removed (bot is live)
+   729→    config_html = kw.get('config_html', '')
+   730→    avg_buy_price = kw.get('avg_buy_price', 0)
+   731→    unrealized_pnl = kw.get('unrealized_pnl', 0)
+   732→    unrealized_pnl_pct = kw.get('unrealized_pnl_pct', 0)
+   733→    avg_buy_size = kw.get('avg_buy_size', 0)
+   734→    change_pct = kw.get('change_pct')
+   735→    change_abs = kw.get('change_abs')
+   736→    change_label = kw.get('change_label', '24h Change')
+   737→    next_action = kw.get('next_action', '')
+   738→    next_action_class = kw.get('next_action_class', 'neutral')
+   739→    dca_card_html = kw.get('dca_card_html', '')
+   740→    is_empty = kw.get('is_empty', False)
+   741→    next_run_str = kw.get('next_run_str', '00:10')
+   742→    next_run_day = kw.get('next_run_day', '')
+   743→    max_dd_class = kw.get('max_dd_class', 'dim')
+   744→    # B22: Indicator history data
+   745→    ih_dates = kw.get('ih_dates', [])
+   746→    ih_price = kw.get('ih_price', [])
+   747→    ih_mvrv = kw.get('ih_mvrv', [])
+   748→    ih_rsi = kw.get('ih_rsi', [])
+   749→    ih_sopr = kw.get('ih_sopr', [])
+   750→    ih_nupl = kw.get('ih_nupl', [])
+   751→    upnl_class = 'green' if unrealized_pnl > 0 else ('red' if unrealized_pnl < 0 else 'neutral')
+   752→    chg_class = 'green' if (change_pct or 0) > 0 else ('red' if (change_pct or 0) < 0 else 'neutral')
+   753→
+   754→    # Status badge
+   755→    if bot_alive:
+   756→        status_html = '''<div class="status-badge alive">
+   757→            <span class="pulse"></span> BOT ACTIVE
+   758→        </div>'''
+   759→    else:
+   760→        reason = kw.get('ks_reason', 'Unknown')
+   761→        status_html = f'''<div class="status-badge killed">
+   762→            KILLED: {reason}
+   763→        </div>'''
+   764→
+   765→    # L1/L2 indicators
+   766→    l1_html = '<span class="tag green">ON</span>' if l1_ok else '<span class="tag red">OFF</span>'
+   767→    l2_html = '<span class="tag green">ON</span>' if l2_ok else '<span class="tag red">OFF</span>'
+   768→
+   769→    # ROI color
+   770→    roi_class = 'green' if roi > 0 else ('red' if roi < 0 else 'neutral')
+   771→
+   772→    # U3: DRY RUN banner — only show if truly dry-run AND no real trades exist
+   773→    # If trade_log has real trades, the bot has been live regardless of stale state flag
+   774→    has_real_trades = buy_count > 0 or sell_count > 0
+   775→    dry_banner_html = '''
+   776→    <div class="dry-run-banner">
+   777→        <span class="banner-icon">&#9888;</span>
+   778→        <div>
+   779→            <div>โหมดทดสอบ (TEST MODE) — ไม่มีการซื้อขายจริง</div>
+   780→            <div class="banner-text">ระบบจำลองผลลัพธ์เท่านั้น เงินและ BTC ไม่เคลื่อนไหวจริง</div>
+   781→        </div>
+   782→    </div>''' if (dry_run and not has_real_trades) else ''
+   783→
+   784→    # MVRV zone
+   785→    if mvrv is not None:
+   786→        if mvrv < 1.0:
+   787→            mvrv_zone = 'Accumulation Zone'
+   788→            mvrv_zone_class = 'green'
+   789→        elif mvrv < 2.0:
+   790→            mvrv_zone = 'Normal'
+   791→            mvrv_zone_class = 'blue'
+   792→        elif mvrv < 3.0:
+   793→            mvrv_zone = 'Euphoria'
+   794→            mvrv_zone_class = 'yellow'
+   795→        else:
+   796→            mvrv_zone = 'Danger Zone'
+   797→            mvrv_zone_class = 'red'
+   798→    else:
+   799→        mvrv_zone = 'N/A'
+   800→        mvrv_zone_class = 'neutral'
+   801→
+   802→    # Sell score bar
+   803→    ss = sell_score
+   804→    ss_color = 'green' if ss < 30 else ('yellow' if ss < 50 else 'red')
+   805→    ss_width = min(ss, 100)
+   806→
+   807→    # Bear badge
+   808→    bear_html = '<span class="tag red">BEAR MARKET</span>' if in_bear else ''
+   809→
+   810→    # Path badge
+   811→    path = path_taken
+   812→    if path in ('A', 'A-Ext', 'B'):
+   813→        path_class = 'yellow'
+   814→    elif path == 'killed':
+   815→        path_class = 'red'
+   816→    elif path.startswith('no-trade'):
+   817→        path_class = 'neutral'
+   818→    else:
+   819→        path_class = 'blue'
+   820→
+   821→    # Recent trades table rows
+   822→    trade_rows = ''
+   823→    for t in recent_trades:
+   824→        ttype = t['type'].upper()
+   825→        tclass = 'buy' if t['type'] == 'buy' else 'sell'
+   826→        extra = ''
+   827→        if 'path' in t and t['path']:
+   828→            extra = f" | Path: {html_mod.escape(t['path'])} (score: {t.get('score', 0)})"
+   829→        if 'reserve' in t and t['reserve'] > 0:
+   830→            extra += f" | Reserve: {t['reserve']:.0f}"
+   831→        trade_rows += f'''
+   832→        <tr class="{tclass}">
+   833→            <td>{t['date']}</td>
+   834→            <td class="{tclass}">{ttype}</td>
+   835→            <td>{fmt_num(t['amount'])} {currency}</td>
+   836→            <td class="num-mono">{fmt_btc(t['btc'])}</td>
+   837→            <td>{fmt_num(t['price'])}</td>
+   838→            <td>{fmt_num(t.get('fee', 0))}</td>
+   839→        </tr>'''
+   840→    if not trade_rows:
+   841→        trade_rows = '<tr><td colspan="6" class="empty">ยังไม่มี trades</td></tr>'
+   842→
+   843→    # Chart data
+   844→    chart_dates = json.dumps([p['date'] for p in portfolio_series])
+   845→    chart_values = json.dumps([p['value'] for p in portfolio_series])
+   846→    chart_types = json.dumps([p['type'] for p in portfolio_series])
+   847→
+   848→    # BTC price for reference line in chart (use trade_log from kw)
+   849→    # We already have the trade_log data in portfolio_series
+   850→
+   851→    return f'''<!DOCTYPE html>
+   852→<html lang="th">
+   853→<head>
+   854→    <meta charset="UTF-8">
+   855→    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   856→    <meta http-equiv="refresh" content="300">  <!-- Auto refresh every 5 min -->
+   857→    <title>Phoenix v5.1 Dashboard</title>
+   858→    <style>
+   859→        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+   860→        :root {{
+   861→            --bg: #0d1117;
+   862→            --card: #161b22;
+   863→            --border: #30363d;
+   864→            --text: #e6edf3;
+   865→            --text-dim: #9da5ae;
+   866→            --green: #3fb950;
+   867→            --green-bg: rgba(63,185,80,0.1);
+   868→            --red: #f85149;
+   869→            --red-bg: rgba(248,81,73,0.1);
+   870→            --blue: #58a6ff;
+   871→            --blue-bg: rgba(88,166,255,0.1);
+   872→            --yellow: #d29922;
+   873→            --yellow-bg: rgba(210,153,34,0.1);
+   874→            --purple: #bc8cff;
+   875→            --purple-bg: rgba(188,140,255,0.1);
+   876→        }}
+   877→        body {{
+   878→            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+   879→            background: var(--bg);
+   880→            color: var(--text);
+   881→            line-height: 1.5;
+   882→            padding: 16px;
+   883→            max-width: 960px;
+   884→            margin: 0 auto;
+   885→        }}
+   886→        h1 {{ font-size: 1.5rem; margin-bottom: 4px; }}
+   887→        h2 {{ font-size: 1.1rem; margin-bottom: 12px; color: var(--text-dim); }}
+   888→        .header {{
+   889→            display: flex;
+   890→            justify-content: space-between;
+   891→            align-items: center;
+   892→            padding: 16px 0;
+   893→            border-bottom: 1px solid var(--border);
+   894→            margin-bottom: 16px;
+   895→        }}
+   896→        .header-left h1 {{ display: inline; }}
+   897→        .header-right {{ display: flex; align-items: center; gap: 8px; }}
+   898→        .status-badge {{
+   899→            padding: 6px 14px;
+   900→            border-radius: 20px;
+   901→            font-weight: 600;
+   902→            font-size: 0.85rem;
+   903→            display: inline-flex;
+   904→            align-items: center;
+   905→            gap: 8px;
+   906→        }}
+   907→        .status-badge.alive {{ background: var(--green-bg); color: var(--green); border: 1px solid var(--green); }}
+   908→        .status-badge.killed {{ background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }}
+   909→        .pulse {{
+   910→            width: 8px; height: 8px;
+   911→            border-radius: 50%;
+   912→            background: var(--green);
+   913→            animation: pulse 2s infinite;
+   914→        }}
+   915→        @keyframes pulse {{
+   916→            0%, 100% {{ opacity: 1; }}
+   917→            50% {{ opacity: 0.3; }}
+   918→        }}
+   919→        .tag {{
+   920→            padding: 2px 10px;
+   921→            border-radius: 12px;
+   922→            font-size: 0.75rem;
+   923→            font-weight: 600;
+   924→        }}
+   925→        .tag.green {{ background: var(--green-bg); color: var(--green); }}
+   926→        .tag.red {{ background: var(--red-bg); color: var(--red); }}
+   927→        .tag.yellow {{ background: var(--yellow-bg); color: var(--yellow); }}
+   928→        .tag.blue {{ background: var(--blue-bg); color: var(--blue); }}
+   929→        .tag.neutral {{ background: rgba(139,148,158,0.1); color: var(--text-dim); }}
+   930→        .grid {{ display: grid; gap: 16px; margin-bottom: 16px; }}
+   931→        .grid-2 {{ grid-template-columns: 1fr 1fr; }}
+   932→        .grid-3 {{ grid-template-columns: 1fr 1fr 1fr; }}
+   933→        .dca-grid {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }}
+   934→        .ind-charts-grid {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }}
+   935→        .ih-chart-box {{ height: 200px; }}
+   936→        @media (max-width: 900px) {{
+   937→            .ind-charts-grid {{ grid-template-columns: 1fr 1fr; }}
+   938→        }}
+   939→        @media (max-width: 640px) {{
+   940→            .grid-2, .grid-3, .dca-grid {{ grid-template-columns: 1fr; }}
+   941→            .ind-charts-grid {{ grid-template-columns: 1fr; }}
+   942→            body {{ padding: 10px; }}
+   943→            .card {{ padding: 12px; border-radius: 10px; }}
+   944→            .grid {{ gap: 10px; margin-bottom: 10px; }}
+   945→            .header {{ padding: 10px 0; margin-bottom: 10px; }}
+   946→            h1 {{ font-size: 1.25rem; }}
+   947→            .metric-value {{ font-size: 1.2rem; }}
+   948→            .metric-value.hero {{ font-size: 1.5rem; }}
+   949→            .ind-grid {{ gap: 4px; }}
+   950→            .ind-item {{ padding: 5px 8px; }}
+   951→            .ind-item .label {{ font-size: 0.72rem; }}
+   952→            .ind-item .val {{ font-size: 0.78rem; }}
+   953→            .ctrl-panel {{ gap: 6px; }}
+   954→            .ctrl-btn {{ padding: 6px 12px; font-size: 0.75rem; }}
+   955→            table {{ font-size: 0.78rem; }}
+   956→            th, td {{ padding: 5px 6px; }}
+   957→            .chart-container {{ height: 220px; }}
+   958→        }}
+   959→        .card {{
+   960→            background: var(--card);
+   961→            border: 1px solid var(--border);
+   962→            border-radius: 12px;
+   963→            padding: 16px;
+   964→        }}
+   965→        .card-title {{
+   966→            font-size: 0.8rem;
+   967→            text-transform: uppercase;
+   968→            letter-spacing: 0.05em;
+   969→            color: var(--text-dim);
+   970→            margin-bottom: 12px;
+   971→        }}
+   972→        .metric {{ margin-bottom: 10px; }}
+   973→        .metric-label {{ font-size: 0.8rem; color: var(--text-dim); }}
+   974→        .metric-value {{ font-size: 1.4rem; font-weight: 700; }}
+   975→        .metric-value.green {{ color: var(--green); }}
+   976→        .metric-value.red {{ color: var(--red); }}
+   977→        .metric-value.blue {{ color: var(--blue); }}
+   978→        .metric-value.yellow {{ color: var(--yellow); }}
+   979→        .metric-value.purple {{ color: var(--purple); }}
+   980→        .metric-value.dim {{ color: var(--text-dim); }}
+   981→        .metric-sub {{ font-size: 0.8rem; color: var(--text-dim); }}
+   982→        .ind-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }}
+   983→        .ind-item {{
+   984→            display: flex;
+   985→            justify-content: space-between;
+   986→            padding: 6px 10px;
+   987→            border-radius: 6px;
+   988→            background: rgba(255,255,255,0.02);
+   989→        }}
+   990→        .ind-item .label {{ font-size: 0.8rem; color: var(--text-dim); }}
+   991→        .ind-item .val {{ font-weight: 600; font-size: 0.85rem; }}
+   992→        .ind-item .val.green {{ color: var(--green); }}
+   993→        .ind-item .val.red {{ color: var(--red); }}
+   994→        .ind-item .val.blue {{ color: var(--blue); }}
+   995→        .ind-item .val.yellow {{ color: var(--yellow); }}
+   996→        .score-bar {{
+   997→            height: 24px;
+   998→            background: rgba(255,255,255,0.05);
+   999→            border-radius: 12px;
+  1000→            overflow: hidden;
+  1001→            position: relative;
+  1002→            margin-top: 8px;
+  1003→        }}
+  1004→        .score-fill {{
+  1005→            height: 100%;
+  1006→            border-radius: 12px;
+  1007→            transition: width 0.3s;
+  1008→            display: flex;
+  1009→            align-items: center;
+  1010→            padding-left: 10px;
+  1011→            font-size: 0.75rem;
+  1012→            font-weight: 700;
+  1013→            color: white;
+  1014→        }}
+  1015→        .score-fill.green {{ background: var(--green); }}
+  1016→        .score-fill.yellow {{ background: var(--yellow); }}
+  1017→        .score-fill.red {{ background: var(--red); }}
+  1018→        table {{ width: 100%; border-collapse: collapse; font-size: 0.85rem; }}
+  1019→        th {{ text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); color: var(--text-dim); font-size: 0.75rem; text-transform: uppercase; }}
+  1020→        td {{ padding: 6px 10px; border-bottom: 1px solid rgba(48,54,61,0.5); }}
+  1021→        tr.buy td:nth-child(2) {{ color: var(--green); font-weight: 600; }}
+  1022→        tr.sell td:nth-child(2) {{ color: var(--red); font-weight: 600; }}
+  1023→        td.empty {{ text-align: center; color: var(--text-dim); padding: 20px; }}
+  1024→        .chart-container {{ width: 100%; height: 280px; }}
+  1025→        .kill-detail {{ font-size: 0.8rem; color: var(--text-dim); margin-top: 6px; }}
+  1026→        .footer {{
+  1027→            text-align: center;
+  1028→            color: var(--text-dim);
+  1029→            font-size: 0.75rem;
+  1030→            padding: 16px 0;
+  1031→            border-top: 1px solid var(--border);
+  1032→            margin-top: 16px;
+  1033→        }}
+  1034→        .mvrv-zone {{
+  1035→            display: inline-block;
+  1036→            padding: 2px 8px;
+  1037→            border-radius: 4px;
+  1038→            font-size: 0.75rem;
+  1039→            font-weight: 600;
+  1040→        }}
+  1041→        .mvrv-zone.green {{ background: var(--green-bg); color: var(--green); }}
+  1042→        .mvrv-zone.blue {{ background: var(--blue-bg); color: var(--blue); }}
+  1043→        .mvrv-zone.yellow {{ background: var(--yellow-bg); color: var(--yellow); }}
+  1044→        .mvrv-zone.red {{ background: var(--red-bg); color: var(--red); }}
+  1045→        .mvrv-zone.neutral {{ background: rgba(139,148,158,0.1); color: var(--text-dim); }}
+  1046→
+  1047→        /* Control Panel */
+  1048→        .ctrl-panel {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }}
+  1049→        .ctrl-btn {{ padding: 7px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px; }}
+  1050→        .ctrl-btn:hover:not(:disabled) {{ border-color: var(--blue); background: var(--blue-bg); }}
+  1051→        .ctrl-btn:disabled {{ opacity: 0.5; cursor: not-allowed; }}
+  1052→        .ctrl-btn.kill {{ border-color: var(--red); color: var(--red); }}
+  1053→        .ctrl-btn.kill:hover:not(:disabled) {{ background: var(--red-bg); }}
+  1054→        .ctrl-btn.resume {{ border-color: var(--green); color: var(--green); }}
+  1055→        .ctrl-btn.resume:hover:not(:disabled) {{ background: var(--green-bg); }}
+  1056→        .ctrl-btn .spinner {{ width: 12px; height: 12px; border: 2px solid transparent; border-top-color: currentColor; border-radius: 50%; animation: spin 0.6s linear infinite; display: none; }}
+  1057→        .ctrl-btn.loading .spinner {{ display: inline-block; }}
+  1058→        @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+  1059→
+  1060→        .toast-container {{ position: fixed; top: 16px; right: 16px; z-index: 9999; }}
+  1061→        .toast {{ padding: 10px 16px; border-radius: 8px; margin-bottom: 8px; font-size: 0.8rem; font-weight: 500; animation: slideIn 0.3s ease; max-width: 320px; }}
+  1062→        .toast.success {{ background: var(--green-bg); color: var(--green); border: 1px solid var(--green); }}
+  1063→        .toast.error {{ background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }}
+  1064→        .toast.info {{ background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue); }}
+  1065→        @keyframes slideIn {{ from {{ transform: translateX(100%); opacity: 0; }} to {{ transform: translateX(0); opacity: 1; }} }}
+  1066→        .confirm-overlay {{ position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 9998; }}
+  1067→        .confirm-overlay.active {{ display: flex; }}
+  1068→        .confirm-box {{ background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; max-width: 400px; width: 90%; }}
+  1069→        .confirm-box h3 {{ margin-bottom: 8px; }}
+  1070→        .confirm-box p {{ color: var(--text-dim); font-size: 0.85rem; margin-bottom: 16px; }}
+  1071→        .confirm-box input {{ width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 0.85rem; margin-bottom: 12px; }}
+  1072→        .confirm-actions {{ display: flex; gap: 8px; justify-content: flex-end; }}
+  1073→
+  1074→        /* U3: DRY RUN Banner */
+  1075→        .dry-run-banner {{
+  1076→            background: linear-gradient(135deg, rgba(210,153,34,0.15), rgba(210,153,34,0.05));
+  1077→            border: 1px solid var(--yellow);
+  1078→            border-radius: 10px;
+  1079→            padding: 12px 16px;
+  1080→            margin-bottom: 16px;
+  1081→            display: flex;
+  1082→            align-items: center;
+  1083→            gap: 10px;
+  1084→            font-size: 0.85rem;
+  1085→            color: var(--yellow);
+  1086→            font-weight: 600;
+  1087→        }}
+  1088→        .dry-run-banner .banner-icon {{ font-size: 1.3rem; flex-shrink: 0; }}
+  1089→        .dry-run-banner .banner-text {{ color: var(--text); font-weight: 400; font-size: 0.8rem; }}
+  1090→
+  1091→        /* U8: Hero metric */
+  1092→        .metric-value.hero {{ font-size: 1.8rem; }}
+  1093→        .num-mono {{ font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace; }}
+  1094→
+  1095→        /* U9: Freshness badge */
+  1096→        .freshness {{ font-size: 0.72rem; color: var(--text-dim); margin-left: 8px; font-weight: 400; }}
+  1097→
+  1098→        /* U10: Collapsible */
+  1099→        .collapsible-header {{ cursor: pointer; user-select: none; display: flex; justify-content: space-between; align-items: center; }}
+  1100→        .collapsible-header .chevron {{ transition: transform 0.2s; font-size: 0.7rem; }}
+  1101→        .collapsible-header.open .chevron {{ transform: rotate(180deg); }}
+  1102→        .collapsible-body {{ max-height: 0; overflow: hidden; transition: max-height 0.3s ease; }}
+  1103→        .collapsible-body.open {{ max-height: 800px; }}
+  1104→
+  1105→        /* U2: Onboarding hero */
+  1106→        .onboarding-hero {{
+  1107→            text-align: center;
+  1108→            padding: 40px 20px;
+  1109→            border: 1px dashed var(--border);
+  1110→            border-radius: 12px;
+  1111→            margin-bottom: 16px;
+  1112→        }}
+  1113→        .onboarding-hero .onboard-icon {{ font-size: 2.5rem; margin-bottom: 12px; opacity: 0.7; }}
+  1114→        .onboarding-hero .onboard-title {{ font-size: 1.1rem; font-weight: 600; margin-bottom: 6px; }}
+  1115→        .onboarding-hero .onboard-desc {{ font-size: 0.85rem; color: var(--text-dim); max-width: 360px; margin: 0 auto; line-height: 1.6; }}
+  1116→
+  1117→        /* Sopr source tag */
+  1118→        .tag.sopr-src {{ font-size: 0.65rem; vertical-align: middle; margin-left: 4px; opacity: 0.7; }}
+  1119→    </style>
+  1120→</head>
+  1121→<body>
+  1122→    <div class="toast-container" id="toasts"></div>
+  1123→    <div class="confirm-overlay" id="confirmOverlay">
+  1124→        <div class="confirm-box">
+  1125→            <h3 id="confirmTitle">Confirm</h3>
+  1126→            <p id="confirmMsg"></p>
+  1127→            <input type="text" id="confirmInput" placeholder="Reason (optional)">
+  1128→            <div class="confirm-actions">
+  1129→                <button class="ctrl-btn" onclick="closeConfirm()">Cancel</button>
+  1130→                <button class="ctrl-btn kill" id="confirmOk">Confirm</button>
+  1131→            </div>
+  1132→        </div>
+  1133→    </div>
+  1134→    <!-- Token Input Modal -->
+  1135→    <div class="confirm-overlay" id="tokenOverlay" style="z-index:10001;">
+  1136→        <div class="confirm-box" style="max-width:520px;">
+  1137→            <h3 style="margin-bottom:8px;">GitHub PAT Token</h3>
+  1138→            <p style="margin-bottom:12px;font-size:0.82rem;color:var(--text-dim);line-height:1.6;">
+  1139→                ปุ่ม Update / Kill / Resume ต้องใช้ GitHub Personal Access Token (PAT)<br>
+  1140→                <b style="color:var(--text);">สร้างที่:</b> <a href="https://github.com/settings/tokens" target="_blank" style="color:var(--blue);">github.com/settings/tokens</a><br>
+  1141→                <b style="color:var(--text);">Permission:</b> <code style="background:var(--bg);padding:2px 6px;border-radius:4px;font-size:0.78rem;">actions:write</code><br>
+  1142→                <span style="color:var(--yellow);">Token เก็บใน browser เท่านั้น ไม่ส่งออกไปที่อื่น</span>
+  1143→            </p>
+  1144→            <input type="password" id="tokenInput" placeholder="ghp_xxxxxxxxxxxx" autocomplete="off" style="font-family:monospace;font-size:0.85rem;">
+  1145→            <div class="confirm-actions">
+  1146→                <button class="ctrl-btn" onclick="closeTokenModal()">ยกเลิก</button>
+  1147→                <button class="ctrl-btn resume" id="tokenSubmitBtn" onclick="submitToken()">บันทึก Token</button>
+  1148→            </div>
+  1149→        </div>
+  1150→    </div>
+  1151→    <!-- U3: DRY RUN Banner -->
+  1152→    {dry_banner_html}
+  1153→
+  1154→    <!-- Header -->
+  1155→    <div class="header">
+  1156→        <div class="header-left">
+  1157→            <h1>Phoenix v5.1</h1>
+  1158→            <!-- U9: Freshness badge -->
+  1159→            <span class="freshness" id="freshness"></span>
+  1160→        </div>
+  1161→        <div class="header-right">
+  1162→            {status_html}
+  1163→        </div>
+  1164→    </div>
+  1165→
+  1166→    <!-- Control Panel -->
+  1167→    <div class="card" style="margin-bottom:16px;">
+  1168→        <div class="ctrl-panel">
+  1169→            <button class="ctrl-btn" id="btnUpdate" onclick="doUpdate()">
+  1170→                <span class="spinner"></span>
+  1171→                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+  1172→                Update
+  1173→            </button>
+  1174→            <button class="ctrl-btn {'kill' if bot_alive else 'resume'}" id="btnKill" onclick="doKillSwitch()">
+  1175→                <span class="spinner"></span>
+  1176→                {'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> Kill Bot' if bot_alive else '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> Resume Bot'}
+  1177→            </button>
+  1178→            <a href="https://github.com/manhiiautomation-gif/Smart-dca/actions" target="_blank" class="ctrl-btn" style="text-decoration:none;">
+  1179→                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+  1180→                Logs
+  1181→            </a>
+  1182→            <span id="tokenStatus" style="margin-left:auto;font-size:0.7rem;color:var(--text-dim);cursor:pointer;" onclick="openTokenModal()" title="คลิกเพื่อตั้ง/เปลี่ยน Token"></span>
+  1183→        </div>
+  1184→    </div>
+  1185→
+  1186→    <!-- U2: Onboarding Hero (shown only when empty state) -->
+  1187→    {("""<div class="onboarding-hero">
+  1188→        <div class="onboard-icon">&#128200;</div>
+  1189→        <div class="onboard-title">ยินดีต้อนรับสู่ Phoenix DCA Bot</div>
+  1190→        <div class="onboard-desc">
+  1191→            ระบบพร้อมทำงานแล้ว - การซื้อครั้งแรกจะเกิดขึ้นอัตโนมัติเมื่อถึงเวลา DCA<br>
+  1192→            <small>รันถัดไป: <b>""" + next_run_str + ' น.</b> (' + next_run_day + ')</small>' + ('<br><span style="color:var(--yellow);">&#9888; ขณะนี้อยู่ในโหมดทดสอบ</span>' if dry_run else '') + """
+  1193→        </div>
+  1194→    </div>""") if is_empty else ''}
+  1195→
+  1196→    <!-- Row 1: Portfolio + Kill Switch -->
+  1197→    <div class="grid grid-2">
+  1198→        <!-- Portfolio Summary -->
+  1199→        <div class="card">
+  1200→            <div class="card-title">Portfolio Summary</div>
+  1201→            <div class="metric">
+  1202→                <div class="metric-label">Portfolio Value</div>
+  1203→                <div class="metric-value hero {roi_class} num-mono">{fmt_num(portfolio)} <small style="font-size:0.7em;opacity:0.7;">{currency}</small></div>
+  1204→            </div>
+  1205→            {('<div class="metric" style="margin-top:-4px;"><div class="metric-label">' + change_label + '</div><div class="metric-value ' + chg_class + '" style="font-size:0.95rem;">' + fmt_num(change_abs, 2) + ' ' + currency + ' (' + f'{change_pct:+.2f}' + '%)</div></div>') if change_pct is not None else ''}
+  1206→            <div class="metric">
+  1207→                <div class="metric-label">BTC Holdings</div>
+  1208→                <div class="metric-value blue num-mono">{fmt_btc(btc_bal)}</div>
+  1209→                <div class="metric-sub">{fmt_num(btc_bal * current_price)} {currency}</div>
+  1210→            </div>
+  1211→            <div class="metric">
+  1212→                <div class="metric-label">Cash Balance</div>
+  1213→                <div class="metric-value">{fmt_num(cash_bal)} {currency}</div>
+  1214→            </div>
+  1215→            {('<div class="metric" style="margin-top:-4px;"><div class="metric-label">Avg Buy Price</div><div class="metric-value dim" style="font-size:0.95rem;">' + fmt_num(avg_buy_price) + ' ' + currency + '</div></div>') if avg_buy_price > 0 else ''}
+  1216→            {('<div class="metric" style="margin-top:-4px;"><div class="metric-label">Unrealized P&L</div><div class="metric-value ' + upnl_class + '" style="font-size:0.95rem;">' + fmt_num(unrealized_pnl) + ' ' + currency + ' (' + f'{unrealized_pnl_pct:+.1f}' + '%)</div></div>') if avg_buy_price > 0 else ''}
+  1217→            {('<div class="metric" style="margin-top:-4px;"><div class="metric-label">Avg Buy Size</div><div class="metric-value dim" style="font-size:0.95rem;">' + fmt_num(avg_buy_size) + ' ' + currency + '/trade</div></div>') if avg_buy_size > 0 else ''}
+  1218→            <div class="grid grid-2" style="margin-top:12px; gap:8px;">
+  1219→                <div class="metric">
+  1220→                    <div class="metric-label">ROI (ตลอดกาล)</div>
+  1221→                    <div class="metric-value {roi_class}">{roi:+.1f}%</div>
+  1222→                </div>
+  1223→                <div class="metric">
+  1224→                    <div class="metric-label">Total Invested</div>
+  1225→                    <div class="metric-value dim">{fmt_num(invested)} {currency}</div>
+  1226→                </div>
+  1227→                <div class="metric">
+  1228→                    <div class="metric-label">Peak Value</div>
+  1229→                    <div class="metric-value dim">{fmt_num(peak)}</div>
+  1230→                </div>
+  1231→                <div class="metric">
+  1232→                    <div class="metric-label">Max Drawdown</div>
+  1233→                    <div class="metric-value {max_dd_class}">{fmt_pct(max_dd)}</div>
+  1234→                </div>
+  1235→            </div>
+  1236→        </div>
+  1237→
+  1238→        <!-- System Status + Kill Switch -->
+  1239→        <div class="card">
+  1240→            <div class="card-title">System Status</div>
+  1241→            <div class="ind-grid">
+  1242→                <div class="ind-item">
+  1243→                    <span class="label">สวิตช์หยุดฉุกเฉิน L1</span>
+  1244→                    <span class="val">{l1_html}</span>
+  1245→                </div>
+  1246→                <div class="ind-item">
+  1247→                    <span class="label">สวิตช์หยุดฉุกเฉิน L2</span>
+  1248→                    <span class="val">{l2_html}</span>
+  1249→                </div>
+  1250→                <div class="ind-item">
+  1251→                    <span class="label">Exchange</span>
+  1252→                    <span class="val">{exchange_name or cfg.EXCHANGE.upper()}</span>
+  1253→                </div>
+  1254→                <div class="ind-item">
+  1255→                    <span class="label">รันล่าสุด</span>
+  1256→                    <span class="val">{last_run}</span>
+  1257→                </div>
+  1258→                <div class="ind-item">
+  1259→                    <span class="label">จำนวนรัน (ตลอดกาล)</span>
+  1260→                    <span class="val">{run_count}</span>
+  1261→                </div>
+  1262→                <div class="ind-item">
+  1263→                    <span class="label">ราคา BTC ตอนนี้</span>
+  1264→                    <span class="val num-mono">{fmt_num(current_price)} {currency}</span>
+  1265→                </div>
+  1266→                <!-- U11: Next Run -->
+  1267→                <div class="ind-item">
+  1268→                    <span class="label">รันถัดไป</span>
+  1269→                    <span class="val blue">{next_run_str} น.</span>
+  1270→                </div>
+  1271→            </div>
+  1272→            {('<div class="kill-detail" style="margin-top:12px; color:var(--red);">'
+  1273→              + f'Reason: {ks_reason}<br>'
+  1274→              + f'At: {ks_time}<br>'
+  1275→              + f'By: {ks_by}'
+  1276→              + '</div>') if not bot_alive else ''}
+  1277→        </div>
+  1278→    </div>
+  1279→
+  1280→    <!-- Row 1.5: DCA Buy Info -->
+  1281→    <div class="card" style="margin-bottom:16px;">
+  1282→        <div class="card-title">DCA Status</div>
+  1283→        {dca_card_html}
+  1284→    </div>
+  1285→
+  1286→    <!-- Row 2: Indicators -->
+  1287→    <div class="grid grid-2">
+  1288→        <div class="card">
+  1289→            <div class="card-title">Indicators</div>
+  1290→            {bear_html}
+  1291→            <div class="ind-grid" style="margin-top:8px;">
+  1292→                <div class="ind-item">
+  1293→                    <span class="label">MVRV</span>
+  1294→                    <span class="val {mvrv_color(mvrv)}">{fmt_num(mvrv, 3)}</span>
+  1295→                </div>
+  1296→                <div class="ind-item">
+  1297→                    <span class="label">MVRV Zone</span>
+  1298→                    <span class="mvrv-zone {mvrv_zone_class}">{mvrv_zone}</span>
+  1299→                </div>
+  1300→                <div class="ind-item">
+  1301→                    <span class="label">MVRV %ile</span>
+  1302→                    <span class="val">{fmt_pct(mvrv_pct)}</span>
+  1303→                </div>
+  1304→                <div class="ind-item">
+  1305→                    <span class="label">MVRV Z-Score</span>
+  1306→                    <span class="val">{fmt_num(mvrv_z, 2)}</span>
+  1307→                </div>
+  1308→                <div class="ind-item">
+  1309→                    <span class="label">RSI (14)</span>
+  1310→                    <span class="val {rsi_color(rsi_val)}">{fmt_num(rsi_val, 1)}</span>
+  1311→                </div>
+  1312→                <div class="ind-item">
+  1313→                    <span class="label">MACD Hist</span>
+  1314→                    <span class="val">{fmt_num(macd_h, 4)}</span>
+  1315→                </div>
+  1316→                <div class="ind-item">
+  1317→                    <span class="label">NUPL</span>
+  1318→                    <span class="val">{fmt_num(nupl, 3)}</span>
+  1319→                </div>
+  1320→                <div class="ind-item">
+  1321→                    <span class="label">SOPR</span>
+  1322→                    <span class="val">{fmt_num(sopr, 3)} <small class="tag neutral sopr-src">{('MVRV-proxy' if 'proxy' in (sopr_source or '') else sopr_source or 'N/A')}</small></span>
+  1323→                </div>
+  1324→                <div class="ind-item">
+  1325→                    <span class="label">SMA 200</span>
+  1326→                    <span class="val">{fmt_num(sma200)}</span>
+  1327→                </div>
+  1328→                <div class="ind-item">
+  1329→                    <span class="label">SMA 365</span>
+  1330→                    <span class="val">{fmt_num(sma365)}</span>
+  1331→                </div>
+  1332→            </div>
+  1333→            <div style="margin-top:12px;padding:10px;border-radius:8px;background:var(--{next_action_class}-bg, rgba(139,148,158,0.1));border:1px solid var(--{next_action_class}, var(--border));">
+  1334→                <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">NEXT EXPECTED ACTION</div>
+  1335→                <div style="font-size:13px;font-weight:600;color:var(--{next_action_class}, var(--text));">{next_action}</div>
+  1336→            </div>
+  1337→        </div>
+  1338→
+  1339→        <!-- Sell Logic -->
+  1340→        <div class="card">
+  1341→            <div class="card-title">Sell Logic</div>
+  1342→            <div class="metric">
+  1343→                <div class="metric-label">Sell Score <span class="tag {path_class}">Path: {path_taken}</span></div>
+  1344→                <div class="score-bar">
+  1345→                    <div class="score-fill {ss_color}" style="width:{ss_width}%">
+  1346→                        {ss} / 100
+  1347→                    </div>
+  1348→                </div>
+  1349→            </div>
+  1350→            <div class="ind-grid" style="margin-top:12px;">
+  1351→                <div class="ind-item">
+  1352→                    <span class="label">Cooldown</span>
+  1353→                    <span class="val">{cooldown} days</span>
+  1354→                </div>
+  1355→                <div class="ind-item">
+  1356→                    <span class="label">ATH</span>
+  1357→                    <span class="val">{fmt_num(ath)}</span>
+  1358→                </div>
+  1359→            </div>
+  1360→            <div style="margin-top:16px;">
+  1361→                <div class="card-title">Trade Statistics</div>
+  1362→                <div class="ind-grid">
+  1363→                    <div class="ind-item">
+  1364→                        <span class="label">Total Buys</span>
+  1365→                        <span class="val green">{buy_count}</span>
+  1366→                    </div>
+  1367→                    <div class="ind-item">
+  1368→                        <span class="label">Total Sells</span>
+  1369→                        <span class="val red">{sell_count}</span>
+  1370→                    </div>
+  1371→                    <div class="ind-item">
+  1372→                        <span class="label">BTC ซื้อรวม</span>
+  1373→                        <span class="val num-mono">{fmt_btc(total_btc_bought)}</span>
+  1374→                    </div>
+  1375→                    <div class="ind-item">
+  1376→                        <span class="label">BTC ขายรวม</span>
+  1377→                        <span class="val num-mono">{fmt_btc(total_btc_sold)}</span>
+  1378→                    </div>
+  1379→                    <div class="ind-item">
+  1380→                        <span class="label">Sell Proceeds</span>
+  1381→                        <span class="val">{fmt_num(total_sell_proceeds)}</span>
+  1382→                    </div>
+  1383→                    <div class="ind-item">
+  1384→                        <span class="label">Reserve Used</span>
+  1385→                        <span class="val">{fmt_num(total_reserve)}</span>
+  1386→                    </div>
+  1387→                    <div class="ind-item">
+  1388→                        <span class="label">Total Fees</span>
+  1389→                        <span class="val yellow">{fmt_num(total_fees)}</span>
+  1390→                    </div>
+  1391→                    <div class="ind-item">
+  1392→                        <span class="label">Last Trade</span>
+  1393→                        <span class="val">{last_trade_date}</span>
+  1394→                    </div>
+  1395→                </div>
+  1396→            </div>
+  1397→        </div>
+  1398→    </div>
+  1399→
+  1400→    <!-- Row 3: Portfolio Chart -->
+  1401→    <div class="card" style="margin-bottom:16px;">
+  1402→        <div class="card-title">Portfolio Value Over Time</div>
+  1403→        <div class="chart-container" id="chart"></div>
+  1404→    </div>
+  1405→
+  1406→    <!-- Row 3b: Indicator History Charts (B22) -->
+  1407→    <div class="card" style="margin-bottom:16px;">
+  1408→        <div class="card-title">Indicator History (last {len(ih_dates)} days)</div>
+  1409→        <div class="ind-charts-grid" id="ihCharts">
+  1410→            <div class="ih-chart-box"><div id="ihChartPrice"></div></div>
+  1411→            <div class="ih-chart-box"><div id="ihChartMvrv"></div></div>
+  1412→            <div class="ih-chart-box"><div id="ihChartRsi"></div></div>
+  1413→            <div class="ih-chart-box"><div id="ihChartSopr"></div></div>
+  1414→            <div class="ih-chart-box"><div id="ihChartNupl"></div></div>
+  1415→        </div>
+  1416→    </div>
+  1417→
+  1418→    <!-- Row 4: Recent Trades -->
+  1419→    <div class="card">
+  1420→        <div class="card-title">Recent Trades (last 10)</div>
+  1421→        <table>
+  1422→            <thead>
+  1423→                <tr>
+  1424→                    <th>Date</th>
+  1425→                    <th>Type</th>
+  1426→                    <th>Amount ({currency})</th>
+  1427→                    <th>BTC</th>
+  1428→                    <th>Price</th>
+  1429→                    <th>Fee</th>
+  1430→                </tr>
+  1431→            </thead>
+  1432→            <tbody>
+  1433→                {trade_rows}
+  1434→            </tbody>
+  1435→        </table>
+  1436→    </div>
+  1437→
+  1438→    {config_html}
+  1439→
+  1440→    <!-- Footer -->
+  1441→    <div class="footer">
+  1442→        Phoenix v5.1 DCA Bot | Generated: {now_str} | Auto-refresh: 5 min | <a href="https://github.com/manhiiautomation-gif/Smart-dca" target="_blank" style="color:var(--blue);text-decoration:none;">GitHub</a>
+  1443→    </div>
+  1444→
+  1445→    <script>
+  1446→    (function() {{
+  1447→        // GitHub Actions direct dispatch (replaces Netlify serverless function)
+  1448→        var REPO = 'manhiiautomation-gif/Smart-dca';
+  1449→        var API_BASE = 'https://api.github.com/repos/' + REPO + '/actions/workflows';
+  1450→        var WORKFLOWS = {{
+  1451→            update: 'dashboard-trigger.yml',
+  1452→            kill: 'dashboard-trigger.yml',
+  1453→            resume: 'dashboard-trigger.yml'
+  1454→        }};
+  1455→
+  1456→        // ── Token management (custom modal, no prompt()) ──
+  1457→        var _pendingTokenCallback = null;
+  1458→
+  1459→        function getGitHubToken() {{
+  1460→            var params = new URLSearchParams(window.location.search);
+  1461→            var token = params.get('token');
+  1462→            if (!token) {{
+  1463→                try {{ token = localStorage.getItem('gh_pat'); }} catch(e) {{}}
+  1464→            }}
+  1465→            return token || null;
+  1466→        }}
+  1467→
+  1468→        function setGitHubToken(token) {{
+  1469→            try {{ localStorage.setItem('gh_pat', token); }} catch(e) {{}}
+  1470→            updateTokenStatus();
+  1471→        }}
+  1472→
+  1473→        function removeGitHubToken() {{
+  1474→            try {{ localStorage.removeItem('gh_pat'); }} catch(e) {{}}
+  1475→            updateTokenStatus();
+  1476→        }}
+  1477→
+  1478→        function updateTokenStatus() {{
+  1479→            var el = document.getElementById('tokenStatus');
+  1480→            if (!el) return;
+  1481→            var token = getGitHubToken();
+  1482→            if (token) {{
+  1483→                var masked = token.slice(0, 6) + '...' + token.slice(-4);
+  1484→                el.innerHTML = '<span style="color:var(--green);">&#9679;</span> Token: ' + masked;
+  1485→                el.title = 'คลิกเพื่อเปลี่ยน Token';
+  1486→            }} else {{
+  1487→                el.innerHTML = '<span style="color:var(--red);">&#9679;</span> ไม่มี Token';
+  1488→                el.title = 'คลิกเพื่อตั้งค่า Token';
+  1489→            }}
+  1490→        }}
+  1491→
+  1492→        window.openTokenModal = function(pendingCallback) {{
+  1493→            _pendingTokenCallback = pendingCallback || null;
+  1494→            var overlay = document.getElementById('tokenOverlay');
+  1495→            var input = document.getElementById('tokenInput');
+  1496→            var existing = getGitHubToken();
+  1497→            input.value = existing || '';
+  1498→            overlay.classList.add('active');
+  1499→            setTimeout(function() {{ input.focus(); }}, 100);
+  1500→        }};
+  1501→
+  1502→        window.closeTokenModal = function() {{
+  1503→            document.getElementById('tokenOverlay').classList.remove('active');
+  1504→            if (_pendingTokenCallback) {{
+  1505→                _pendingTokenCallback(null);
+  1506→                _pendingTokenCallback = null;
+  1507→            }}
+  1508→        }};
+  1509→
+  1510→        window.submitToken = function() {{
+  1511→            var input = document.getElementById('tokenInput');
+  1512→            var val = input.value.trim();
+  1513→            if (!val) {{
+  1514→                showToast('กรุณาใส่ Token', 'error');
+  1515→                return;
+  1516→            }}
+  1517→            setGitHubToken(val);
+  1518→            closeTokenModal();
+  1519→            showToast('Token บันทึกแล้ว', 'success');
+  1520→            if (_pendingTokenCallback) {{
+  1521→                var cb = _pendingTokenCallback;
+  1522→                _pendingTokenCallback = null;
+  1523→                cb(val);
+  1524→            }}
+  1525→        }};
+  1526→
+  1527→        // Allow Enter key in token input
+  1528→        var tokenInputEl = document.getElementById('tokenInput');
+  1529→        if (tokenInputEl) {{
+  1530→            tokenInputEl.addEventListener('keydown', function(e) {{
+  1531→                if (e.key === 'Enter') submitToken();
+  1532→                if (e.key === 'Escape') closeTokenModal();
+  1533→            }});
+  1534→        }}
+  1535→        var tokenOverlayEl = document.getElementById('tokenOverlay');
+  1536→        if (tokenOverlayEl) {{
+  1537→            tokenOverlayEl.addEventListener('click', function(e) {{
+  1538→                if (e.target === this) closeTokenModal();
+  1539→            }});
+  1540→        }}
+  1541→
+  1542→        function requireToken(callback) {{
+  1543→            var token = getGitHubToken();
+  1544→            if (token) {{
+  1545→                callback(token);
+  1546→                return;
+  1547→            }}
+  1548→            openTokenModal(function(submittedToken) {{
+  1549→                if (submittedToken) {{
+  1550→                    callback(submittedToken);
+  1551→                }} else {{
+  1552→                    showToast('ต้องมี Token ก่อนกดปุ่ม', 'error');
+  1553→                }}
+  1554→            }});
+  1555→        }}
+  1556→
+  1557→        // ── Toast & Loading ──
+  1558→        function showToast(msg, type) {{
+  1559→            var c = document.getElementById('toasts');
+  1560→            var t = document.createElement('div');
+  1561→            t.className = 'toast ' + (type || 'info');
+  1562→            t.textContent = msg;
+  1563→            c.appendChild(t);
+  1564→            setTimeout(function() {{ t.remove(); }}, 5000);
+  1565→        }}
+  1566→
+  1567→        function setLoading(btn, on) {{
+  1568→            if (on) btn.classList.add('loading'); else btn.classList.remove('loading');
+  1569→            btn.disabled = on;
+  1570→        }}
+  1571→
+  1572→        function dispatchWorkflow(workflowFile, inputs, token) {{
+  1573→            return fetch(API_BASE + '/' + workflowFile + '/dispatches', {{
+  1574→                method: 'POST',
+  1575→                headers: {{
+  1576→                    'Authorization': 'Bearer ' + token,
+  1577→                    'Accept': 'application/vnd.github.v3+json',
+  1578→                    'Content-Type': 'application/json'
+  1579→                }},
+  1580→                body: JSON.stringify({{ ref: 'main', inputs: inputs }})
+  1581→            }});
+  1582→        }}
+  1583→
+  1584→        // ── Actions ──
+  1585→        window.doUpdate = function() {{
+  1586→            var btn = document.getElementById('btnUpdate');
+  1587→            requireToken(function(token) {{
+  1588→                setLoading(btn, true);
+  1589→                dispatchWorkflow('dashboard-trigger.yml', {{ action: 'update' }}, token)
+  1590→                .then(function(r) {{
+  1591→                    if (r.status === 204) {{
+  1592→                        showToast('ส่งคำสั่ง Update แล้ว! รอ ~2 นาที แล้วรีเฟรชหน้า', 'success');
+  1593→                    }} else {{
+  1594→                        return r.json().then(function(d) {{
+  1595→                            throw new Error(d.message || 'HTTP ' + r.status);
+  1596→                        }});
+  1597→                    }}
+  1598→                }})
+  1599→                .catch(function(e) {{ showToast('Error: ' + e.message, 'error'); }})
+  1600→                .finally(function() {{ setTimeout(function() {{ setLoading(btn, false); }}, 3000); }});
+  1601→            }});
+  1602→        }};
+  1603→
+  1604→        var confirmCallback = null;
+  1605→        window.doKillSwitch = function() {{
+  1606→            var isAlive = {str(bot_alive).lower()};
+  1607→            var overlay = document.getElementById('confirmOverlay');
+  1608→            var input = document.getElementById('confirmInput');
+  1609→            var okBtn = document.getElementById('confirmOk');
+  1610→            var title = document.getElementById('confirmTitle');
+  1611→            var msg = document.getElementById('confirmMsg');
+  1612→
+  1613→            if (isAlive) {{
+  1614→                title.textContent = 'Kill Bot?';
+  1615→                msg.innerHTML = '\u26a0\ufe0f ก่อน Kill:<br>' +
+  1616→                    '\u2022 กำลังถือ: <b>' + '{fmt_num(btc_bal)}' + ' BTC</b> (~' + '{fmt_num(btc_bal * current_price)}' + ' {currency})<br>' +
+  1617→                    '\u2022 ถ้าราคาเปลี่ยน จะไม่มี auto-sell<br>' +
+  1618→                    '\u2022 ต้อง Resume ด้วยมือเท่านั้น';
+  1619→                input.value = '';
+  1620→                input.placeholder = 'Reason (optional)';
+  1621→                input.style.display = 'block';
+  1622→                okBtn.textContent = 'Kill';
+  1623→                okBtn.className = 'ctrl-btn kill';
+  1624→                confirmCallback = function() {{
+  1625→                    requireToken(function(token) {{
+  1626→                        var btn = document.getElementById('btnKill');
+  1627→                        setLoading(btn, true);
+  1628→                        dispatchWorkflow('dashboard-trigger.yml', {{ action: 'kill', reason: input.value || 'Manual kill from dashboard' }}, token)
+  1629→                        .then(function(r) {{
+  1630→                            if (r.status === 204) showToast('Kill switch activated!', 'success');
+  1631→                            else throw new Error('HTTP ' + r.status);
+  1632→                        }})
+  1633→                        .catch(function(e) {{ showToast('Error: ' + e.message, 'error'); }})
+  1634→                        .finally(function() {{ setTimeout(function() {{ setLoading(btn, false); }}, 3000); }});
+  1635→                    }});
+  1636→                }};
+  1637→            }} else {{
+  1638→                title.textContent = 'Resume Bot?';
+  1639→                msg.textContent = 'Bot \u0e08\u0e30\u0e01\u0e25\u0e31\u0e1a\u0e21\u0e32\u0e17\u0e33\u0e07\u0e32\u0e19\u0e1b\u0e01\u0e15\u0e34';
+  1640→                input.style.display = 'none';
+  1641→                okBtn.textContent = 'Resume';
+  1642→                okBtn.className = 'ctrl-btn resume';
+  1643→                confirmCallback = function() {{
+  1644→                    requireToken(function(token) {{
+  1645→                        var btn = document.getElementById('btnKill');
+  1646→                        setLoading(btn, true);
+  1647→                        dispatchWorkflow('dashboard-trigger.yml', {{ action: 'resume' }}, token)
+  1648→                        .then(function(r) {{
+  1649→                            if (r.status === 204) showToast('Bot resumed!', 'success');
+  1650→                            else throw new Error('HTTP ' + r.status);
+  1651→                        }})
+  1652→                        .catch(function(e) {{ showToast('Error: ' + e.message, 'error'); }})
+  1653→                        .finally(function() {{ setTimeout(function() {{ setLoading(btn, false); }}, 3000); }});
+  1654→                    }});
+  1655→                }};
+  1656→            }}
+  1657→            overlay.classList.add('active');
+  1658→        }};
+  1659→
+  1660→        window.closeConfirm = function() {{
+  1661→            document.getElementById('confirmOverlay').classList.remove('active');
+  1662→            confirmCallback = null;
+  1663→        }};
+  1664→
+  1665→        document.getElementById('confirmOk').addEventListener('click', function() {{
+  1666→            if (confirmCallback) confirmCallback();
+  1667→            closeConfirm();
+  1668→        }});
+  1669→        document.getElementById('confirmOverlay').addEventListener('click', function(e) {{
+  1670→            if (e.target === this) closeConfirm();
+  1671→        }});
+  1672→        document.addEventListener('keydown', function(e) {{
+  1673→            if (e.key === 'Escape') {{
+  1674→                var confirmEl = document.getElementById('confirmOverlay');
+  1675→                if (confirmEl && confirmEl.classList.contains('active')) {{ closeConfirm(); }}
+  1676→                else {{ toggleHelp(); }}
+  1677→            }}
+  1678→        }});
+  1679→        // Help modal
+  1680→        window.toggleHelp = function() {{
+  1681→            var o = document.getElementById('helpOverlay');
+  1682→            if (o) o.classList.toggle('active');
+  1683→        }};
+  1684→        var helpO = document.getElementById('helpOverlay');
+  1685→        if (helpO) helpO.addEventListener('click', function(e) {{
+  1686→            if (e.target === this) toggleHelp();
+  1687→        }});
+  1688→        // Init token status on page load
+  1689→        updateTokenStatus();
+  1690→
+  1691→        // Demo card removed — bot is now live
+  1692→
+  1693→        // U9: Freshness badge — shows relative time since generation
+  1694→        (function() {{
+  1695→            var genTime = {now_ts} * 1000;
+  1696→            var el = document.getElementById('freshness');
+  1697→            if (!el) return;
+  1698→            function update() {{
+  1699→                var diff = Math.floor((Date.now() - genTime) / 60000);
+  1700→                if (diff < 1) el.textContent = 'อัปเดตเมื่อสักครู่';
+  1701→                else if (diff < 60) el.textContent = 'อัปเดต ' + diff + ' นาทีก่อน';
+  1702→                else {{ var h = Math.floor(diff/60); var m = diff % 60; el.textContent = 'อัปเดต ' + h + ' ชม. ' + m + ' นาทีก่อน'; }}
+  1703→            }}
+  1704→            update();
+  1705→            setInterval(update, 30000);
+  1706→        }})();
+  1707→    }})();
+  1708→    </script>
+  1709→
+  1710→    <!-- ECharts -->
+  1711→    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  1712→    <script>
+  1713→        (function() {{
+  1714→            var dates = {chart_dates};
+  1715→            var values = {chart_values};
+  1716→            var types = {chart_types};
+  1717→
+  1718→            if (dates.length === 0) {{
+  1719→                document.getElementById('chart').innerHTML =
+  1720→                    '<div style="text-align:center;color:var(--text-dim);padding:60px 20px;">' +
+  1721→                    '<div style="font-size:2rem;opacity:0.4;margin-bottom:8px;">&#128200;</div>' +
+  1722→                    '<div style="font-size:0.9rem;">กราฟจะปรากฏหลังการซื้อขายครั้งแรก</div>' +
+  1723→                    '<div style="font-size:0.78rem;margin-top:4px;">การซื้อ DCA อัตโนมัติจะเริ่มต้นเมื่อถึงเวลาที่กำหนด</div></div>';
+  1724→                return;
+  1725→            }}
+  1726→
+  1727→            var buyDates = [], sellDates = [];
+  1728→            var buyPoints = [], sellPoints = [];
+  1729→            for (var i = 0; i < types.length; i++) {{
+  1730→                if (types[i] === 'buy') {{ buyDates.push(dates[i]); buyPoints.push(values[i]); }}
+  1731→                if (types[i] === 'sell') {{ sellDates.push(dates[i]); sellPoints.push(values[i]); }}
+  1732→            }}
+  1733→
+  1734→            var option = {{
+  1735→                backgroundColor: 'transparent',
+  1736→                tooltip: {{
+  1737→                    trigger: 'axis',
+  1738→                    backgroundColor: '#1c2128',
+  1739→                    borderColor: '#30363d',
+  1740→                    textStyle: {{ color: '#e6edf3', fontSize: 12 }}
+  1741→                }},
+  1742→                grid: {{ left: 60, right: 20, top: 20, bottom: 40 }},
+  1743→                xAxis: {{
+  1744→                    type: 'category',
+  1745→                    data: dates,
+  1746→                    axisLabel: {{ color: '#8b949e', fontSize: 10, rotate: 30 }},
+  1747→                    axisLine: {{ lineStyle: {{ color: '#30363d' }} }}
+  1748→                }},
+  1749→                yAxis: {{
+  1750→                    type: 'value',
+  1751→                    axisLabel: {{ color: '#8b949e', fontSize: 10, formatter: function(v) {{ return v.toLocaleString(); }} }},
+  1752→                    splitLine: {{ lineStyle: {{ color: '#21262d' }} }}
+  1753→                }},
+  1754→                series: [
+  1755→                    {{
+  1756→                        name: 'Portfolio',
+  1757→                        type: 'line',
+  1758→                        data: values,
+  1759→                        smooth: true,
+  1760→                        lineStyle: {{ color: '#58a6ff', width: 2 }},
+  1761→                        areaStyle: {{
+  1762→                            color: {{
+  1763→                                type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+  1764→                                colorStops: [
+  1765→                                    {{ offset: 0, color: 'rgba(88,166,255,0.2)' }},
+  1766→                                    {{ offset: 1, color: 'rgba(88,166,255,0.01)' }}
+  1767→                                ]
+  1768→                            }}
+  1769→                        }},
+  1770→                        itemStyle: {{ color: '#58a6ff' }}
+  1771→                    }},
+  1772→                    {{
+  1773→                        name: 'Buy',
+  1774→                        type: 'scatter',
+  1775→                        data: buyPoints.length ? buyPoints.map(function(v, i) {{ return [buyDates[i], v]; }}) : [],
+  1776→                        symbol: 'triangle',
+  1777→                        symbolSize: 12,
+  1778→                        itemStyle: {{ color: '#3fb950' }},
+  1779→                        tooltip: {{ formatter: function(p) {{ return 'BUY<br>Value: ' + p.value[1].toLocaleString(); }} }}
+  1780→                    }},
+  1781→                    {{
+  1782→                        name: 'Sell',
+  1783→                        type: 'scatter',
+  1784→                        data: sellPoints.length ? sellPoints.map(function(v, i) {{ return [sellDates[i], v]; }}) : [],
+  1785→                        symbol: 'triangle',
+  1786→                        symbolRotate: 180,
+  1787→                        symbolSize: 12,
+  1788→                        itemStyle: {{ color: '#f85149' }},
+  1789→                        tooltip: {{ formatter: function(p) {{ return 'SELL<br>Value: ' + p.value[1].toLocaleString(); }} }}
+  1790→                    }}
+  1791→                ]
+  1792→            }};
+  1793→
+  1794→            var chart = echarts.init(document.getElementById('chart'));
+  1795→            chart.setOption(option);
+  1796→            window.addEventListener('resize', function() {{ chart.resize(); }});
+  1797→        }})();
+  1798→
+  1799→        // B22: Indicator History Charts (built via _build_indicator_charts_js)
+  1800→        {_build_indicator_charts_js(ih_dates, ih_price, ih_mvrv, ih_rsi, ih_sopr, ih_nupl, currency)}
+  1801→    </script>
+  1802→</body>
+  1803→</html>'''
+  1804→
+  1805→
+  1806→if __name__ == '__main__':
+  1807→    import argparse
+  1808→    parser = argparse.ArgumentParser(description='Generate Phoenix v5.1 Dashboard')
+  1809→    parser.add_argument('--state', default='live_bot/state.json')
+  1810→    parser.add_argument('--trade-log', default='trade_log.json')
+  1811→    parser.add_argument('--kill-switch', default='kill_switch.json')
+  1812→    parser.add_argument('--output', default='dashboard/dist/index.html')
+  1813→    args = parser.parse_args()
+  1814→    generate_dashboard(
+  1815→        state_path=args.state,
+  1816→        trade_log_path=args.trade_log,
+  1817→        kill_switch_path=args.kill_switch,
+  1818→        output_path=args.output,
+  1819→    )
+  1820→

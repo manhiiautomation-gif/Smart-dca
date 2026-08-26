@@ -1,0 +1,690 @@
+     1→'use client';
+     2→
+     3→import { useEffect, useState, useCallback } from "react";
+     4→import {
+     5→  Card,
+     6→  CardContent,
+     7→  CardHeader,
+     8→  CardTitle,
+     9→} from "@/components/ui/card";
+    10→import { Badge } from "@/components/ui/badge";
+    11→import {
+    12→  Activity,
+    13→  TrendingDown,
+    14→  TrendingUp,
+    15→  Minus,
+    16→  Bot,
+    17→  BarChart3,
+    18→  Shield,
+    19→  Newspaper,
+    20→  RefreshCw,
+    21→  ArrowDownRight,
+    22→  ArrowUpRight,
+    23→  AlertTriangle,
+    24→  CircleDot,
+    25→  Zap,
+    26→  Target,
+    27→  Layers,
+    28→} from "lucide-react";
+    29→import { Button } from "@/components/ui/button";
+    30→
+    31→// ─── Types ───
+    32→
+    33→interface BriefingData {
+    34→  price: {
+    35→    current: number;
+    36→    currency: string;
+    37→    change_24h: number | null;
+    38→    vs_sma200: number | null;
+    39→    vs_ath: number | null;
+    40→    trend: string;
+    41→    trendColor: string;
+    42→  };
+    43→  onchain: {
+    44→    mvrv: number;
+    45→    mvrv_pct: number;
+    46→    mvrv_z: number;
+    47→    mvrv_zone: string;
+    48→    mvrv_zoneColor: string;
+    49→    mvrv_source: string;
+    50→    nupl: number;
+    51→    nupl_phase: string;
+    52→    sopr: number;
+    53→    sopr_signal: string;
+    54→    sopr_source: string;
+    55→  };
+    56→  momentum: {
+    57→    rsi: number;
+    58→    rsi_zone: string;
+    59→    rsi_zoneColor: string;
+    60→    macd_hist: number;
+    61→    macd_signal: string;
+    62→    macd_bear_cross: boolean;
+    63→    rsi_divergence: boolean;
+    64→  };
+    65→  bot: {
+    66→    status: string;
+    67→    last_run: string;
+    68→    last_decision: string;
+    69→    buy_amount: number;
+    70→    sell_amount: number;
+    71→    multiplier: number;
+    72→    sell_score: number;
+    73→    path_taken: string;
+    74→    cooldown: number;
+    75→    portfolio_value: number;
+    76→    btc_balance: number;
+    77→    cash_balance: number;
+    78→    total_invested: number;
+    79→    total_btc_bought: number;
+    80→    buy_count: number;
+    81→    sell_count: number;
+    82→    unrealized_pnl_pct: number;
+    83→    avg_cost: number;
+    84→    sma_200: number;
+    85→    sma_365: number;
+    86→    in_bear: boolean;
+    87→  };
+    88→  keyLevels: {
+    89→    ath: number;
+    90→    realized_price: number;
+    91→    lth_realized_price: number;
+    92→    sma_200: number;
+    93→    sma_365: number;
+    94→    distance_rp: number;
+    95→    distance_lth: number;
+    96→    distance_sma200: number;
+    97→  };
+    98→  trades: Array<{
+    99→    date: string;
+   100→    type: string;
+   101→    amount_thb: number;
+   102→    btc_amount: number;
+   103→    price: number;
+   104→    fee: number;
+   105→  }>;
+   106→  marketNarrative: string;
+   107→  lastRefreshed: string;
+   108→}
+   109→
+   110→// ─── Mini Chart Component (SVG sparkline) ───
+   111→
+   112→function Sparkline({
+   113→  data,
+   114→  color = "#f59e0b",
+   115→  height = 40,
+   116→}: {
+   117→  data: number[];
+   118→  color?: string;
+   119→  height?: number;
+   120→}) {
+   121→  if (data.length < 2) return null;
+   122→  const min = Math.min(...data);
+   123→  const max = Math.max(...data);
+   124→  const range = max - min || 1;
+   125→  const w = 100;
+   126→  const points = data
+   127→    .map((v, i) => {
+   128→      const x = (i / (data.length - 1)) * w;
+   129→      const y = height - ((v - min) / range) * (height - 4) - 2;
+   130→      return `${x},${y}`;
+   131→    })
+   132→    .join(" ");
+   133→  return (
+   134→    <svg
+   135→      viewBox={`0 0 ${w} ${height}`}
+   136→      className="w-full"
+   137→      style={{ height }}
+   138→      preserveAspectRatio="none"
+   139→    >
+   140→      <polyline
+   141→        points={points}
+   142→        fill="none"
+   143→        stroke={color}
+   144→        strokeWidth="1.5"
+   145→        strokeLinejoin="round"
+   146→      />
+   147→    </svg>
+   148→  );
+   149→}
+   150→
+   151→// ─── Format helpers ───
+   152→
+   153→function fmt(n: number, decimals = 2): string {
+   154→  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(decimals)}M`;
+   155→  if (n >= 1_000) return `${(n / 1_000).toFixed(decimals)}K`;
+   156→  return n.toFixed(decimals);
+   157→}
+   158→
+   159→function fmtCurrency(n: number, currency: string): string {
+   160→  return `${n.toLocaleString(undefined, { maximumFractionDigits: 0 })} ${currency}`;
+   161→}
+   162→
+   163→function ChangeBadge({ value }: { value: number | null }) {
+   164→  if (value === null) return <span className="text-muted-foreground text-xs">N/A</span>;
+   165→  const isUp = value >= 0;
+   166→  return (
+   167→    <span
+   168→      className={`inline-flex items-center gap-0.5 text-sm font-semibold ${isUp ? "text-emerald-500" : "text-red-500"}`}
+   169→    >
+   170→      {isUp ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
+   171→      {Math.abs(value).toFixed(2)}%
+   172→    </span>
+   173→  );
+   174→}
+   175→
+   176→// ─── Main Dashboard ───
+   177→
+   178→export default function Home() {
+   179→  const [data, setData] = useState<BriefingData | null>(null);
+   180→  const [loading, setLoading] = useState(true);
+   181→  const [error, setError] = useState<string | null>(null);
+   182→
+   183→  const fetchBriefing = useCallback(async () => {
+   184→    try {
+   185→      setLoading(true);
+   186→      setError(null);
+   187→      const res = await fetch("/api/briefing");
+   188→      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+   189→      const json = await res.json();
+   190→      if (json.error) throw new Error(json.error);
+   191→      setData(json);
+   192→    } catch (e) {
+   193→      setError(String(e));
+   194→    } finally {
+   195→      setLoading(false);
+   196→    }
+   197→  }, []);
+   198→
+   199→  useEffect(() => {
+   200→    fetchBriefing();
+   201→    const interval = setInterval(fetchBriefing, 5 * 60 * 1000);
+   202→    return () => clearInterval(interval);
+   203→  }, [fetchBriefing]);
+   204→
+   205→  if (loading && !data) {
+   206→    return (
+   207→      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
+   208→        <div className="text-zinc-400 flex items-center gap-3">
+   209→          <RefreshCw className="w-5 h-5 animate-spin" />
+   210→          <span>Loading BTC Briefing...</span>
+   211→        </div>
+   212→      </div>
+   213→    );
+   214→  }
+   215→
+   216→  if (error && !data) {
+   217→    return (
+   218→      <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
+   219→        <Card className="bg-zinc-900 border-zinc-800 max-w-md">
+   220→          <CardContent className="pt-6 text-center">
+   221→            <AlertTriangle className="w-10 h-10 text-amber-500 mx-auto mb-3" />
+   222→            <h2 className="text-lg font-semibold text-zinc-100 mb-1">Failed to Load Data</h2>
+   223→            <p className="text-zinc-400 text-sm mb-4">{error}</p>
+   224→            <Button variant="outline" onClick={fetchBriefing} className="border-zinc-700 text-zinc-300 hover:bg-zinc-800">
+   225→              <RefreshCw className="w-4 h-4 mr-2" />Retry
+   226→            </Button>
+   227→          </CardContent>
+   228→        </Card>
+   229→      </div>
+   230→    );
+   231→  }
+   232→
+   233→  if (!data) return null;
+   234→
+   235→  const { price: p, onchain: oc, momentum: mom, bot, keyLevels: kl } = data;
+   236→  const isDark = true;
+   237→
+   238→  const priceHistory = data.trades.length > 0 ? [p.current] : [];
+   239→
+   240→  return (
+   241→    <div className={`min-h-screen ${isDark ? "bg-zinc-950 text-zinc-100" : "bg-white"}`}>
+   242→      {/* ─── Header ─── */}
+   243→      <header className={`border-b ${isDark ? "border-zinc-800 bg-zinc-900/80" : "border-zinc-200 bg-white/80"} backdrop-blur-sm sticky top-0 z-50`}>
+   244→        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+   245→          <div className="flex items-center gap-3">
+   246→            <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center">
+   247→              <Zap className="w-5 h-5 text-amber-500" />
+   248→            </div>
+   249→            <div>
+   250→              <h1 className="text-lg font-bold tracking-tight">BTC Daily Briefing</h1>
+   251→              <p className="text-xs text-zinc-500">Manual trading intelligence + Phoenix bot status</p>
+   252→            </div>
+   253→          </div>
+   254→          <div className="flex items-center gap-3">
+   255→            <Badge
+   256→              variant="outline"
+   257→              className={`${isDark ? "border-zinc-700 text-zinc-400" : "border-zinc-300 text-zinc-600"} text-xs`
+   258→            >
+   259→              {data.lastRefreshed
+   260→                ? new Date(data.lastRefreshed).toLocaleTimeString("th-TH", {
+   261→                    hour: "2-digit",
+   262→                    minute: "2-digit",
+   263→                  })
+   264→                : ""}
+   265→            </Badge>
+   266→            <Button
+   267→              variant="ghost"
+   268→              size="sm"
+   269→              onClick={fetchBriefing}
+   270→              disabled={loading}
+   271→              className={`${isDark ? "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800" : ""}`}
+   272→            >
+   273→              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+   274→            </Button>
+   275→          </div>
+   276→        </div>
+   277→      </header>
+   278→
+   279→      <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
+   280→        {/* ─── Row 1: Price Hero + Trend ─── */}
+   281→        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+   282→          {/* Price Hero Card */}
+   283→          <Card className={`lg:col-span-2 ${isDark ? "bg-zinc-900 border-zinc-800" : ""}`}>
+   284→            <CardContent className="pt-6">
+   285→              <div className="flex flex-col sm:flex-row sm:items-end gap-3 mb-4">
+   286→                <div>
+   287→                  <p className={`text-sm font-medium ${isDark ? "text-zinc-400" : "text-zinc-500"} mb-1`}>
+   288→                    BTC / {p.currency}
+   289→                  </p>
+   290→                  <div className="flex items-baseline gap-3">
+   291→                    <span className="text-4xl font-bold tracking-tight">
+   292→                      {p.current.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+   293→                    </span>
+   294→                    <ChangeBadge value={p.change_24h} />
+   295→                  </div>
+   296→                </div>
+   297→                <Badge
+   298→                  className="self-start sm:self-end"
+   299→                  style={{
+   300→                    backgroundColor: `${p.trendColor}20`,
+   301→                    color: p.trendColor,
+   302→                    borderColor: `${p.trendColor}40`,
+   303→                  }}
+   304→                >
+   305→                  {p.trend}
+   306→                </Badge>
+   307→              </div>
+   308→              {/* Price vs Key MAs */}
+   309→              <div className={`grid grid-cols-3 gap-3 ${isDark ? "text-zinc-400" : "text-zinc-600"}`}>
+   310→                <div className="text-center">
+   311→                  <p className="text-xs mb-0.5">vs SMA200</p>
+   312→                  <p className="text-sm font-semibold">
+   313→                    {p.vs_sma200 !== null ? (
+   314→                      <span className={p.vs_sma200 >= 0 ? "text-emerald-400" : "text-red-400"}>
+   315→                        {p.vs_sma200 >= 0 ? "+" : ""}
+   316→                        {p.vs_sma200.toFixed(1)}%
+   317→                      </span>
+   318→                    ) : (
+   319→                      "N/A"
+   320→                    )}
+   321→                  </p>
+   322→                </div>
+   323→                <div className="text-center">
+   324→                  <p className="text-xs mb-0.5">vs ATH</p>
+   325→                  <p className="text-sm font-semibold">
+   326→                    {p.vs_ath !== null ? (
+   327→                      <span className={p.vs_ath >= 0 ? "text-emerald-400" : "text-red-400"}>
+   328→                        {p.vs_ath >= 0 ? "+" : ""}
+   329→                        {p.vs_ath.toFixed(1)}%
+   330→                      </span>
+   331→                    ) : (
+   332→                      "N/A"
+   333→                    )}
+   334→                  </p>
+   335→                </div>
+   336→                <div className="text-center">
+   337→                  <p className="text-xs mb-0.5">SMA200</p>
+   338→                  <p className="text-sm font-semibold">
+   339→                    {bot.sma_200 > 0
+   340→                      ? bot.sma_200.toLocaleString(undefined, { maximumFractionDigits: 0 })
+   341→                      : "N/A"}
+   342→                  </p>
+   343→                </div>
+   344→              </div>
+   345→            </CardContent>
+   346→          </Card>
+   347→
+   348→          {/* Phoenix Bot Status Card */}
+   349→          <Card className={`${isDark ? "bg-zinc-900 border-zinc-800" : ""}`}>
+   350→            <CardHeader className="pb-2">
+   351→              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+   352→                <Bot className="w-4 h-4 text-amber-500" />
+   353→                Phoenix v5.1
+   354→                <Badge
+   355→                  variant="outline"
+   356→                  className={`ml-auto text-xs ${bot.status === "active" ? "border-emerald-700 text-emerald-400" : "border-red-700 text-red-400"}`}
+   357→                >
+   358→                  {bot.status === "active" ? "ACTIVE" : "OFFLINE"}
+   359→                </Badge>
+   360→              </CardTitle>
+   361→            </CardHeader>
+   362→            <CardContent className="space-y-3">
+   363→              <div className="grid grid-cols-2 gap-2 text-sm">
+   364→                <div>
+   365→                  <p className={`text-xs ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Portfolio</p>
+   366→                  <p className="font-semibold">{fmtCurrency(bot.portfolio_value, p.currency)}</p>
+   367→                </div>
+   368→                <div>
+   369→                  <p className={`text-xs ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>P&L</p>
+   370→                  <p
+   371→                    className={`font-semibold ${bot.unrealized_pnl_pct >= 0 ? "text-emerald-400" : "text-red-400"}`}
+   372→                  >
+   373→                    {bot.unrealized_pnl_pct >= 0 ? "+" : ""}
+   374→                    {bot.unrealized_pnl_pct.toFixed(1)}%
+   375→                  </p>
+   376→                </div>
+   377→                <div>
+   378→                  <p className={`text-xs ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>BTC</p>
+   379→                  <p className="font-mono text-xs">{bot.btc_balance.toFixed(6)}</p>
+   380→                </div>
+   381→                <div>
+   382→                  <p className={`text-xs ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>Cash</p>
+   383→                  <p className="font-mono text-xs">{fmtCurrency(bot.cash_balance, p.currency)}</p>
+   384→                </div>
+   385→              </div>
+   386→              <div className={`border-t ${isDark ? "border-zinc-800" : "border-zinc-200"} pt-2`}>
+   387→                <p className={`text-xs ${isDark ? "text-zinc-500" : "text-zinc-400"} mb-1`}>Last Decision</p>
+   388→                <p className="text-sm font-medium">{bot.last_decision}</p>
+   389→                <div className="flex items-center gap-2 mt-1">
+   390→                  <span className={`text-xs ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+   391→                    Multiplier: {bot.multiplier}x | Score: {bot.sell_score}
+   392→                  </span>
+   393→                  {bot.path_taken !== "none" && (
+   394→                    <Badge variant="outline" className="text-xs border-amber-700 text-amber-400">
+   395→                      {bot.path_taken}
+   396→                    </Badge>
+   397→                  )}
+   398→                </div>
+   399→              </div>
+   400→            </CardContent>
+   401→          </Card>
+   402→        </div>
+   403→
+   404→        {/* ─── Row 2: On-Chain + Momentum + Key Levels ─── */}
+   405→        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+   406→          {/* On-Chain Pulse */}
+   407→          <Card className={`${isDark ? "bg-zinc-900 border-zinc-800" : ""}`}>
+   408→            <CardHeader className="pb-2">
+   409→              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+   410→                <Layers className="w-4 h-4 text-orange-400" />
+   411→                On-Chain Pulse
+   412→              </CardTitle>
+   413→            </CardHeader>
+   414→            <CardContent className="space-y-3">
+   415→              {/* MVRV */}
+   416→              <div>
+   417→                <div className="flex items-center justify-between mb-1">
+   418→                  <span className={`text-xs ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>MVRV Ratio</span>
+   419→                  <Badge
+   420→                    className="text-xs"
+   421→                    style={{
+   422→                      backgroundColor: `${oc.mvrv_zoneColor}20`,
+   423→                      color: oc.mvrv_zoneColor,
+   424→                      borderColor: `${oc.mvrv_zoneColor}40`,
+   425→                    }}
+   426→                  >
+   427→                    {oc.mvrv_zone}
+   428→                  </Badge>
+   429→                </div>
+   430→                <p className="text-2xl font-bold">{oc.mvrv.toFixed(3)}</p>
+   431→                <div className={`flex gap-4 text-xs ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+   432→                  <span>Pct: {(oc.mvrv_pct * 100).toFixed(1)}%</span>
+   433→                  <span>Z: {oc.mvrv_z.toFixed(2)}</span>
+   434→                </div>
+   435→              </div>
+   436→              {/* NUPL */}
+   437→              <div className={`border-t ${isDark ? "border-zinc-800" : "border-zinc-200"} pt-2`}>
+   438→                <div className="flex items-center justify-between">
+   439→                  <span className={`text-xs ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>NUPL</span>
+   440→                  <span className="text-xs font-medium">{oc.nupl_phase}</span>
+   441→                </div>
+   442→                <p className="text-lg font-semibold">{oc.nupl.toFixed(3)}</p>
+   443→              </div>
+   444→              {/* SOPR */}
+   445→              <div className={`border-t ${isDark ? "border-zinc-800" : "border-zinc-200"} pt-2`}>
+   446→                <div className="flex items-center justify-between">
+   447→                  <span className={`text-xs ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>SOPR</span>
+   448→                  <span className={`text-xs font-medium ${oc.sopr < 1 ? "text-emerald-400" : "text-zinc-400"}`}>
+   449→                    {oc.sopr_signal}
+   450→                  </span>
+   451→                </div>
+   452→                <p className={`text-lg font-semibold ${oc.sopr < 1 ? "text-emerald-400" : ""}`}>{oc.sopr.toFixed(3)}</p>
+   453→                <p className={`text-xs ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>
+   454→                  Source: {oc.sopr_source}
+   455→                </p>
+   456→              </div>
+   457→            </CardContent>
+   458→          </Card>
+   459→
+   460→          {/* Technical Momentum */}
+   461→          <Card className={`${isDark ? "bg-zinc-900 border-zinc-800" : ""}`}>
+   462→            <CardHeader className="pb-2">
+   463→              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+   464→                <Activity className="w-4 h-4 text-blue-400" />
+   465→                Technical Momentum
+   466→              </CardTitle>
+   467→            </CardHeader>
+   468→            <CardContent className="space-y-3">
+   469→              {/* RSI */}
+   470→              <div>
+   471→                <div className="flex items-center justify-between mb-1">
+   472→                  <span className={`text-xs ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>RSI (14)</span>
+   473→                  <Badge
+   474→                    className="text-xs"
+   475→                    style={{
+   476→                      backgroundColor: `${mom.rsi_zoneColor}20`,
+   477→                      color: mom.rsi_zoneColor,
+   478→                      borderColor: `${mom.rsi_zoneColor}40`,
+   479→                    }}
+   480→                  >
+   481→                    {mom.rsi_zone}
+   482→                  </Badge>
+   483→                </div>
+   484→                {/* RSI bar */}
+   485→                <div className={`w-full h-2 rounded-full ${isDark ? "bg-zinc-800" : "bg-zinc-200"} mb-1`}>
+   486→                  <div
+   487→                    className="h-full rounded-full transition-all"
+   488→                    style={{
+   489→                      width: `${Math.min(mom.rsi, 100)}%`,
+   490→                      backgroundColor: mom.rsi_zoneColor,
+   491→                    }}
+   492→                  />
+   493→                </div>
+   494→                <p className="text-2xl font-bold">{mom.rsi.toFixed(1)}</p>
+   495→              </div>
+   496→              {/* MACD */}
+   497→              <div className={`border-t ${isDark ? "border-zinc-800" : "border-zinc-200"} pt-2`}>
+   498→                <div className="flex items-center justify-between">
+   499→                  <span className={`text-xs ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>MACD Histogram</span>
+   500→                  <span
+   501→                    className={`text-sm font-semibold ${mom.macd_hist >= 0 ? "text-emerald-400" : "text-red-400"}`}
+   502→                  >
+   503→                    {mom.macd_hist >= 0 ? "+" : ""}
+   504→                    {mom.macd_hist.toFixed(0)}
+   505→                  </span>
+   506→                </div>
+   507→                <p className="text-sm mt-1">{mom.macd_signal}</p>
+   508→              </div>
+   509→              {/* Signals */}
+   510→              <div className={`border-t ${isDark ? "border-zinc-800" : "border-zinc-200"} pt-2 space-y-1`}>
+   511→                {mom.macd_bear_cross && (
+   512→                  <div className="flex items-center gap-2 text-xs text-red-400">
+   513→                    <TrendingDown className="w-3.5 h-3.5" />
+   514→                    MACD Bearish Crossover
+   515→                  </div>
+   516→                )}
+   517→                {mom.rsi_divergence && (
+   518→                  <div className="flex items-center gap-2 text-xs text-amber-400">
+   519→                    <AlertTriangle className="w-3.5 h-3.5" />
+   520→                    RSI Divergence Detected
+   521→                  </div>
+   522→                )}
+   523→                {!mom.macd_bear_cross && !mom.rsi_divergence && (
+   524→                  <p className={`text-xs ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>
+   525→                    No divergence signals
+   526→                  </p>
+   527→                )}
+   528→              </div>
+   529→            </CardContent>
+   530→          </Card>
+   531→
+   532→          {/* Key On-Chain Levels */}
+   533→          <Card className={`${isDark ? "bg-zinc-900 border-zinc-800" : ""}`}>
+   534→            <CardHeader className="pb-2">
+   535→              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+   536→                <Target className="w-4 h-4 text-emerald-400" />
+   537→                Key On-Chain Levels
+   538→              </CardTitle>
+   539→            </CardHeader>
+   540→            <CardContent className="space-y-3">
+   541→              <LevelRow
+   542→                label="Realized Price"
+   543→                value={kl.realized_price}
+   544→                distance={kl.distance_rp}
+   545→                isDark={isDark}
+   546→              />
+   547→              <LevelRow
+   548→                label="LTH Realized Price"
+   549→                value={kl.lth_realized_price}
+   550→                distance={kl.distance_lth}
+   551→                isDark={isDark}
+   552→              />
+   553→              <LevelRow
+   554→                label="SMA 200"
+   555→                value={kl.sma_200}
+   556→                distance={kl.distance_sma200}
+   557→                isDark={isDark}
+   558→              />
+   559→              <LevelRow
+   560→                label="ATH"
+   561→                value={kl.ath}
+   562→                distance={p.vs_ath}
+   563→                isDark={isDark}
+   564→              />
+   565→              <div className={`border-t ${isDark ? "border-zinc-800" : "border-zinc-200"} pt-2`}>
+   566→                <p className={`text-xs ${isDark ? "text-zinc-500" : "text-zinc-400"}`}>
+   567→                  Below Realized Price = historically profitable accumulation zone.
+   568→                  Above LTH-RP = long-term holders in profit (sell pressure zone).
+   569→                </p>
+   570→              </div>
+   571→            </CardContent>
+   572→          </Card>
+   573→        </div>
+   574→
+   575→        {/* ─── Row 3: Market Narrative ─── */}
+   576→        <Card className={`${isDark ? "bg-zinc-900 border-zinc-800" : ""}`}>
+   577→          <CardHeader className="pb-2">
+   578→            <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+   579→              <Newspaper className="w-4 h-4 text-cyan-400" />
+   580→              Market Briefing
+   581→            </CardTitle>
+   582→          </CardHeader>
+   583→          <CardContent>
+   584→            <p className={`text-sm leading-relaxed ${isDark ? "text-zinc-300" : "text-zinc-600"}`}>
+   585→              {data.marketNarrative}
+   586→            </p>
+   587→          </CardContent>
+   588→        </Card>
+   589→
+   590→        {/* ─── Row 4: Recent Trades ─── */}
+   591→        {data.trades.length > 0 && (
+   592→          <Card className={`${isDark ? "bg-zinc-900 border-zinc-800" : ""}`}>
+   593→            <CardHeader className="pb-2">
+   594→              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+   595→                <BarChart3 className="w-4 h-4 text-violet-400" />
+   596→                Recent Trades
+   597→              </CardTitle>
+   598→            </CardHeader>
+   599→            <CardContent>
+   600→              <div className="overflow-x-auto">
+   601→                <table className="w-full text-sm">
+   602→                  <thead>
+   603→                    <tr className={`text-xs ${isDark ? "text-zinc-500" : "text-zinc-400"} text-left`}>
+   604→                      <th className="pb-2 pr-4">Date</th>
+   605→                      <th className="pb-2 pr-4">Type</th>
+   606→                      <th className="pb-2 pr-4 text-right">Amount</th>
+   607→                      <th className="pb-2 pr-4 text-right">BTC</th>
+   608→                      <th className="pb-2 text-right">Price</th>
+   609→                    </tr>
+   610→                  </thead>
+   611→                  <tbody>
+   612→                    {data.trades.map((t, i) => (
+   613→                      <tr
+   614→                        key={i}
+   615→                        className={`border-t ${isDark ? "border-zinc-800" : "border-zinc-100"}`}
+   616→                      >
+   617→                        <td className={`py-2 pr-4 text-xs ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
+   618→                          {t.date}
+   619→                        </td>
+   620→                        <td className="py-2 pr-4">
+   621→                          <Badge
+   622→                            variant="outline"
+   623→                            className={`text-xs ${t.type === "BUY" ? "border-emerald-700 text-emerald-400" : "border-red-700 text-red-400"}`}
+   624→                          >
+   625→                            {t.type}
+   626→                          </Badge>
+   627→                        </td>
+   628→                        <td className="py-2 pr-4 text-right font-mono text-xs">
+   629→                          {t.amount_thb.toLocaleString()} {p.currency}
+   630→                        </td>
+   631→                        <td className="py-2 pr-4 text-right font-mono text-xs">
+   632→                          {t.btc_amount.toFixed(8)}
+   633→                        </td>
+   634→                        <td className="py-2 text-right font-mono text-xs">
+   635→                          {t.price.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+   636→                        </td>
+   637→                      </tr>
+   638→                    ))}
+   639→                  </tbody>
+   640→                </table>
+   641→              </div>
+   642→            </CardContent>
+   643→          </Card>
+   644→        )}
+   645→
+   646→        {/* ─── Footer ─── */}
+   647→        <footer className={`text-center py-4 text-xs ${isDark ? "text-zinc-600" : "text-zinc-400"}`}>
+   648→          Phoenix v5.1 Briefing Dashboard | Auto-refreshes every 5 min | For manual trading decisions only
+   649→        </footer>
+   650→      </main>
+   651→    </div>
+   652→  );
+   653→}
+   654→
+   655→// ─── Sub-components ───
+   656→
+   657→function LevelRow({
+   658→  label,
+   659→  value,
+   660→  distance,
+   661→  isDark,
+   662→}: {
+   663→  label: string;
+   664→  value: number;
+   665→  distance: number | null;
+   666→  isDark: boolean;
+   667→}) {
+   668→  if (value <= 0) return null;
+   669→  return (
+   670→    <div className="flex items-center justify-between">
+   671→      <span className={`text-xs ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
+   672→        {label}
+   673→      </span>
+   674→      <div className="flex items-center gap-2">
+   675→        <span className="text-xs font-mono">
+   676→          {value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+   677→        </span>
+   678→        {distance !== null && (
+   679→          <span
+   680→            className={`text-xs font-semibold ${distance >= 0 ? "text-emerald-400" : "text-red-400"}`}
+   681→          >
+   682→            {distance >= 0 ? "+" : ""}
+   683→            {distance.toFixed(1)}%
+   684→          </span>
+   685→        )}
+   686→      </div>
+   687→    </div>
+   688→  );
+   689→}
+   690→

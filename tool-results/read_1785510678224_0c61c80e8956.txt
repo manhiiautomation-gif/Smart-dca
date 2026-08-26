@@ -1,0 +1,502 @@
+     1→     1→     1→#!/usr/bin/env python3
+     2→     2→     2→"""
+     3→     3→     3→================================================================================
+     4→     4→     4→SMART DCA BACKTEST SUITE — Full Quantitative Research Script (v2)
+     5→     5→     5→================================================================================
+     6→     6→     6→Tests 5 DCA strategies against 3-year and 5-year BTC historical periods:
+     7→     7→     7→  1. Standard DCA (Benchmark)
+     8→     8→     8→  2. Style C  (On-Chain Tiered Pure DCA)
+     9→     9→     9→  3. Style E  (Smart Rebalance & Top Skimming)
+    10→    10→    10→  4. Style G v2 (Adaptive Hybrid Flagship)
+    11→    11→    11→  5. Style Alpha (Innovated — Designed to Outperform All)
+    12→    12→    12→
+    13→    13→    13→Data   : Binance REAL prices + CoinMetrics REAL MVRV + Derived NUPL / Proxy SOPR
+    14→    14→    14→         ALL API data cached to CSV 7 days (re-runs = instant, no API calls)
+    15→    15→    15→Output : Summary tables + Matplotlib charts with results comparison table
+    16→    16→    16→================================================================================
+    17→    17→    17→"""
+    18→    18→    18→
+    19→    19→    19→# ============================================================
+    20→    20→    20→# SECTION 0: IMPORTS & GLOBAL CONSTANTS
+    21→    21→    21→# ============================================================
+    22→    22→    22→import os
+    23→    23→    23→import sys
+    24→    24→    24→import time
+    25→    25→    25→import warnings
+    26→    26→    26→import numpy as np
+    27→    27→    27→import pandas as pd
+    28→    28→    28→import matplotlib
+    29→    29→    29→import matplotlib.pyplot as plt
+    30→    30→    30→import matplotlib.ticker as mticker
+    31→    31→    31→import requests
+    32→    32→    32→from datetime import datetime, timedelta
+    33→    33→    33→
+    34→    34→    34→matplotlib.font_manager.fontManager.addfont('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')
+    35→    35→    35→plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+    36→    36→    36→plt.rcParams['axes.unicode_minus'] = False
+    37→    37→    37→warnings.filterwarnings('ignore')
+    38→    38→    38→
+    39→    39→    39→# ============================================================
+    40→    40→    40→# GLOBAL CONSTANTS
+    41→    41→    41→# ============================================================
+    42→    42→    42→BASE_BUDGET_THB = 100    # Fixed daily budget in THB
+    43→    43→    43→USD_THB_RATE    = 36     # Fixed exchange rate: 1 USD = 36 THB
+    44→    44→    44→BUY_FEE_PCT     = 0.0015 # 0.15% total execution friction on buys
+    45→    45→    45→SELL_FEE_PCT    = 0.0015 # 0.15% total execution friction on sells
+    46→    46→    46→DOWNLOAD_DIR    = '/home/z/my-project/download'
+    47→    47→    47→CACHE_DIR       = '/home/z/my-project/cache'
+    48→    48→    48→os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+    49→    49→    49→os.makedirs(CACHE_DIR, exist_ok=True)
+    50→    50→    50→
+    51→    51→    51→print("=" * 70)
+    52→    52→    52→print("  SMART DCA BACKTEST SUITE v2 (with CSV Cache)")
+    53→    53→    53→print("  Strategies: Standard | Style C | Style E | Style G v2 | Style Alpha | Style Beta")
+    54→    54→    54→print("=" * 70)
+    55→    55→    55→
+    56→    56→    56→
+    57→    57→    57→# ============================================================
+    58→    58→    58→# SECTION 1: DATA PIPELINE — REAL DATA + CSV CACHE
+    59→    59→    59→# ============================================================
+    60→    60→    60→
+    61→    61→    61→def _cache_path(name):
+    62→    62→    62→    """Return CSV cache file path for a given data source."""
+    63→    63→    63→    return os.path.join(CACHE_DIR, f'{name}.csv')
+    64→    64→    64→
+    65→    65→    65→
+    66→    66→    66→CACHE_MAX_AGE_HOURS = 168  # 7 days — historical data doesn't change
+    67→    67→    67→
+    68→    68→    68→
+    69→    69→    69→def _load_cache(name):
+    70→    70→    70→    """Load DataFrame from CSV cache if it exists and is recent (< 7 days)."""
+    71→    71→    71→    path = _cache_path(name)
+    72→    72→    72→    if os.path.exists(path):
+    73→    73→    73→        age_hours = (time.time() - os.path.getmtime(path)) / 3600
+    74→    74→    74→        if age_hours < CACHE_MAX_AGE_HOURS:
+    75→    75→    75→            df = pd.read_csv(path, parse_dates=['date'])
+    76→    76→    76→            df['date'] = df['date'].dt.date
+    77→    77→    77→            print(f"[CACHE] Loaded {name} from disk ({len(df)} rows, {age_hours:.1f}h old)")
+    78→    78→    78→            return df
+    79→    79→    79→        else:
+    80→    80→    80→            print(f"[CACHE] {name} cache expired ({age_hours:.1f}h old), re-fetching...")
+    81→    81→    81→    return None
+    82→    82→    82→
+    83→    83→    83→
+    84→    84→    84→def _save_cache(name, df):
+    85→    85→    85→    """Save DataFrame to CSV cache."""
+    86→    86→    86→    path = _cache_path(name)
+    87→    87→    87→    df.to_csv(path, index=False)
+    88→    88→    88→    print(f"[CACHE] Saved {name} to disk ({len(df)} rows)")
+    89→    89→    89→
+    90→    90→    90→
+    91→    91→    91→def fetch_binance_btc_price(days=2000):
+    92→    92→    92→    """
+    93→    93→    93→    Fetch REAL BTC daily close prices from Binance Spot API (klines).
+    94→    94→    94→    Uses pagination (2 x 1000) for ~2000 days of historical data.
+    95→    95→    95→    Results are cached to CSV — subsequent runs use cache (no API call).
+    96→    96→    96→    Returns DataFrame with ['date', 'price_usd'] or None on failure.
+    97→    97→    97→    """
+    98→    98→    98→    # Try cache first
+    99→    99→    99→    cached = _load_cache('binance_btc_prices')
+   100→   100→   100→    if cached is not None:
+   101→   101→   101→        return cached
+   102→   102→   102→
+   103→   103→   103→    try:
+   104→   104→   104→        print("[DATA] Fetching REAL BTC prices from Binance API...")
+   105→   105→   105→        limit = 1000
+   106→   106→   106→        url1 = (f"https://api.binance.com/api/v3/klines?symbol=BTCUSDT"
+   107→   107→   107→               f"&interval=1d&limit={limit}")
+   108→   108→   108→        resp1 = requests.get(url1, timeout=15)
+   109→   109→   109→        if resp1.status_code != 200:
+   110→   110→   110→            print(f"[DATA] Binance returned status {resp1.status_code}.")
+   111→   111→   111→            return None
+   112→   112→   112→        candles1 = resp1.json()
+   113→   113→   113→        if not candles1:
+   114→   114→   114→            return None
+   115→   115→   115→
+   116→   116→   116→        # Page 2: older 1000 days
+   117→   117→   117→        first_time = candles1[0][0]
+   118→   118→   118→        url2 = (f"https://api.binance.com/api/v3/klines?symbol=BTCUSDT"
+   119→   119→   119→               f"&interval=1d&limit={limit}&endTime={first_time - 1}")
+   120→   120→   120→        resp2 = requests.get(url2, timeout=15)
+   121→   121→   121→        candles2 = resp2.json() if resp2.status_code == 200 else []
+   122→   122→   122→
+   123→   123→   123→        all_candles = candles2 + candles1
+   124→   124→   124→        records = []
+   125→   125→   125→        for c in all_candles:
+   126→   126→   126→            dt = datetime.fromtimestamp(c[0] / 1000, tz=None).date()
+   127→   127→   127→            close_price = float(c[4])
+   128→   128→   128→            records.append({'date': dt, 'price_usd': close_price})
+   129→   129→   129→
+   130→   130→   130→        df = pd.DataFrame(records).drop_duplicates(subset='date').sort_values('date').reset_index(drop=True)
+   131→   131→   131→        print(f"[DATA] Binance returned {len(df)} days of REAL price data.")
+   132→   132→   132→        print(f"        Period: {df['date'].iloc[0]} to {df['date'].iloc[-1]}")
+   133→   133→   133→
+   134→   134→   134→        # Save to cache
+   135→   135→   135→        _save_cache('binance_btc_prices', df)
+   136→   136→   136→        return df
+   137→   137→   137→    except Exception as e:
+   138→   138→   138→        print(f"[DATA] Binance fetch failed: {e}.")
+   139→   139→   139→        return None
+   140→   140→   140→
+   141→   141→   141→
+   142→   142→   142→def fetch_coinmetrics_mvrv(start_date, end_date):
+   143→   143→   143→    """
+   144→   144→   144→    Fetch REAL MVRV from CoinMetrics Community API (FREE, no API key needed).
+   145→   145→   145→    Metric: CapMVRVCur (Market Value to Realized Value Ratio).
+   146→   146→   146→    High rate limit — no issues in practice.
+   147→   147→   147→    Cached to CSV — subsequent runs skip the API entirely.
+   148→   148→   148→    Returns DataFrame with ['date', 'mvrv'] or None on failure.
+   149→   149→   149→    """
+   150→   150→   150→    cache_key = 'coinmetrics_mvrv'
+   151→   151→   151→    cached = _load_cache(cache_key)
+   152→   152→   152→    if cached is not None:
+   153→   153→   153→        return cached
+   154→   154→   154→
+   155→   155→   155→    try:
+   156→   156→   156→        print(f"[DATA] Fetching REAL MVRV from CoinMetrics Community API...")
+   157→   157→   157→        all_records = []
+   158→   158→   158→        # CoinMetrics limits ~100 rows per request — use 90-day chunks
+   159→   159→   159→        current_start = start_date.strftime('%Y-%m-%dT00:00:00Z')
+   160→   160→   160→        end_str = end_date.strftime('%Y-%m-%dT23:59:59Z')
+   161→   161→   161→        
+   162→   162→   162→        while current_start < end_str:
+   163→   163→   163→            chunk_end_dt = (pd.to_datetime(current_start) + timedelta(days=90)).strftime('%Y-%m-%dT00:00:00Z')
+   164→   164→   164→            if chunk_end_dt > end_str:
+   165→   165→   165→                chunk_end_dt = end_str
+   166→   166→   166→            
+   167→   167→   167→            url = "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics"
+   168→   168→   168→            params = {
+   169→   169→   169→                'assets': 'btc',
+   170→   170→   170→                'metrics': 'CapMVRVCur',
+   171→   171→   171→                'frequency': '1d',
+   172→   172→   172→                'start_time': current_start,
+   173→   173→   173→                'end_time': chunk_end_dt,
+   174→   174→   174→            }
+   175→   175→   175→            resp = requests.get(url, params=params, timeout=30)
+   176→   176→   176→            if resp.status_code != 200:
+   177→   177→   177→                print(f"[DATA] CoinMetrics HTTP {resp.status_code}: {resp.text[:200]}")
+   178→   178→   178→                if not all_records:
+   179→   179→   179→                    return None
+   180→   180→   180→                break
+   181→   181→   181→            
+   182→   182→   182→            data = resp.json().get('data', [])
+   183→   183→   183→            for item in data:
+   184→   184→   184→                dt = pd.to_datetime(item['time']).date()
+   185→   185→   185→                val = float(item['CapMVRVCur'])
+   186→   186→   186→                if val > 0:  # skip invalid MVRV
+   187→   187→   187→                    all_records.append({'date': dt, 'mvrv': val})
+   188→   188→   188→            
+   189→   189→   189→            print(f"[DATA]   {current_start[:10]} to {chunk_end_dt[:10]}: {len(data)} rows")
+   190→   190→   190→            current_start = chunk_end_dt
+   191→   191→   191→            time.sleep(0.2)  # CoinMetrics has high rate limits
+   192→   192→   192→        
+   193→   193→   193→        if not all_records:
+   194→   194→   194→            return None
+   195→   195→   195→        
+   196→   196→   196→        df = pd.DataFrame(all_records).drop_duplicates(subset='date').sort_values('date').reset_index(drop=True)
+   197→   197→   197→        print(f"[DATA] CoinMetrics MVRV: {len(df)} records ({df['date'].iloc[0]} to {df['date'].iloc[-1]})")
+   198→   198→   198→        print(f"        MVRV range: {df['mvrv'].min():.3f} - {df['mvrv'].max():.3f}")
+   199→   199→   199→        _save_cache(cache_key, df)
+   200→   200→   200→        return df
+   201→   201→   201→    except Exception as e:
+   202→   202→   202→        print(f"[DATA] CoinMetrics MVRV fetch failed: {e}")
+   203→   203→   203→        return None
+   204→   204→   204→
+   205→   205→   205→
+   206→   206→   206→def fetch_bgeometrics_metric(metric_name, token='7NqNRwWhyc'):
+   207→   207→   207→    """
+   208→   208→   208→    Fetch REAL on-chain metric from BGeometrics API (FALLBACK only).
+   209→   209→   209→    Used for SOPR which CoinMetrics doesn't offer for free.
+   210→   210→   210→    """
+   211→   211→   211→    cache_key = f'bgeometrics_{metric_name}'
+   212→   212→   212→    cached = _load_cache(cache_key)
+   213→   213→   213→    if cached is not None:
+   214→   214→   214→        return cached
+   215→   215→   215→
+   216→   216→   216→    url = f"https://api.bgeometrics.com/v1/{metric_name}?token={token}"
+   217→   217→   217→    for attempt in range(3):
+   218→   218→   218→        try:
+   219→   219→   219→            if attempt > 0:
+   220→   220→   220→                wait = 10 * attempt
+   221→   221→   221→                print(f"[DATA] BGeometrics {metric_name}: retry in {wait}s (attempt {attempt+1}/3)")
+   222→   222→   222→                time.sleep(wait)
+   223→   223→   223→            resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=15)
+   224→   224→   224→            if resp.status_code == 429:
+   225→   225→   225→                print(f"[DATA] BGeometrics {metric_name}: HTTP 429 rate-limit (attempt {attempt+1}/3)")
+   226→   226→   226→                continue
+   227→   227→   227→            if resp.status_code != 200:
+   228→   228→   228→                return None
+   229→   229→   229→            data = resp.json()
+   230→   230→   230→            if not isinstance(data, list) or len(data) == 0:
+   231→   231→   231→                return None
+   232→   232→   232→            records = []
+   233→   233→   233→            for item in data:
+   234→   234→   234→                date_str = item.get('d')
+   235→   235→   235→                metric_val = item.get(metric_name)
+   236→   236→   236→                if date_str and metric_val is not None:
+   237→   237→   237→                    dt = pd.to_datetime(date_str).date()
+   238→   238→   238→                    records.append({'date': dt, metric_name: float(metric_val)})
+   239→   239→   239→            if not records:
+   240→   240→   240→                return None
+   241→   241→   241→            df = pd.DataFrame(records).drop_duplicates(subset='date').sort_values('date').reset_index(drop=True)
+   242→   242→   242→            print(f"[DATA] BGeometrics {metric_name}: {len(df)} records "
+   243→   243→   243→                  f"({df['date'].iloc[0]} to {df['date'].iloc[-1]})")
+   244→   244→   244→            _save_cache(cache_key, df)
+   245→   245→   245→            return df
+   246→   246→   246→        except Exception as e:
+   247→   247→   247→            if attempt == 2:
+   248→   248→   248→                return None
+   249→   249→   249→    return None
+   250→   250→   250→
+   251→   251→   251→
+   252→   252→   252→def generate_mock_btc_prices(start_date, end_date, seed=42):
+   253→   253→   253→    """
+   254→   254→   254→    Generate realistic mock BTC daily prices (LAST RESORT only if API fails).
+   255→   255→   255→    Simulates a full BTC cycle: Bull -> Peak -> Bear -> Recovery -> New Bull.
+   256→   256→   256→    """
+   257→   257→   257→    np.random.seed(seed)
+   258→   258→   258→    dates = pd.date_range(start=start_date, end=end_date, freq='D')
+   259→   259→   259→    n = len(dates)
+   260→   260→   260→    waypoints = [
+   261→   261→   261→        (0,     np.log(30000)), (200,   np.log(55000)), (350,   np.log(69000)),
+   262→   262→   262→        (420,   np.log(45000)), (600,   np.log(22000)), (800,   np.log(16000)),
+   263→   263→   263→        (1000,  np.log(25000)), (1200,  np.log(42000)), (1400,  np.log(65000)),
+   264→   264→   264→        (1550,  np.log(95000)), (1700,  np.log(110000)), (n - 1, np.log(98000)),
+   265→   265→   265→    ]
+   266→   266→   266→    wp_days = [w[0] for w in waypoints]
+   267→   267→   267→    wp_logs = [w[1] for w in waypoints]
+   268→   268→   268→    all_days = np.arange(n)
+   269→   269→   269→    log_prices = np.interp(all_days, wp_days, wp_logs)
+   270→   270→   270→    sigma = 0.50
+   271→   271→   271→    dt_step = 1 / 365.25
+   272→   272→   272→    noise = np.random.standard_normal(n) * sigma * np.sqrt(dt_step)
+   273→   273→   273→    log_prices += noise
+   274→   274→   274→    log_prices = pd.Series(log_prices).ewm(span=3, adjust=False).mean().values
+   275→   275→   275→    prices = np.exp(log_prices)
+   276→   276→   276→    prices = np.clip(prices, 5000, 200000)
+   277→   277→   277→    df = pd.DataFrame({'date': dates.date, 'price_usd': prices})
+   278→   278→   278→    print(f"[DATA] MOCK FALLBACK: {n} days ({start_date} to {end_date}).")
+   279→   279→   279→    print(f"        Price range: ${prices.min():,.0f} - ${prices.max():,.0f}")
+   280→   280→   280→    return df
+   281→   281→   281→
+   282→   282→   282→
+   283→   283→   283→def generate_mock_onchain_metrics(price_df, seed=123):
+   284→   284→   284→    """Generate mock on-chain metrics (LAST RESORT only)."""
+   285→   285→   285→    np.random.seed(seed)
+   286→   286→   286→    n = len(price_df)
+   287→   287→   287→    dates = price_df['date'].values
+   288→   288→   288→    prices = price_df['price_usd'].values
+   289→   289→   289→    sma_365 = pd.Series(prices).rolling(365, min_periods=1).mean().values
+   290→   290→   290→    price_ratio = prices / np.maximum(sma_365, 1)
+   291→   291→   291→    cycle_phase = np.linspace(0, 3 * np.pi, n)
+   292→   292→   292→    mvrv_base = np.power(price_ratio, 1.8)
+   293→   293→   293→    mvrv_cycle = 1.5 * np.sin(cycle_phase)
+   294→   294→   294→    mvrv_noise = np.random.normal(0, 0.08, n)
+   295→   295→   295→    mvrv = mvrv_base + mvrv_cycle + mvrv_noise
+   296→   296→   296→    mvrv = pd.Series(np.clip(mvrv, 0.4, 7.0)).ewm(span=14).mean().values
+   297→   297→   297→    nupl_base = (prices - sma_365) / np.maximum(prices, 1)
+   298→   298→   298→    nupl = nupl_base * 2.5 + np.random.normal(0, 0.08, n)
+   299→   299→   299→    nupl = pd.Series(np.clip(nupl, -0.5, 0.8)).ewm(span=7).mean().values
+   300→   300→   300→    sopr_noise = np.random.normal(0, 0.05, n)
+   301→   301→   301→    sopr_trend = 1.0 + 0.3 * (price_ratio - 1.0) + np.sin(cycle_phase * 0.7) * 0.1
+   302→   302→   302→    sopr = pd.Series(np.clip(sopr_trend + sopr_noise, 0.5, 2.5)).ewm(span=7).mean().values
+   303→   303→   303→    df = pd.DataFrame({'date': dates, 'mvrv': mvrv, 'nupl': nupl, 'sopr': sopr})
+   304→   304→   304→    print(f"[DATA] MOCK on-chain metrics: {n} days.")
+   305→   305→   305→    return df
+   306→   306→   306→
+   307→   307→   307→
+   308→   308→   308→def compute_technical_indicators(df):
+   309→   309→   309→    """Add EMA 20, RSI 14, and SMA 365 to the DataFrame."""
+   310→   310→   310→    prices = df['price_usd']
+   311→   311→   311→    df['ema_20'] = prices.ewm(span=20, adjust=False).mean()
+   312→   312→   312→    delta = prices.diff()
+   313→   313→   313→    gain = delta.where(delta > 0, 0.0).ewm(span=14, adjust=False).mean()
+   314→   314→   314→    loss = (-delta.where(delta < 0, 0.0)).ewm(span=14, adjust=False).mean()
+   315→   315→   315→    rs = gain / loss.replace(0, np.nan)
+   316→   316→   316→    df['rsi_14'] = 100 - (100 / (1 + rs))
+   317→   317→   317→    df['rsi_14'] = df['rsi_14'].fillna(50)
+   318→   318→   318→    df['sma_365'] = prices.rolling(365, min_periods=1).mean()
+   319→   319→   319→    return df
+   320→   320→   320→
+   321→   321→   321→
+   322→   322→   322→def build_master_dataframe(years=5):
+   323→   323→   323→    """
+   324→   324→   324→    Main data pipeline: fetch REAL data (with CSV cache), merge into master DF.
+   325→   325→   325→    Falls back to mock data ONLY if both API and cache fail.
+   326→   326→   326→    Falls back to proxy calculations for dates before BGeometrics data starts.
+   327→   327→   327→    """
+   328→   328→   328→    used_cache = {'price': False, 'mvrv': False, 'nupl': False, 'sopr': False}
+   329→   329→   329→
+   330→   330→   330→    # --- Step 1: REAL BTC Price from Binance (or cache) ---
+   331→   331→   331→    price_df = fetch_binance_btc_price(days=2000)
+   332→   332→   332→    if price_df is None or len(price_df) < 365:
+   333→   333→   333→        # Check if there's an old cache we can still use
+   334→   334→   334→        old_cache = pd.read_csv(_cache_path('binance_btc_prices'), parse_dates=['date'])
+   335→   335→   335→        if len(old_cache) >= 365:
+   336→   336→   336→            old_cache['date'] = old_cache['date'].dt.date
+   337→   337→   337→            price_df = old_cache
+   338→   338→   338→            print("[DATA] Using expired cache as fallback for prices.")
+   339→   339→   339→        else:
+   340→   340→   340→            print("[DATA] Binance FAILED. Using mock prices as LAST RESORT.")
+   341→   341→   341→            end_date = datetime.now().date()
+   342→   342→   342→            start_date = end_date - timedelta(days=int(years * 365.25))
+   343→   343→   343→            price_df = generate_mock_btc_prices(start_date, end_date)
+   344→   344→   344→    else:
+   345→   345→   345→        used_cache['price'] = os.path.exists(_cache_path('binance_btc_prices'))
+   346→   346→   346→
+   347→   347→   347→    # --- Step 2: REAL On-Chain Metrics ---
+   348→   348→   348→    # PRIMARY:   CoinMetrics Community API (CapMVRVCur) — FREE, high rate limit
+   349→   349→   349→    # DERIVED:   NUPL = 1 - (1/MVRV) — mathematically identical to on-chain NUPL
+   350→   350→   350→    # FALLBACK:  BGeometrics SOPR (rate-limited) → Proxy (Price/EMA30)
+   351→   351→   351→    data_start = price_df['date'].iloc[0]
+   352→   352→   352→    data_end = price_df['date'].iloc[-1]
+   353→   353→   353→
+   354→   354→   354→    print(f"\n[DATA] === ON-CHAIN DATA PIPELINE ===")
+   355→   355→   355→    print(f"        Primary source: CoinMetrics Community API (CapMVRVCur)")
+   356→   356→   356→    print(f"        NUPL: Derived from MVRV (NUPL = 1 - 1/MVRV)")
+   357→   357→   357→    print(f"        SOPR: BGeometrics fallback -> Proxy (Price/EMA30)")
+   358→   358→   358→
+   359→   359→   359→    # Fetch REAL MVRV from CoinMetrics
+   360→   360→   360→    mvrv_df = fetch_coinmetrics_mvrv(data_start, data_end)
+   361→   361→   361→    nupl_df = None  # Will be derived from MVRV
+   362→   362→   362→
+   363→   363→   363→    # Try BGeometrics SOPR (non-critical, proxy is acceptable)
+   364→   364→   364→    time.sleep(2)
+   365→   365→   365→    sopr_df = fetch_bgeometrics_metric('sopr')
+   366→   366→   366→
+   367→   367→   367→    # Merge on-chain data
+   368→   368→   368→    onchain_df = price_df[['date']].copy()
+   369→   369→   369→    onchain_df['mvrv'] = np.nan
+   370→   370→   370→    onchain_df['nupl'] = np.nan
+   371→   371→   371→    onchain_df['sopr'] = np.nan
+   372→   372→   372→    if mvrv_df is not None:
+   373→   373→   373→        onchain_df = onchain_df.drop(columns=['mvrv']).merge(mvrv_df, on='date', how='left')
+   374→   374→   374→    if sopr_df is not None:
+   375→   375→   375→        onchain_df = onchain_df.drop(columns=['sopr']).merge(sopr_df, on='date', how='left')
+   376→   376→   376→
+   377→   377→   377→    master = price_df.merge(onchain_df, on='date', how='left')
+   378→   378→   378→    master = master.sort_values('date').reset_index(drop=True)
+   379→   379→   379→
+   380→   380→   380→    # Forward-fill missing on-chain (up to 2 days)
+   381→   381→   381→    for col in ['mvrv', 'nupl', 'sopr']:
+   382→   382→   382→        master[col] = master[col].ffill(limit=2)
+   383→   383→   383→
+   384→   384→   384→    # --- Step 3: Proxy fallback ---
+   385→   385→   385→    master['sma_365'] = master['price_usd'].rolling(365, min_periods=1).mean()
+   386→   386→   386→    # MVRV proxy (only if CoinMetrics failed)
+   387→   387→   387→    master['mvrv_proxy'] = master['price_usd'] / master['sma_365']
+   388→   388→   388→    master['mvrv'] = master['mvrv'].fillna(master['mvrv_proxy'])
+   389→   389→   389→
+   390→   390→   390→    # NUPL: DERIVE from real MVRV where available, proxy otherwise
+   391→   391→   391→    # Real: NUPL = 1 - (1/MVRV)   [on-chain identity]
+   392→   392→   392→    # Proxy: NUPL = (Price - SMA365) / Price
+   393→   393→   393→    master['nupl_real'] = 1.0 - (1.0 / master['mvrv'])
+   394→   394→   394→    nupl_proxy = (master['price_usd'] - master['sma_365']) / master['price_usd']
+   395→   395→   395→    # Use derived NUPL where MVRV is real (not proxy), else proxy
+   396→   396→   396→    master['nupl'] = master['nupl'].fillna(master['nupl_real'])
+   397→   397→   397→    master['nupl'] = master['nupl'].fillna(nupl_proxy)
+   398→   398→   398→    master.drop(columns=['nupl_real'], inplace=True)
+   399→   399→   399→
+   400→   400→   400→    # SOPR proxy: Price/EMA30
+   401→   401→   401→    ema30 = master['price_usd'].ewm(span=30, adjust=False).mean()
+   402→   402→   402→    sopr_proxy = master['price_usd'] / ema30
+   403→   403→   403→    master['sopr'] = master['sopr'].fillna(sopr_proxy)
+   404→   404→   404→
+   405→   405→   405→    # Report data coverage
+   406→   406→   406→    real_mvrv_count = len(mvrv_df) if mvrv_df is not None else 0
+   407→   407→   407→    real_sopr_count = len(sopr_df) if sopr_df is not None else 0
+   408→   408→   408→    # NUPL is derived from MVRV, so same count
+   409→   409→   409→    real_nupl_count = real_mvrv_count
+   410→   410→   410→
+   411→   411→   411→    print(f"\n[DATA] === DATA SOURCE SUMMARY ===")
+   412→   412→   412→    print(f"        Price:  Binance REAL ({len(master)} days)")
+   413→   413→   413→    print(f"        MVRV:   CoinMetrics REAL ({real_mvrv_count}d) + Proxy ({max(0, len(master)-real_mvrv_count)}d)")
+   414→   414→   414→    print(f"        NUPL:   Derived from MVRV ({real_nupl_count}d) + Proxy ({max(0, len(master)-real_nupl_count)}d)")
+   415→   415→   415→    print(f"        SOPR:   BGeometrics REAL ({real_sopr_count}d) + Proxy ({max(0, len(master)-real_sopr_count)}d)")
+   416→   416→   416→    print(f"        Cache dir: {CACHE_DIR}/")
+   417→   417→   417→    print(f"        Cache TTL : {CACHE_MAX_AGE_HOURS}h (7 days)")
+   418→   418→   418→    print(f"        To force re-fetch: rm {CACHE_DIR}/*.csv")
+   419→   419→   419→
+   420→   420→   420→    if real_mvrv_count > 0:
+   421→   421→   421→        real_mvrv_range = master[master['mvrv'].notna()]['mvrv']
+   422→   422→   422→        # Get the real MVRV range (not proxy)
+   423→   423→   423→        if mvrv_df is not None:
+   424→   424→   424→            print(f"\n        [OK] REAL MVRV range: {mvrv_df['mvrv'].min():.3f} - {mvrv_df['mvrv'].max():.3f}")
+   425→   425→   425→            print(f"             Days with MVRV > 2.5: {(mvrv_df['mvrv'] > 2.5).sum()}")
+   426→   426→   426→            print(f"             Days with MVRV > 3.0: {(mvrv_df['mvrv'] > 3.0).sum()}")
+   427→   427→   427→    else:
+   428→   428→   428→        print(f"\n  [!] WARNING: MVRV uses PROXY (CoinMetrics failed).")
+   429→   429→   429→        print(f"      Proxy MVRV = Price/SMA365 (range ~0.4-2.1) vs Real MVRV (range ~0.5-7.0).")
+   430→   430→   430→        print(f"      Delete {CACHE_DIR}/coinmetrics_mvrv.csv and re-run to retry.")
+   431→   431→   431→
+   432→   432→   432→    if real_sopr_count == 0:
+   433→   433→   433→        print(f"        [i] SOPR uses Proxy (Price/EMA30) — BGeometrics rate-limited.")
+   434→   434→   434→        print(f"            SOPR is a secondary booster signal, impact is limited.")
+   435→   435→   435→        print(f"            To get real SOPR: export from Dune.com or Glassnode and place in {CACHE_DIR}/")
+   436→   436→   436→
+   437→   437→   437→    # Technical indicators
+   438→   438→   438→    master = compute_technical_indicators(master)
+   439→   439→   439→    master['price_thb'] = master['price_usd'] * USD_THB_RATE
+   440→   440→   440→
+   441→   441→   441→    print(f"\n[DATA] Master DataFrame: {len(master)} rows, {master['date'].min()} to {master['date'].max()}")
+   442→   442→   442→    return master
+   443→   443→   443→
+   444→   444→   444→
+   445→   445→   445→# ============================================================
+   446→   446→   446→# SECTION 2: BACKTEST ENGINE
+   447→   447→   447→# ============================================================
+   448→   448→   448→
+   449→   449→   449→def apply_buy_fee(thb_amount):
+   450→   450→   450→    return thb_amount * (1 - BUY_FEE_PCT)
+   451→   451→   451→
+   452→   452→   452→def apply_sell_fee(thb_amount):
+   453→   453→   453→    return thb_amount * (1 - SELL_FEE_PCT)
+   454→   454→   454→
+   455→   455→   455→def backtest_strategy(df, strategy_func, strategy_name):
+   456→   456→   456→    """
+   457→   457→   457→    Generic backtest runner. Calls strategy_func for each day.
+   458→   458→   458→    """
+   459→   459→   459→    btc = 0.0
+   460→   460→   460→    cash_reserve = 0.0
+   461→   461→   461→    total_invested = 0.0
+   462→   462→   462→    cooldown = 0
+   463→   463→   463→    peak_value = 0.0
+   464→   464→   464→    max_drawdown = 0.0
+   465→   465→   465→    daily_log = []
+   466→   466→   466→
+   467→   467→   467→    for idx, row in df.iterrows():
+   468→   468→   468→        price_thb = row['price_thb']
+   469→   469→   469→        if cooldown > 0:
+   470→   470→   470→            cooldown -= 1
+   471→   471→   471→
+   472→   472→   472→        state = {
+   473→   473→   473→            'btc': btc, 'cash_reserve': cash_reserve,
+   474→   474→   474→            'total_invested': total_invested, 'cooldown': cooldown,
+   475→   475→   475→            'row': row, 'idx': idx
+   476→   476→   476→        }
+   477→   477→   477→        action = strategy_func(state)
+   478→   478→   478→
+   479→   479→   479→        buy_thb = action.get('buy_thb', 0)
+   480→   480→   480→        sell_btc_pct = action.get('sell_btc_pct', 0)
+   481→   481→   481→        to_reserve = action.get('to_reserve', 0)
+   482→   482→   482→
+   483→   483→   483→        actual_buy = apply_buy_fee(buy_thb)
+   484→   484→   484→        btc_bought = actual_buy / price_thb if price_thb > 0 else 0
+   485→   485→   485→        btc += btc_bought
+   486→   486→   486→        total_invested += buy_thb
+   487→   487→   487→
+   488→   488→   488→        if sell_btc_pct > 0 and btc > 0:
+   489→   489→   489→            btc_to_sell = btc * (sell_btc_pct / 100.0)
+   490→   490→   490→            sell_proceeds = apply_sell_fee(btc_to_sell * price_thb)
+   491→   491→   491→            btc -= btc_to_sell
+   492→   492→   492→            cash_reserve += sell_proceeds
+   493→   493→   493→            cooldown = action.get('new_cooldown', cooldown)
+   494→   494→   494→
+   495→   495→   495→        cash_reserve += to_reserve
+   496→   496→   496→        cash_reserve = max(cash_reserve, 0.0)
+   497→   497→   497→
+   498→   498→   498→        portfolio_value = btc * price_thb + cash_reserve
+   499→   499→   499→        avg_cost = total_invested / btc if btc > 0 else 0
+   500→   500→   500→
+
+[showing lines 1-500 of 1149; use offset=501 with limit to continue reading]

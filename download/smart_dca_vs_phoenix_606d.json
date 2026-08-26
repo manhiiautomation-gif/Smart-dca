@@ -1,0 +1,76 @@
+{
+  "period": [
+    "2024-12-29",
+    "2026-08-26"
+  ],
+  "total_days": 606,
+  "smart_dca": {
+    "strategy": "smart_dca",
+    "budget_usd": 100,
+    "total_return_pct": -0.15,
+    "total_spent_usd": 51484.0,
+    "final_value_usd": 51407.58,
+    "btc_accumulated": 0.65516465,
+    "avg_entry_usd": 78581.77,
+    "buy_days": 417,
+    "skip_days": 189,
+    "buy_ratio": 0.688,
+    "sell_count": 0,
+    "has_sell_mechanism": false
+  },
+  "baseline_dca": {
+    "strategy": "baseline_dca",
+    "budget_usd": 100,
+    "total_return_pct": -9.05,
+    "total_spent_usd": 60600.0,
+    "final_value_usd": 55113.17,
+    "btc_accumulated": 0.70239055,
+    "avg_entry_usd": 86276.79,
+    "buy_days": 606,
+    "skip_days": 0,
+    "buy_ratio": 1.0,
+    "sell_count": 0,
+    "has_sell_mechanism": false
+  },
+  "phoenix_v5_1": {
+    "strategy": "phoenix_v5_1",
+    "budget_thb": 100,
+    "budget_usd": 2.78,
+    "net_capital_thb": 78010.0,
+    "total_invested_thb": 78010.0,
+    "total_invested_usd": 2166.94,
+    "final_value_thb": 82737.65618229375,
+    "final_value_usd": 2298.27,
+    "roi_pct": 6.060320705414371,
+    "true_roi_pct": 6.060320705414371,
+    "max_drawdown_pct": 24.155861349405004,
+    "calmar_ratio": 0.25088406568303334,
+    "btc_accumulated": 0.029258666165320656,
+    "avg_entry_usd": 74061.63,
+    "buy_days": 605,
+    "sell_count": 0,
+    "has_sell_mechanism": true,
+    "reserve_injected_thb": 0.0,
+    "sell_proceeds_thb": 0.0
+  },
+  "phoenix_v5": {
+    "strategy": "phoenix_v5",
+    "budget_thb": 100,
+    "roi_pct": 6.8752163766018075,
+    "true_roi_pct": 13.548237246666886,
+    "max_drawdown_pct": 22.619464127529714,
+    "calmar_ratio": 0.5989636699738429,
+    "btc_accumulated": 0.03108120001739265,
+    "sell_count": 1,
+    "has_sell_mechanism": true
+  },
+  "standard_dca_100thb": {
+    "strategy": "standard_dca_100thb",
+    "budget_thb": 100,
+    "roi_pct": -9.092556894495292,
+    "true_roi_pct": -9.092556894495292,
+    "max_drawdown_pct": 30.7186298035113,
+    "btc_accumulated": 0.019481544141005676,
+    "sell_count": 0
+  }
+}

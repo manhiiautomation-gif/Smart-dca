@@ -1,0 +1,1290 @@
+     1→     1→'''Phoenix v5.1 Bot Engine.
+     2→     2→
+     3→     3→Orchestrates: kill switch check, fetch data, compute indicators,
+     4→     4→run strategy, execute trades, update state, record trade log, send notifications.
+     5→     5→
+     6→     6→Modes:
+     7→     7→    - run_daily():      Standard run (dry-run or live)
+     8→     8→    - run_demo():       Demo portfolio simulation (isolated state, slippage, validation)
+     9→     9→'''
+    10→    10→
+    11→    11→import math
+    12→    12→import os
+    13→    13→import time
+    14→    14→from datetime import date, datetime, timezone, timedelta
+    15→    15→
+    16→    16→from . import config
+    17→    17→from . import indicators as ind
+    18→    18→from . import strategy
+    19→    19→from . import state as state_mod
+    20→    20→from . import notifier
+    21→    21→from . import kill_switch as ks_mod
+    22→    22→
+    23→    23→# ── Named constants (CQ: replace magic numbers) ──
+    24→    24→PRICE_HISTORY_DAYS = 500
+    25→    25→MIN_CLOSES_FOR_INDICATORS = 50
+    26→    26→BALANCE_VERIFY_DELAY_S = 5
+    27→    27→BTC_BALANCE_EPSILON = 1e-8
+    28→    28→MAX_SELL_PCT_OF_BALANCE = 0.99
+    29→    29→MIN_SELL_AMOUNT = 10.0
+    30→    30→LTH_RP_BEAR_MULTIPLIER = 1.25
+    31→    31→LTH_RP_HIGH_MVRV_MULTIPLIER = 1.10
+    32→    32→LTH_RP_DEFAULT_MULTIPLIER = 1.15
+    33→    33→HIGH_MVRV_THRESHOLD = 2.5
+    34→    34→SOPR_ACCURACY_FLOOR = 0.001
+    35→    35→
+    36→    36→# H1: Thai timezone for idempotency check
+    37→    37→# GitHub Actions cron: 03:00/03:10/03:30 UTC = 10:00/10:10/10:30 THB
+    38→    38→_THAI_TZ = timezone(timedelta(hours=7))
+    39→    39→
+    40→    40→
+    41→    41→def _thai_today() -> date:
+    42→    42→    """Return today's date in Thai timezone (UTC+7)."""
+    43→    43→    return datetime.now(_THAI_TZ).date()
+    44→    44→
+    45→    45→
+    46→    46→def _thai_now() -> datetime:
+    47→    47→    """Return current datetime in Thai timezone (UTC+7)."""
+    48→    48→    return datetime.now(_THAI_TZ)
+    49→    49→
+    50→    50→
+    51→    51→def _in_dca_time_window() -> bool:
+    52→    52→    """Check if current Thai time is within the DCA buy window.
+    53→    53→
+    54→    54→    Configured via DCA_TIME_WINDOW_START / DCA_TIME_WINDOW_END (Thai 24h).
+    55→    55→    Window is [start, end) — start inclusive, end exclusive.
+    56→    56→    """
+    57→    57→    now = _thai_now()
+    58→    58→    hour = now.hour
+    59→    59→    return config.DCA_TIME_WINDOW_START <= hour < config.DCA_TIME_WINDOW_END
+    60→    60→
+    61→    61→
+    62→    62→def _is_monday_thai() -> bool:
+    63→    63→    """Check if today (Thai timezone) is Monday.
+    64→    64→
+    65→    65→    Monday is weekday() == 0 in Python.
+    66→    66→    """
+    67→    67→    return _thai_today().weekday() == 0
+    68→    68→
+    69→    69→from . import config
+    70→    70→from . import indicators as ind
+    71→    71→from . import strategy
+    72→    72→from . import state as state_mod
+    73→    73→from . import notifier
+    74→    74→from . import kill_switch as ks_mod
+    75→    75→
+    76→    76→
+    77→    77→# Dead code removed: _fetch_price_history() — unused, only _fetch_price_history_with_dates() is called.
+    78→    78→
+    79→    79→
+    80→    80→def _fetch_price_history_with_dates(exchange) -> list:
+    81→    81→    '''Fetch daily closes with dates. Returns list of {date, close}.'''
+    82→    82→    return exchange.get_klines(days=PRICE_HISTORY_DAYS)
+    83→    83→
+    84→    84→
+    85→    85→# ── B22: Shared on-chain metric resolution ────────────────────────────
+    86→    86→# These functions replace 4 duplicated fallback chains
+    87→    87→# (run_daily, refresh_dashboard, run_demo, idempotency-skip).
+    88→    88→
+    89→    89→def _sopr_proxy(price, sma14, sma30):
+    90→    90→    """Estimate SOPR from price vs short-term moving average.
+    91→    91→
+    92→    92→    SOPR = price / avg_cost_basis_of_STH.
+    93→    93→    SMA14 approximates short-term holder average buy price.
+    94→    94→    price > SMA14 -> recent buyers in profit -> SOPR > 1
+    95→    95→    """
+    96→    96→    if sma14 > 0 and not math.isnan(sma14):
+    97→    97→        return price / sma14
+    98→    98→    if sma30 > 0 and not math.isnan(sma30):
+    99→    99→        return price / sma30
+   100→   100→    return 1.0
+   101→   101→
+   102→   102→
+   103→   103→def _lth_rp_proxy(realized_price_val, price, mvrv_val, in_bear=False):
+   104→   104→    """Estimate LTH Realized Price from Realized Price.
+   105→   105→
+   106→   106→    B23: Dynamic multiplier based on market regime.
+   107→   107→    LTH holders have higher cost basis than overall realized price.
+   108→   108→    """
+   109→   109→    if not math.isnan(realized_price_val) and realized_price_val > 0:
+   110→   110→        multiplier = LTH_RP_BEAR_MULTIPLIER if in_bear else (LTH_RP_HIGH_MVRV_MULTIPLIER if mvrv_val > HIGH_MVRV_THRESHOLD else LTH_RP_DEFAULT_MULTIPLIER)
+   111→   111→        return realized_price_val * multiplier
+   112→   112→    # Derive from MVRV if no realized price
+   113→   113→    if mvrv_val > 0 and not math.isnan(mvrv_val) and price > 0:
+   114→   114→        est_rp = price / mvrv_val
+   115→   115→        multiplier = LTH_RP_BEAR_MULTIPLIER if in_bear else (LTH_RP_HIGH_MVRV_MULTIPLIER if mvrv_val > HIGH_MVRV_THRESHOLD else LTH_RP_DEFAULT_MULTIPLIER)
+   116→   116→        return est_rp * multiplier
+   117→   117→    return float('nan')
+   118→   118→
+   119→   119→
+   120→   120→def _resolve_onchain_metrics(price, closes, today,
+   121→   121→                              log_prefix='[BOT]',
+   122→   122→                              allow_web_fallback=True,
+   123→   123→                              notify_on_fail=True):
+   124→   124→    """Resolve all technical + on-chain indicators with unified fallback chain.
+   125→   125→
+   126→   126→    B22: Replaces duplicated code in run_daily(), refresh_dashboard(),
+   127→   127→    run_demo(), and idempotency-skip path.
+   128→   128→
+   129→   129→    Steps:
+   130→   130→        1. Compute technical indicators from price closes
+   131→   131→        2. Resolve MVRV (BG cache -> embedded -> web)
+   132→   132→        3. Call BG batch for on-chain metrics
+   133→   133→        4. Apply proxy fallbacks for SOPR/LTH-RP
+   134→   134→
+   135→   135→    Args:
+   136→   136→        price: current BTC price
+   137→   137→        closes: list of daily close prices
+   138→   138→        today: date object (Thai TZ)
+   139→   139→        log_prefix: prefix for log messages (e.g. '[BOT]', '[REFRESH]', '[DEMO]')
+   140→   140→        allow_web_fallback: try CoinMetrics/ahasignals when embedded MVRV is missing
+   141→   141→        notify_on_fail: send Telegram when all MVRV sources fail
+   142→   142→
+   143→   143→    Returns:
+   144→   144→        dict with all resolved metrics. Key differences from callers:
+   145→   145→        - run_daily uses allow_web=True, notify_on_fail=True
+   146→   146→        - refresh uses allow_web=False, notify_on_fail=False
+   147→   147→        - demo uses allow_web=True, notify_on_fail=False
+   148→   148→    """
+   149→   149→    # ── 1. Technical indicators ──
+   150→   150→    sma_200 = ind.sma(closes, 200)
+   151→   151→    sma_365 = ind.sma(closes, 365)
+   152→   152→    rsi_val = ind.rsi(closes, 14)
+   153→   153→    macd_line, macd_sig, macd_h = ind.macd(closes)
+   154→   154→    macd_hist_series = ind.compute_all_macd_hist(closes)
+   155→   155→    rsi_series = ind.compute_all_rsi(closes, 14)
+   156→   156→    macd_bear = ind.macd_cross_bear(macd_hist_series)
+   157→   157→    macd_declining = ind.macd_hist_declining(macd_hist_series, 4)
+   158→   158→    rsi_div = ind.rsi_divergence(closes, rsi_series, 40)
+   159→   159→    ath = max(closes) if closes else 0
+   160→   160→    sma14 = ind.sma(closes, 14)
+   161→   161→    sma30 = ind.sma(closes, 30)
+   162→   162→
+   163→   163→    print(f'{log_prefix} SMA200={sma_200:,.2f} RSI={rsi_val:.1f} MACD_H={macd_h:.4f}')
+   164→   164→    print(f'{log_prefix} MACD_bear={macd_bear} MACD_declining={macd_declining} RSI_div={rsi_div}')
+   165→   165→
+   166→   166→    in_bear = not math.isnan(sma_200) and price < sma_200
+   167→   167→
+   168→   168→    # ── 2. MVRV — try BG cache first, then embedded, then web ──
+   169→   169→    mvrv_val = float('nan')
+   170→   170→    mvrv_z = float('nan')
+   171→   171→    mvrv_z_source = 'N/A'
+   172→   172→    mvrv_source = 'N/A'
+   173→   173→
+   174→   174→    try:
+   175→   175→        from . import bg_metrics
+   176→   176→        bg_mvrv = bg_metrics.get_cached_value('mvrv', today)
+   177→   177→        if not math.isnan(bg_mvrv):
+   178→   178→            mvrv_val = bg_mvrv
+   179→   179→            if mvrv_val is not None and mvrv_val <= 0:
+   180→   180→                mvrv_val = float('nan')
+   181→   181→            mvrv_source = 'BG-cache'
+   182→   182→            print(f'{log_prefix} MVRV from BG cache: {mvrv_val:.4f}')
+   183→   183→        bg_z = bg_metrics.get_cached_value('mvrv_zscore', today)
+   184→   184→        if not math.isnan(bg_z):
+   185→   185→            mvrv_z = bg_z
+   186→   186→            mvrv_z_source = 'BG-cache'
+   187→   187→    except ImportError:
+   188→   188→        pass
+   189→   189→
+   190→   190→    if math.isnan(mvrv_val):
+   191→   191→        mvrv_val = strategy.get_mvrv_for_date(today)
+   192→   192→        if mvrv_val is not None and mvrv_val <= 0:
+   193→   193→            mvrv_val = float('nan')
+   194→   194→        if not math.isnan(mvrv_val):
+   195→   195→            mvrv_source = 'embedded'
+   196→   196→            if allow_web_fallback:
+   197→   197→                from datetime import timedelta as td
+   198→   198→                if today - strategy._MVRV_HISTORY_MAX > td(days=1):
+   199→   199→                    print(f'{log_prefix} MVRV embedded stale (ends {strategy._MVRV_HISTORY_MAX}), '
+   200→   200→                          f'updating in background...')
+   201→   201→                    try:
+   202→   202→                        from . import mvrv_fetcher
+   203→   203→                        ok, msg = mvrv_fetcher.try_update_mvrv()
+   204→   204→                        print(f'{log_prefix} MVRV update: {msg}')
+   205→   205→                    except Exception as e:
+   206→   206→                        print(f'{log_prefix} MVRV background update failed: {e}')
+   207→   207→        elif allow_web_fallback:
+   208→   208→            print(f'{log_prefix} No embedded MVRV for {today}, trying web fallback...')
+   209→   209→            from . import mvrv_fetcher
+   210→   210→            web_mvrv, web_date, web_source = mvrv_fetcher.fetch_mvrv_from_web()
+   211→   211→            if web_mvrv is not None:
+   212→   212→                mvrv_val = web_mvrv
+   213→   213→                if mvrv_val is not None and mvrv_val <= 0:
+   214→   214→                    mvrv_val = float('nan')
+   215→   215→                mvrv_source = web_source
+   216→   216→                print(f'{log_prefix} Web MVRV: {mvrv_val:.4f}')
+   217→   217→            else:
+   218→   218→                print(f'{log_prefix} WARNING: All MVRV sources failed: {web_source}')
+   219→   219→                if notify_on_fail:
+   220→   220→                    notifier.send_telegram(
+   221→   221→                        f'Phoenix v5.1 WARNING: No MVRV data for {today}. '
+   222→   222→                        'All sources failed. Skipping trade.'
+   223→   223→                    )
+   224→   224→                return {'_mvrv_all_failed': True}
+   225→   225→        else:
+   226→   226→            mvrv_source = 'N/A'
+   227→   227→
+   228→   228→    # DI-6: Default to NaN (not 0) when MVRV unavailable.
+   229→   229→    # 0 falsely implies 'MVRV at minimum' to dashboard/strategy.
+   230→   230→    mvrv_pct = strategy.compute_mvrv_percentile(today, mvrv_val) if not math.isnan(mvrv_val) else float('nan')
+   231→   231→    if math.isnan(mvrv_z):
+   232→   232→        mvrv_z = strategy.compute_mvrv_zscore(today, mvrv_val) if not math.isnan(mvrv_val) else float('nan')
+   233→   233→        mvrv_z_source = 'embedded-365d'
+   234→   234→    nupl = 1.0 - 1.0 / mvrv_val if mvrv_val > 0 and not math.isnan(mvrv_val) else 0
+   235→   235→    realized_price = price / mvrv_val if mvrv_val > 0 and not math.isnan(mvrv_val) else float('nan')
+   236→   236→
+   237→   237→    # ── 3. BG batch fetch + on-chain metric resolution ──
+   238→   238→    sopr = float('nan')
+   239→   239→    lth_rp = float('nan')
+   240→   240→    sopr_source = 'N/A'
+   241→   241→    lth_source = 'N/A'
+   242→   242→    rp_source = 'mvrv-derived' if not math.isnan(realized_price) else 'N/A'
+   243→   243→
+   244→   244→    try:
+   245→   245→        from . import bg_metrics
+   246→   246→        bg = bg_metrics.get_all_metrics_today(target_date=today)
+   247→   247→
+   248→   248→        # MVRV upgrade from BG batch
+   249→   249→        if not math.isnan(bg.get('mvrv', float('nan'))):
+   250→   250→            bg_mvrv_val = bg['mvrv']
+   251→   251→            if bg_mvrv_val > 0 and mvrv_source != 'BG':
+   252→   252→                mvrv_val = bg_mvrv_val
+   253→   253→                mvrv_source = 'BG'
+   254→   254→                nupl = 1.0 - 1.0 / mvrv_val
+   255→   255→                realized_price = price / mvrv_val
+   256→   256→                rp_source = 'BG'
+   257→   257→                print(f'{log_prefix} MVRV upgraded from BG: {mvrv_val:.4f}')
+   258→   258→
+   259→   259→        # MVRV Z-Score from BG
+   260→   260→        if not math.isnan(bg.get('mvrv_zscore', float('nan'))):
+   261→   261→            mvrv_z = bg['mvrv_zscore']
+   262→   262→            mvrv_z_source = 'BG'
+   263→   263→            print(f'{log_prefix} MVRV Z-Score from BG: {mvrv_z:.3f}')
+   264→   264→
+   265→   265→        # SOPR
+   266→   266→        if not math.isnan(bg.get('sth_sopr', float('nan'))):
+   267→   267→            sopr = bg['sth_sopr']
+   268→   268→            sopr_source = 'BG'
+   269→   269→        else:
+   270→   270→            sopr = _sopr_proxy(price, sma14, sma30)
+   271→   271→            sopr_source = 'proxy-sma14'
+   272→   272→
+   273→   273→        # Realized Price
+   274→   274→        if not math.isnan(bg.get('realized_price', float('nan'))):
+   275→   275→            realized_price = bg['realized_price']
+   276→   276→            rp_source = 'BG'
+   277→   277→
+   278→   278→        # LTH Realized Price
+   279→   279→        if not math.isnan(bg.get('lth_realized_price', float('nan'))):
+   280→   280→            lth_rp = bg['lth_realized_price']
+   281→   281→            lth_source = 'BG'
+   282→   282→        else:
+   283→   283→            lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val, in_bear=in_bear)
+   284→   284→            lth_source = 'proxy-rp*dynamic' if not math.isnan(lth_rp) else 'N/A'
+   285→   285→
+   286→   286→        # B20: Proxy accuracy logging (when BG has actual SOPR)
+   287→   287→        _proxy_sopr = _sopr_proxy(price, sma14, sma30)
+   288→   288→        if not math.isnan(sopr) and not math.isnan(_proxy_sopr) and sopr_source == 'BG':
+   289→   289→            proxy_err = abs(sopr - _proxy_sopr) / max(abs(sopr), SOPR_ACCURACY_FLOOR) * 100
+   290→   290→            print(f'{log_prefix} SOPR proxy accuracy: actual={sopr:.4f} proxy={_proxy_sopr:.4f} err={proxy_err:.1f}%')
+   291→   291→
+   292→   292→    except Exception as e:
+   293→   293→        print(f'{log_prefix} BG metrics failed: {e}. Using all-proxy mode')
+   294→   294→        sopr = _sopr_proxy(price, sma14, sma30)
+   295→   295→        lth_rp = _lth_rp_proxy(realized_price, price, mvrv_val, in_bear=in_bear)
+   296→   296→        sopr_source = 'proxy-sma14'
+   297→   297→        lth_source = 'proxy-rp*dynamic'
+   298→   298→
+   299→   299→    print(f'{log_prefix} STH-SOPR={sopr:.4f} ({sopr_source}) '
+   300→   300→          f'LTH-RP={lth_rp:,.2f} ({lth_source}) '
+   301→   301→          f'RP={realized_price:,.2f} ({rp_source})')
+   302→   302→    print(f'{log_prefix} MVRV={mvrv_val:.3f} ({mvrv_source}) Pct={mvrv_pct:.3f} Z={mvrv_z:.2f} ({mvrv_z_source}) NUPL={nupl:.3f}')
+   303→   303→
+   304→   304→    return {
+   305→   305→        'sma_200': sma_200, 'sma_365': sma_365,
+   306→   306→        'rsi': rsi_val, 'macd_line': macd_line, 'macd_sig': macd_sig, 'macd_h': macd_h,
+   307→   307→        'macd_hist_series': macd_hist_series, 'rsi_series': rsi_series,
+   308→   308→        'macd_bear': macd_bear, 'macd_declining': macd_declining, 'rsi_div': rsi_div,
+   309→   309→        'ath': ath, 'sma14': sma14, 'sma30': sma30, 'in_bear': in_bear,
+   310→   310→        'mvrv': mvrv_val, 'mvrv_source': mvrv_source,
+   311→   311→        'mvrv_pct': mvrv_pct, 'mvrv_z': mvrv_z, 'mvrv_z_source': mvrv_z_source,
+   312→   312→        'nupl': nupl, 'realized_price': realized_price, 'rp_source': rp_source,
+   313→   313→        'sopr': sopr, 'sopr_source': sopr_source,
+   314→   314→        'lth_realized_price': lth_rp, 'lth_source': lth_source,
+   315→   315→    }
+   316→   316→
+   317→   317→
+   318→   318→def _get_cash_balance(exchange) -> float:
+   319→   319→    '''Get available cash in exchange currency.'''
+   320→   320→    try:
+   321→   321→        if hasattr(exchange, 'get_usdt_balance'):
+   322→   322→            return exchange.get_usdt_balance()
+   323→   323→        # Prefer robust get_balances() if available (Bitkub)
+   324→   324→        if hasattr(exchange, 'get_balances'):
+   325→   325→            balances = exchange.get_balances()
+   326→   326→        elif hasattr(exchange, 'get_balance'):
+   327→   327→            balances = exchange.get_balance()
+   328→   328→        else:
+   329→   329→            return 0.0
+   330→   330→        if isinstance(balances, dict):
+   331→   331→            return balances.get(exchange.currency, 0.0)
+   332→   332→    except Exception as e:
+   333→   333→        print(f'[BOT] WARNING: Could not fetch cash balance: {e}')
+   334→   334→    return 0.0
+   335→   335→
+   336→   336→
+   337→   337→def _get_btc_balance(exchange) -> float:
+   338→   338→    '''Get available BTC balance.'''
+   339→   339→    try:
+   340→   340→        # Prefer robust get_balances() if available (Bitkub)
+   341→   341→        if hasattr(exchange, 'get_balances'):
+   342→   342→            bal = exchange.get_balances()
+   343→   343→        elif hasattr(exchange, 'get_balance'):
+   344→   344→            bal = exchange.get_balance()
+   345→   345→        else:
+   346→   346→            return 0.0
+   347→   347→        if isinstance(bal, dict):
+   348→   348→            return bal.get('BTC', 0.0)
+   349→   349→        return float(bal)
+   350→   350→    except Exception as e:
+   351→   351→        print(f'[BOT] WARNING: Could not fetch BTC balance: {e}')
+   352→   352→    return 0.0
+   353→   353→
+   354→   354→
+   355→   355→# ── Extracted helpers (CQ: reduce duplication) ─────────────────
+   356→   356→
+   357→   357→
+   358→   358→def _build_indicators_snapshot(metrics: dict, overrides: dict = None) -> dict:
+   359→   359→    """Build standardized indicators dict for state snapshot.
+   360→   360→
+   361→   361→    Used by run_daily(), refresh_dashboard(), run_demo(), and
+   362→   362→    idempotency-skip path. Eliminates ~80 lines of duplication.
+   363→   363→
+   364→   364→    Args:
+   365→   365→        metrics: dict from _resolve_onchain_metrics()
+   366→   366→        overrides: optional dict of extra fields to merge
+   367→   367→    """
+   368→   368→    snap = {
+   369→   369→        'price': round(metrics['price'], 2),
+   370→   370→        'mvrv': round(metrics['mvrv'], 3) if not math.isnan(metrics['mvrv']) else None,
+   371→   371→        'mvrv_source': metrics['mvrv_source'],
+   372→   372→        'mvrv_pct': round(metrics['mvrv_pct'], 3) if not math.isnan(metrics.get('mvrv_pct', float('nan'))) else None,
+   373→   373→        'mvrv_z': round(metrics['mvrv_z'], 2) if not math.isnan(metrics.get('mvrv_z', float('nan'))) else None,
+   374→   374→        'mvrv_z_source': metrics['mvrv_z_source'],
+   375→   375→        'rsi': round(metrics['rsi'], 1),
+   376→   376→        'macd_h': round(metrics['macd_h'], 4),
+   377→   377→        'nupl': round(metrics['nupl'], 3),
+   378→   378→        'sopr': round(metrics['sopr'], 3) if not math.isnan(metrics['sopr']) else None,
+   379→   379→        'sopr_source': metrics['sopr_source'],
+   380→   380→        'sma_200': round(metrics['sma_200'], 2) if not math.isnan(metrics['sma_200']) else None,
+   381→   381→        'sma_365': round(metrics['sma_365'], 2) if not math.isnan(metrics['sma_365']) else None,
+   382→   382→        'macd_bear': metrics['macd_bear'],
+   383→   383→        'macd_declining': metrics['macd_declining'],
+   384→   384→        'rsi_divergence': metrics['rsi_div'],
+   385→   385→        'ath': round(metrics['ath'], 2),
+   386→   386→        'sell_score': metrics.get('sell_score', 0),
+   387→   387→        'path_taken': metrics.get('path_taken', 'none'),
+   388→   388→        'in_bear': metrics.get('in_bear', False),
+   389→   389→        'cooldown': metrics.get('cooldown', 0),
+   390→   390→    }
+   391→   391→    # Optional fields (not always present in metrics)
+   392→   392→    for key in ('realized_price', 'lth_realized_price', 'lth_source', 'rp_source'):
+   393→   393→        val = metrics.get(key)
+   394→   394→        if val is not None:
+   395→   395→            if isinstance(val, float) and math.isnan(val):
+   396→   396→                snap[key] = None
+   397→   397→            elif isinstance(val, float):
+   398→   398→                snap[key] = round(val, 2)
+   399→   399→            else:
+   400→   400→                snap[key] = val
+   401→   401→    if overrides:
+   402→   402→        snap.update(overrides)
+   403→   403→    return snap
+   404→   404→
+   405→   405→
+   406→   406→def _build_decision_metadata(decision: dict, monday_boost: bool,
+   407→   407→                             in_dca_window: bool) -> dict:
+   408→   408→    """Build decision metadata dict for state/dashboard.
+   409→   409→
+   410→   410→    Used by run_daily() and run_demo().
+   411→   411→    """
+   412→   412→    buy_amt = decision.get('buy_amount', 0)
+   413→   413→    base_budget_display = config.get_daily_budget()
+   414→   414→    if base_budget_display > 0 and buy_amt > 0:
+   415→   415→        calc_mult = round(buy_amt / base_budget_display, 1)
+   416→   416→    else:
+   417→   417→        calc_mult = 0.0
+   418→   418→    return {
+   419→   419→        'buy_amount': round(buy_amt, 2),
+   420→   420→        'sell_amount': round(decision.get('sell_amount', 0), 2),
+   421→   421→        'multiplier': calc_mult,
+   422→   422→        'base_budget': round(base_budget_display, 2),
+   423→   423→        'reserve_injection': round(decision.get('reserve_injection', 0), 2),
+   424→   424→        'monday_boost': config.MONDAY_DCA_MULTIPLIER if monday_boost else 1.0,
+   425→   425→        'in_dca_window': in_dca_window,
+   426→   426→    }
+   427→   427→
+   428→   428→
+   429→   429→def _update_state_metadata(bot_state: dict, exchange, btc: float,
+   430→   430→                            cash: float, portfolio: float, price: float) -> None:
+   431→   431→    """Update state with exchange metadata (balances, price, name).
+   432→   432→
+   433→   433→    Used by run_daily(), refresh_dashboard(), idempotency-skip path.
+   434→   434→    Does NOT set last_dry_run (caller controls that).
+   435→   435→    """
+   436→   436→    bot_state['last_btc_balance'] = round(btc, 8)
+   437→   437→    bot_state['last_cash_balance'] = round(cash, 2)
+   438→   438→    bot_state['last_portfolio_value'] = round(portfolio, 2)
+   439→   439→    bot_state['last_price'] = round(price, 2)
+   440→   440→    bot_state['last_exchange_currency'] = exchange.currency
+   441→   441→    bot_state['last_exchange_name'] = exchange.__class__.__name__.replace('Client', '').upper()
+   442→   442→
+   443→   443→
+   444→   444→def _apply_monday_boost(base_budget: float) -> tuple:
+   445→   445→    """Apply Monday DCA boost if applicable.
+   446→   446→
+   447→   447→    Returns (boosted_budget, is_boosted).
+   448→   448→    """
+   449→   449→    if _is_monday_thai() and config.MONDAY_DCA_MULTIPLIER != 1.0:
+   450→   450→        return base_budget * config.MONDAY_DCA_MULTIPLIER, True
+   451→   451→    return base_budget, False
+   452→   452→
+   453→   453→
+   454→   454→def run_daily(exchange, bot_state: dict, dry_run: bool = False,
+   455→   455→              trade_log_path: str = 'trade_log.json',
+   456→   456→              kill_switch_path: str = 'kill_switch.json',
+   457→   457→              force: bool = False) -> dict:
+   458→   458→    '''Main daily run. Returns updated state.
+   459→   459→
+   460→   460→    Steps:
+   461→   461→        0. Idempotency guard (bypassed with --force)
+   462→   462→        -1. Kill switch check (L1 + L2)
+   463→   463→        1.  Fetch price & history
+   464→   464→        2.  Compute indicators
+   465→   465→        3.  Get MVRV
+   466→   466→        4.  Get balances (virtual in dry-run, real in live)
+   467→   467→        5.  Convert budget
+   468→   468→        6.  Decrement cooldown
+   469→   469→        7.  Run strategy
+   470→   470→        8.  Execute trades (simulated in dry-run, real in live)
+   471→   471→        9.  Update state + trade log
+   472→   472→        10. Snapshot indicators for dashboard
+   473→   473→        11. Send notification
+   474→   474→    '''
+   475→   475→    currency = exchange.currency
+   476→   476→    today = _thai_today()
+   477→   477→
+   478→   478→    # ── 0a. Print effective config (for debugging budget/multiplier issues) ──
+   479→   479→    print(f'[BOT] Config: DAILY_BUDGET_THB={config.DAILY_BUDGET_THB} MAX_BUY_THB={config.MAX_BUY_THB} '
+   480→   480→          f'MAX_DCA_BUYS_PER_DAY={config.MAX_DCA_BUYS_PER_DAY}')
+   481→   481→
+   482→   482→    # ── 0. Idempotency guard: skip if already ran today (unless --force) ──
+   483→   483→    # H1: Uses Thai timezone so daily guard aligns with THB calendar day
+   484→   484→    # (cron at 03:00/03:20/03:40 UTC = 10:00/10:20/10:40 THB)
+   485→   485→    # Each cron slot also has 3x internal retry with 60s backoff.
+   486→   486→    # Backup slots are safety nets — if 1st run succeeds,
+   487→   487→    # last_run_date is set and later runs skip via this guard.
+   488→   488→    # If 1st run fails (exception/timeout), last_run_date is NOT updated,
+   489→   489→    # so the next cron slot proceeds normally.
+   490→   490→    if not force and bot_state.get('last_run_date') == today.isoformat():
+   491→   491→        print(f'[BOT] Already ran today ({today} THB). Skipping TRADE but refreshing dashboard data.')
+   492→   492→        print(f'[BOT] Use --force to override (e.g. for testing).')
+   493→   493→        # Still fetch indicators + balances for dashboard (no trading)
+   494→   494→        # B22: Use shared _resolve_onchain_metrics instead of duplicated inline code
+   495→   495→        try:
+   496→   496→            refresh_price = exchange.get_price()
+   497→   497→            refresh_klines = _fetch_price_history_with_dates(exchange)
+   498→   498→            refresh_closes = [k['close'] for k in refresh_klines]
+   499→   499→            if len(refresh_closes) >= MIN_CLOSES_FOR_INDICATORS:
+   500→   500→                rm = _resolve_onchain_metrics(refresh_price, refresh_closes, today,
+   501→   501→                                                log_prefix='[BOT/idem]',
+   502→   502→                                                allow_web_fallback=False,
+   503→   503→                                                notify_on_fail=False)
+   504→   504→                if not rm.get('_mvrv_all_failed'):
+   505→   505→                    # Balances
+   506→   506→                    if dry_run:
+   507→   507→                        r_btc = bot_state.get('dry_run_btc', 0.0)
+   508→   508→                        r_cash = bot_state.get('dry_run_cash', config.DRY_RUN_INITIAL_CASH)
+   509→   509→                    else:
+   510→   510→                        r_btc = _get_btc_balance(exchange)
+   511→   511→                        r_cash = _get_cash_balance(exchange)
+   512→   512→                    r_portfolio = r_btc * refresh_price + r_cash
+   513→   513→
+   514→   514→                    rm_for_snap = {**rm, 'price': refresh_price,
+   515→   515→                                   'sell_score': bot_state.get('last_indicators', {}).get('sell_score', 0),
+   516→   516→                                   'path_taken': bot_state.get('last_indicators', {}).get('path_taken', 'none'),
+   517→   517→                                   'in_bear': rm['in_bear'],
+   518→   518→                                   'cooldown': bot_state.get('cooldown', 0)}
+   519→   519→                    bot_state['last_indicators'] = _build_indicators_snapshot(rm_for_snap)
+   520→   520→                    _update_state_metadata(bot_state, exchange, r_btc, r_cash, r_portfolio, refresh_price)
+   521→   521→                    # D2: Do NOT overwrite last_dry_run in refresh-only paths.
+   522→   522→                    if r_portfolio > bot_state.get('peak_value', 0):
+   523→   523→                        bot_state['peak_value'] = r_portfolio
+   524→   524→                    print(f'[BOT] Dashboard data refreshed (skipped trade). Portfolio: {r_portfolio:,.2f} {currency}')
+   525→   525→        except Exception as e:
+   526→   526→            print(f'[BOT] Dashboard refresh failed: {e}')
+   527→   527→        return bot_state
+   528→   528→
+   529→   529→    # ── 0b. Daily buy count guard (MAX_DCA_BUYS_PER_DAY) ──
+   530→   530→    # This is a SECONDARY guard on top of the idempotency guard above.
+   531→   531→    # It counts actual buys in trade_log.json for today (Thai date),
+   532→   532→    # preventing runaway buys from: manual workflow_dispatch with --force,
+   533→   533→    # stale state from failed git push, or concurrent process race conditions.
+   534→   534→    max_daily_buys = config.MAX_DCA_BUYS_PER_DAY
+   535→   535→    today_str = today.isoformat()
+   536→   536→    try:
+   537→   537→        existing_log = state_mod.load_trade_log(trade_log_path)
+   538→   538→        today_buy_count = sum(
+   539→   539→            1 for t in existing_log
+   540→   540→            if t.get('type') == 'buy' and t.get('date', '').startswith(today_str)
+   541→   541→        )
+   542→   542→    except Exception:
+   543→   543→        today_buy_count = 0
+   544→   544→
+   545→   545→    if not force and today_buy_count >= max_daily_buys:
+   546→   546→        print(f'[BOT] Daily buy limit reached: {today_buy_count}/{max_daily_buys} buys today ({today}). Skipping.')
+   547→   547→        notifier.send_telegram(
+   548→   548→            f'Phoenix v5.1: Daily buy limit BLOCKED {today_buy_count+1}th buy '
+   549→   549→            f'({today_buy_count}/{max_daily_buys} already done today).'
+   550→   550→        )
+   551→   551→        # Still update last_run_date to prevent re-running the full pipeline
+   552→   552→        bot_state['last_run_date'] = today_str
+   553→   553→        bot_state['run_count'] += 1
+   554→   554→        return bot_state
+   555→   555→
+   556→   556→    # ── 0c. Dry-run → Live transition reset (D3) ──
+   557→   557→    # When transitioning from dry-run to first live run, reset all
+   558→   558→    # counters and metrics that were contaminated by dry-run data.
+   559→   559→    # This prevents phantom invested/BTC/count values on the dashboard.
+   560→   560→    if not dry_run and bot_state.get('last_dry_run') is True:
+   561→   561→        print('[BOT] D3: Dry-run → Live transition detected. Resetting contaminated state.')
+   562→   562→        for _key in ('total_invested', 'adjusted_invested', 'total_sell_proceeds',
+   563→   563→                     'total_btc_bought', 'total_btc_sold', 'cumulative_fees',
+   564→   564→                     'peak_value', 'max_drawdown', 'sell_proceeds_reserve',
+   565→   565→                     'dry_run_sell_proceeds', 'total_reserve_injected'):
+   566→   566→            bot_state[_key] = 0.0 if isinstance(bot_state.get(_key, 0), (int, float)) else None
+   567→   567→        for _key in ('buy_count', 'sell_count'):
+   568→   568→            bot_state[_key] = 0
+   569→   569→        bot_state['last_trade_date'] = ''
+   570→   570→        bot_state['last_sell_date'] = ''
+   571→   571→        bot_state['realized_price'] = None
+   572→   572→        bot_state['lth_realized_price'] = None
+   573→   573→        bot_state['dry_run_btc'] = None
+   574→   574→        bot_state['dry_run_cash'] = None
+   575→   575→        # D3-ext: Also clear trade_log.json to remove contaminated dry-run entries.
+   576→   576→        # The dashboard's D1 filter (dry_run=False check) handles this at read time,
+   577→   577→        # but cleaning the source file is the correct approach.
+   578→   578→        try:
+   579→   579→            state_mod.clear_trade_log(trade_log_path)
+   580→   580→        except Exception as e:
+   581→   581→            print(f'[BOT] D3: WARNING — failed to clear trade log: {e}')
+   582→   582→        print('[BOT] D3: State reset complete. Starting fresh with live data.')
+   583→   583→
+   584→   584→    # ── -1. Kill Switch Check ──
+   585→   585→    is_alive, kill_reason = ks_mod.check_kill_switch(kill_switch_path)
+   586→   586→    if not is_alive:
+   587→   587→        print(f'[BOT] KILLED: {kill_reason}')
+   588→   588→        # Still fetch indicators for dashboard, but skip all trading
+   589→   589→        try:
+   590→   590→            price = exchange.get_price()
+   591→   591→            _snapshot_indicators(bot_state, price, currency, dry_run,
+   592→   592→                                  exchange, killed=True, kill_reason=kill_reason)
+   593→   593→        except Exception as e:
+   594→   594→            print(f'[BOT] Could not fetch indicators for dashboard: {e}')
+   595→   595→        notifier.send_telegram(
+   596→   596→            f'Phoenix v5.1 KILLED: {kill_reason}\n'
+   597→   597→            f'No trades executed. Dashboard still updated.'
+   598→   598→        )
+   599→   599→        # Do NOT set last_run_date — a killed run must not consume
+   600→   600→        # the daily idempotency slot so a re-run can still trade.
+   601→   601→        bot_state['run_count'] += 1
+   602→   602→        return bot_state
+   603→   603→
+   604→   604→    # ── 1. Fetch current price ──
+   605→   605→    print(f'[BOT] Fetching price from {exchange.__class__.__name__}...')
+   606→   606→    price = exchange.get_price()
+   607→   607→    print(f'[BOT] Current price: {price:,.2f} {currency}')
+   608→   608→
+   609→   609→    if price <= 0:
+   610→   610→        print(f'[BOT] ERROR: Invalid price from exchange: {price}. Skipping.')
+   611→   611→        notifier.send_telegram(
+   612→   612→            f'Phoenix v5.1 ERROR: Invalid price from exchange: {price}. Skipping.'
+   613→   613→        )
+   614→   614→        return bot_state
+   615→   615→
+   616→   616→    # ── 2. Fetch price history for indicators ──
+   617→   617→    print('[BOT] Fetching price history (500d)...')
+   618→   618→    klines = _fetch_price_history_with_dates(exchange)
+   619→   619→    closes = [k['close'] for k in klines]
+   620→   620→    print(f'[BOT] Got {len(closes)} daily closes')
+   621→   621→
+   622→   622→    if len(closes) < MIN_CLOSES_FOR_INDICATORS:
+   623→   623→        print('[BOT] ERROR: Not enough price history for indicators')
+   624→   624→        notifier.send_telegram(
+   625→   625→            f'Phoenix v5.1 ERROR: Only {len(closes)} days of price data. Skipping.'
+   626→   626→        )
+   627→   627→        return bot_state
+   628→   628→
+   629→   629→    # ── 3+4+4b. Resolve all indicators + on-chain metrics (B22: shared function) ──
+   630→   630→    print('[BOT] Computing indicators + resolving on-chain metrics...')
+   631→   631→    m = _resolve_onchain_metrics(price, closes, today,
+   632→   632→                                  log_prefix='[BOT]',
+   633→   633→                                  allow_web_fallback=True,
+   634→   634→                                  notify_on_fail=True)
+   635→   635→    if m.get('_mvrv_all_failed'):
+   636→   636→        return bot_state
+   637→   637→
+   638→   638→    # Unpack resolved metrics
+   639→   639→    sma_200 = m['sma_200']
+   640→   640→    sma_365 = m['sma_365']
+   641→   641→    rsi_val = m['rsi']
+   642→   642→    macd_h = m['macd_h']
+   643→   643→    macd_bear = m['macd_bear']
+   644→   644→    macd_declining = m['macd_declining']
+   645→   645→    rsi_div = m['rsi_div']
+   646→   646→    ath = m['ath']
+   647→   647→    mvrv_val = m['mvrv']
+   648→   648→    mvrv_source = m['mvrv_source']
+   649→   649→    mvrv_pct = m['mvrv_pct']
+   650→   650→    mvrv_z = m['mvrv_z']
+   651→   651→    mvrv_z_source = m['mvrv_z_source']
+   652→   652→    nupl = m['nupl']
+   653→   653→    realized_price = m['realized_price']
+   654→   654→    rp_source = m['rp_source']
+   655→   655→    sopr = m['sopr']
+   656→   656→    sopr_source = m['sopr_source']
+   657→   657→    lth_rp = m['lth_realized_price']
+   658→   658→    lth_source = m['lth_source']
+   659→   659→    in_bear = m['in_bear']
+   660→   660→
+   661→   661→    # ── 5. Get exchange balances ──
+   662→   662→    # ╔═══════════════════════════════════════════════════════════════╗
+   663→   663→    # ║  DRY RUN SAFETY: Virtual balances — NO real API balance calls ║
+   664→   664→    # ║  LIVE MODE: Real balances fetched from exchange API           ║
+   665→   665→    # ╚═══════════════════════════════════════════════════════════════╝
+   666→   666→    if dry_run:
+   667→   667→        # DRY RUN: Use virtual balances from state (no real API calls)
+   668→   668→        if bot_state.get('dry_run_cash') is None:
+   669→   669→            bot_state['dry_run_cash'] = config.DRY_RUN_INITIAL_CASH
+   670→   670→            bot_state['dry_run_btc'] = 0.0
+   671→   671→            print(f'[BOT] DRY RUN: Initialized virtual wallet')
+   672→   672→            print(f'[BOT]   Virtual cash: {config.DRY_RUN_INITIAL_CASH:,.2f} {currency}')
+   673→   673→        btc_balance = bot_state.get('dry_run_btc', 0.0)
+   674→   674→        cash_balance = bot_state.get('dry_run_cash', config.DRY_RUN_INITIAL_CASH)
+   675→   675→        print(f'[BOT] DRY RUN: Virtual BTC={btc_balance:.8f} Cash={cash_balance:,.2f} {currency}')
+   676→   676→    else:
+   677→   677→        # LIVE MODE: Fetch real balances from exchange
+   678→   678→        btc_balance = _get_btc_balance(exchange)
+   679→   679→        cash_balance = _get_cash_balance(exchange)
+   680→   680→        print(f'[BOT] LIVE MODE: Real BTC={btc_balance:.8f} Cash={cash_balance:,.2f} {currency}')
+   681→   681→
+   682→   682→    # ── 6. Convert budget to exchange currency ──
+   683→   683→    base_budget = config.get_daily_budget()
+   684→   684→    max_buy = config.get_max_buy()
+   685→   685→    print(f'[BOT] Budget: {base_budget:.2f} {currency}/run (max buy: {max_buy:.2f})')
+   686→   686→
+   687→   687→    # ── 6a. Monday DCA boost (CQ: shared helper) ──
+   688→   688→    # Research: Monday has highest next-day BTC returns (+0.38% avg, 6/7 sources).
+   689→   689→    # Apply to base_budget BEFORE strategy so max_buy cap inside strategy still works.
+   690→   690→    base_budget, monday_boost = _apply_monday_boost(base_budget)
+   691→   691→    if monday_boost:
+   692→   692→        print(f'[BOT] MONDAY BOOST: base_budget x{config.MONDAY_DCA_MULTIPLIER} = {base_budget:.2f} {currency}')
+   693→   693→
+   694→   694→    # ── 6b. DCA time window check ──
+   695→   695→    # Only buy during configured Thai time window (default: 10:00-11:00 THB).
+   696→   696→    # Indicators + dashboard are still computed outside the window.
+   697→   697→    in_dca_window = _in_dca_time_window()
+   698→   698→    if not in_dca_window:
+   699→   699→        thai_h = _thai_now().hour
+   700→   700→        print(f'[BOT] DCA TIME WINDOW: {thai_h}:xx THB is outside '
+   701→   701→              f'{config.DCA_TIME_WINDOW_START}:00-{config.DCA_TIME_WINDOW_END}:00. '
+   702→   702→              f'Skipping BUY (indicators + dashboard still updated).')
+   703→   703→
+   704→   704→    # ── 6c. Separate reserve from DCA cash ──
+   705→   705→    # In demo: sell_proceeds_reserve is tracked separately
+   706→   706→    # In live/dry-run: we track total_sell_proceeds in state as reserve proxy
+   707→   707→    # cash_reserve passed to strategy = ONLY profits from BTC sales
+   708→   708→    sell_proceeds_reserve = bot_state.get('total_sell_proceeds', 0.0) - bot_state.get('total_reserve_injected', 0.0)
+   709→   709→    sell_proceeds_reserve = max(sell_proceeds_reserve, 0.0)
+   710→   710→    # For dry-run, also consider virtual sell proceeds
+   711→   711→    if dry_run and bot_state.get('dry_run_sell_proceeds'):
+   712→   712→        sell_proceeds_reserve = bot_state['dry_run_sell_proceeds']
+   713→   713→    print(f'[BOT] Sell proceeds reserve: {sell_proceeds_reserve:,.2f} {currency}')
+   714→   714→
+   715→   715→    # ── 7. Decrement cooldown ──
+   716→   716→    if bot_state.get('cooldown', 0) > 0:
+   717→   717→        bot_state['cooldown'] -= 1
+   718→   718→        print(f'[BOT] Cooldown: {bot_state["cooldown"] + 1} -> {bot_state["cooldown"]}')
+   719→   719→
+   720→   720→    # ── 8. Run strategy ──
+   721→   721→    print('[BOT] Running Phoenix v5.1 strategy...')
+   722→   722→    decision = strategy.phoenix_v5_1_decision(
+   723→   723→        mvrv=mvrv_val, rsi=rsi_val, sopr=sopr, nupl=nupl,
+   724→   724→        price=price, sma_200=sma_200, sma_365=sma_365,
+   725→   725→        realized_price=realized_price, lth_realized_price=lth_rp,
+   726→   726→        mvrv_pct=mvrv_pct, mvrv_z=mvrv_z,
+   727→   727→        macd_cross_bear=macd_bear, macd_hist_declining=macd_declining,
+   728→   728→        rsi_divergence_flag=rsi_div, ath=ath,
+   729→   729→        btc_balance=btc_balance,
+   730→   730→        cash_reserve=sell_proceeds_reserve,  # Only BTC sale profits, not DCA cash
+   731→   731→        cooldown=bot_state['cooldown'],
+   732→   732→        base_budget=base_budget, max_buy=max_buy,
+   733→   733→        # Reserve deployment config (all in exchange currency)
+   734→   734→        reserve_floor=config.get_reserve_floor(),
+   735→   735→        max_reserve_injection=config.get_max_reserve_injection(),
+   736→   736→        max_reserve_boosted=config.get_max_reserve_boosted(),
+   737→   737→        reserve_boost_multiplier=config.RESERVE_BOOST_MULTIPLIER,
+   738→   738→        reserve_boost_price_ratio=config.RESERVE_BOOST_PRICE_RATIO,
+   739→   739→    )
+   740→   740→
+   741→   741→    print(f'[BOT] Decision: buy={decision["buy_amount"]:.2f} '
+   742→   742→          f'sell={decision["sell_amount"]:.2f} '
+   743→   743→          f'score={decision["sell_score"]} path={decision["path_taken"]}')
+   744→   744→
+   745→   745→    # ── 8b. DCA time window enforcement ──
+   746→   746→    # Zero out buy if outside the configured Thai time window.
+   747→   747→    # This is a safety feature that ALWAYS applies, even with --force.
+   748→   748→    # Rationale: buying outside the research-optimized window defeats the purpose.
+   749→   749→    # Sell decisions are NOT affected by time window.
+   750→   750→    if not in_dca_window and decision['buy_amount'] > 0:
+   751→   751→        print(f'[BOT] TIME WINDOW BLOCK: Zeroing buy {decision["buy_amount"]:.2f} (outside DCA window)')
+   752→   752→        decision['buy_amount'] = 0.0
+   753→   753→
+   754→   754→    # ── 9. Execute trades ──
+   755→   755→    buy_fee = 0.0
+   756→   756→    sell_fee = 0.0
+   757→   757→    buy_btc_got = 0.0
+   758→   758→    sell_btc_sold = 0.0
+   759→   759→    buy_cost_actual = 0.0
+   760→   760→    sell_proceeds_actual = 0.0
+   761→   761→    trade_attempted = False
+   762→   762→    trade_succeeded = False
+   763→   763→    # BUY
+   764→   764→    if decision['buy_amount'] > 0:
+   765→   765→        # Check minimum order size
+   766→   766→        min_buy = config.MIN_BUY_USDT if currency == 'USDT' else config.MIN_BUY_THB
+   767→   767→        if decision['buy_amount'] < min_buy:
+   768→   768→            print(f'[BOT] Buy amount {decision["buy_amount"]:.2f} below minimum {min_buy}. Skipping.')
+   769→   769→            decision['buy_amount'] = 0
+   770→   770→        elif cash_balance < decision['buy_amount']:
+   771→   771→            print(f'[BOT] Insufficient cash: have {cash_balance:,.2f}, need {decision["buy_amount"]:.2f}')
+   772→   772→            # Buy with what we have
+   773→   773→            if cash_balance >= min_buy:
+   774→   774→                decision['buy_amount'] = cash_balance
+   775→   775→            else:
+   776→   776→                decision['buy_amount'] = 0
+   777→   777→
+   778→   778→    # ═══════════════════════════════════════════════════════════════
+   779→   779→    # DRY RUN SAFETY GATE
+   780→   780→    # When dry_run=True, exchange.market_buy() is NEVER called.
+   781→   781→    # Trades are simulated locally with virtual balances only.
+   782→   782→    # ═══════════════════════════════════════════════════════════════
+   783→   783→    if decision['buy_amount'] > 0 and not dry_run:
+   784→   784→        trade_attempted = True
+   785→   785→        print(f'[BOT] LIVE BUY: {decision["buy_amount"]:.2f} {currency} of BTC...')
+   786→   786→        try:
+   787→   787→            result = exchange.market_buy(decision['buy_amount'])
+   788→   788→            buy_cost_actual = float(result.get('cummulative_quote_qty', result.get('cost', decision['buy_amount'])))
+   789→   789→            buy_btc_got = float(result.get('executed_qty', result.get('amount', 0)))
+   790→   790→            # C3: Fallback — if API returns 0, compute BTC from cost/price
+   791→   791→            if buy_btc_got <= 0 and buy_cost_actual > 0 and price > 0:
+   792→   792→                print(f'[BOT] C3 fallback: executed_qty=0, computing BTC = {buy_cost_actual:.2f} / {price:,.2f}')
+   793→   793→                buy_btc_got = buy_cost_actual / price
+   794→   794→            buy_fee = float(result.get('fee', buy_cost_actual * config.BUY_FEE_PCT))
+   795→   795→            bot_state['total_btc_bought'] += buy_btc_got
+   796→   796→            trade_succeeded = True
+   797→   797→            print(f'[BOT] Bought {buy_btc_got:.8f} BTC for {buy_cost_actual:.2f} {currency} (fee: {buy_fee:.2f})')
+   798→   798→            print(f'[BOT] BUY STATUS: SUCCESS')
+   799→   799→        except Exception as e:
+   800→   800→            print(f'[BOT] BUY ERROR: {e}')
+   801→   801→            print(f'[BOT] BUY STATUS: FAILED')
+   802→   802→            # C2: If timeout/connection error, order likely executed on exchange.
+   803→   803→            # Consume daily slot to prevent double-buy on retry.
+   804→   804→            # Also estimate the trade details so trade_log and state are updated.
+   805→   805→            _err_str = str(e).lower()
+   806→   806→            if 'timeout' in _err_str or 'connection' in _err_str or 'ssl' in _err_str:
+   807→   807→                print(f'[BOT] BUY TIMEOUT — attempting verification via balance check...')
+   808→   808→                trade_succeeded = True  # Consume daily slot to prevent double-buy
+   809→   809→                time.sleep(BALANCE_VERIFY_DELAY_S)
+   810→   810→                try:
+   811→   811→                    post_btc = _get_btc_balance(exchange)
+   812→   812→                    btc_diff = post_btc - btc_balance
+   813→   813→                    if btc_diff > BTC_BALANCE_EPSILON:  # BTC balance increased — order likely executed
+   814→   814→                        buy_btc_got = btc_diff
+   815→   815→                        buy_cost_actual = decision['buy_amount']  # best estimate of cost
+   816→   816→                        buy_fee = 0  # Unknown — be conservative
+   817→   817→                        bot_state['total_btc_bought'] += buy_btc_got
+   818→   818→                        print(f'[BOT] TIMEOUT VERIFIED: +{btc_diff:.8f} BTC detected via balance check')
+   819→   819→                    else:
+   820→   820→                        # BTC unchanged — order likely did NOT execute
+   821→   821→                        buy_btc_got = 0
+   822→   822→                        buy_cost_actual = 0
+   823→   823→                        buy_fee = 0
+   824→   824→                        decision['buy_amount'] = 0  # DI-1: prevent phantom invested/buy_count
+   825→   825→                        print(f'[BOT] TIMEOUT UNVERIFIED: BTC balance unchanged ({post_btc:.8f}). '
+   826→   826→                              f'Slot consumed to prevent double-buy. No trade recorded.')
+   827→   827→                except Exception as ve:
+   828→   828→                    buy_btc_got = 0
+   829→   829→                    buy_cost_actual = 0
+   830→   830→                    buy_fee = 0
+   831→   831→                    decision['buy_amount'] = 0  # DI-1: prevent phantom invested/buy_count
+   832→   832→                    print(f'[BOT] TIMEOUT VERIFICATION FAILED: {ve}. '
+   833→   833→                          f'Slot consumed to prevent double-buy. No trade recorded.')
+   834→   834→            else:
+   835→   835→                decision['buy_amount'] = 0
+   836→   836→    elif decision['buy_amount'] > 0 and dry_run:
+   837→   837→        if price <= 0:
+   838→   838→            print(f'[BOT] DRY RUN BUY SKIP: invalid price {price}')
+   839→   839→            decision['buy_amount'] = 0
+   840→   840→        else:
+   841→   841→            buy_btc_got = decision['buy_amount'] / price
+   842→   842→            buy_cost_actual = decision['buy_amount']
+   843→   843→            buy_fee = buy_cost_actual * config.BUY_FEE_PCT
+   844→   844→            bot_state['total_btc_bought'] += buy_btc_got
+   845→   845→            print(f'[BOT] DRY RUN BUY: {decision["buy_amount"]:.2f} {currency} → {buy_btc_got:.8f} BTC @ {price:,.2f} (fee: {buy_fee:.2f})')
+   846→   846→
+   847→   847→    # SELL
+   848→   848→    # ═══════════════════════════════════════════════════════════════
+   849→   849→    # DRY RUN SAFETY GATE (SELL)
+   850→   850→    # When dry_run=True, exchange.market_sell() is NEVER called.
+   851→   851→    # ═══════════════════════════════════════════════════════════════
+   852→   852→    if decision['sell_amount'] > 0 and not dry_run:
+   853→   853→        if price <= 0:
+   854→   854→            print(f'[BOT] LIVE SELL SKIP: invalid price {price}')
+   855→   855→            decision['sell_amount'] = 0
+   856→   856→        else:
+   857→   857→            btc_to_sell = decision['sell_amount'] / price
+   858→   858→            if btc_to_sell >= btc_balance * MAX_SELL_PCT_OF_BALANCE:
+   859→   859→                btc_to_sell = btc_balance * MAX_SELL_PCT_OF_BALANCE  # Never sell 100%
+   860→   860→            min_sell = MIN_SELL_AMOUNT
+   861→   861→            if btc_to_sell * price < min_sell:
+   862→   862→                print(f'[BOT] Sell amount {btc_to_sell * price:.2f} below minimum {min_sell}. Skipping.')
+   863→   863→                decision['sell_amount'] = 0
+   864→   864→            else:
+   865→   865→                trade_attempted = True
+   866→   866→                print(f'[BOT] LIVE SELL: {btc_to_sell:.8f} BTC (~{decision["sell_amount"]:.2f} {currency})...')
+   867→   867→                try:
+   868→   868→                    result = exchange.market_sell(btc_to_sell)
+   869→   869→                    sell_btc_sold = float(result.get('executed_qty', result.get('amount', 0)))
+   870→   870→                    sell_proceeds_actual = float(result.get('cummulative_quote_qty', result.get('cost', decision['sell_amount'])))
+   871→   871→                    sell_fee = float(result.get('fee', sell_proceeds_actual * config.SELL_FEE_PCT))
+   872→   872→                    bot_state['total_btc_sold'] += sell_btc_sold
+   873→   873→                    # Update cash reserve after sell
+   874→   874→                    cash_balance += sell_proceeds_actual
+   875→   875→                    trade_succeeded = True
+   876→   876→                    print(f'[BOT] Sold {sell_btc_sold:.8f} BTC for {sell_proceeds_actual:.2f} {currency} (fee: {sell_fee:.2f})')
+   877→   877→                except Exception as e:
+   878→   878→                    print(f'[BOT] SELL ERROR: {e}')
+   879→   879→                    decision['sell_amount'] = 0
+   880→   880→                    decision['new_cooldown'] = 0
+   881→   881→    elif decision['sell_amount'] > 0 and dry_run:
+   882→   882→        if price <= 0:
+   883→   883→            print(f'[BOT] DRY RUN SELL SKIP: invalid price {price}')
+   884→   884→            decision['sell_amount'] = 0
+   885→   885→        else:
+   886→   886→            sell_btc_sold = decision['sell_amount'] / price
+   887→   887→            sell_proceeds_actual = decision['sell_amount']
+   888→   888→            sell_fee = sell_proceeds_actual * config.SELL_FEE_PCT
+   889→   889→            bot_state['total_btc_sold'] += sell_btc_sold
+   890→   890→            print(f'[BOT] DRY RUN SELL: {sell_btc_sold:.8f} BTC → {sell_proceeds_actual:.2f} {currency} (fee: {sell_fee:.2f})')
+   891→   891→
+   892→   892→    # Record trades in trade log FIRST (before mutating state)
+   893→   893→    # This ensures if trade log write fails, state is not yet mutated,
+   894→   894→    # preventing data inconsistency between state.json and trade_log.json.
+   895→   895→    # H3: Compute actual fill prices from exchange response for accurate records
+   896→   896→    buy_fill_price = price
+   897→   897→    if buy_btc_got > 0 and buy_cost_actual > 0:
+   898→   898→        buy_fill_price = buy_cost_actual / buy_btc_got
+   899→   899→
+   900→   900→    sell_fill_price = price
+   901→   901→    if sell_btc_sold > 0 and sell_proceeds_actual > 0:
+   902→   902→        sell_fill_price = sell_proceeds_actual / sell_btc_sold
+   903→   903→
+   904→   904→    if decision['buy_amount'] > 0 and buy_btc_got > 0:
+   905→   905→        buy_extra = {'dry_run': dry_run,
+   906→   906→                     'reserve': round(decision.get('reserve_injection', 0), 2)}
+   907→   907→        if monday_boost:
+   908→   908→            buy_extra['monday_boost'] = config.MONDAY_DCA_MULTIPLIER
+   909→   909→        state_mod.append_trade_log(
+   910→   910→            trade_log_path, 'buy', buy_cost_actual, buy_btc_got,
+   911→   911→            buy_fill_price, buy_fee,
+   912→   912→            extra=buy_extra
+   913→   913→        )
+   914→   914→
+   915→   915→    if decision['sell_amount'] > 0 and sell_btc_sold > 0:
+   916→   916→        state_mod.append_trade_log(
+   917→   917→            trade_log_path, 'sell', sell_proceeds_actual, sell_btc_sold,
+   918→   918→            sell_fill_price, sell_fee,
+   919→   919→            extra={'dry_run': dry_run,
+   920→   920→                   'path': decision.get('path_taken', ''),
+   921→   921→                   'score': decision.get('sell_score', 0)}
+   922→   922→        )
+   923→   923→
+   924→   924→    # ── 10. Update state ──
+   925→   925→    bot_state = state_mod.update_state_after_run(
+   926→   926→        bot_state, decision, buy_fill_price, sell_fill_price, currency,
+   927→   927→        buy_fee=buy_fee, sell_fee=sell_fee,
+   928→   928→        btc_balance=btc_balance, cash_balance=cash_balance,
+   929→   929→        sell_proceeds_actual=sell_proceeds_actual,
+   930→   930→        actual_buy_cost=buy_cost_actual,
+   931→   931→    )
+   932→   932→
+   933→   933→    # If a trade was attempted but failed (amount zeroed), don't consume daily slot
+   934→   934→    if trade_attempted and not trade_succeeded:
+   935→   935→        bot_state.pop('last_run_date', None)
+   936→   936→        bot_state['run_count'] -= 1  # Revert the increment
+   937→   937→        print(f'[BOT] Trade failed — not consuming daily slot. Cron retry will try again.')
+   938→   938→
+   939→   939→    # Track portfolio value
+   940→   940→    if dry_run:
+   941→   941→        # DRY RUN: Use virtual balances (no exchange API calls)
+   942→   942→        current_btc = btc_balance + buy_btc_got - sell_btc_sold
+   943→   943→        current_cash = cash_balance - buy_cost_actual + sell_proceeds_actual - buy_fee - sell_fee
+   944→   944→        # Save updated virtual balances to state for next run
+   945→   945→        bot_state['dry_run_btc'] = round(current_btc, 8)
+   946→   946→        bot_state['dry_run_cash'] = round(current_cash, 2)
+   947→   947→        # Track sell proceeds for reserve
+   948→   948→        if sell_proceeds_actual > 0:
+   949→   949→            bot_state['dry_run_sell_proceeds'] = bot_state.get('dry_run_sell_proceeds', 0.0) + sell_proceeds_actual - sell_fee
+   950→   950→        print(f'[BOT] DRY RUN portfolio: BTC={current_btc:.8f} Cash={current_cash:,.2f} {currency}')
+   951→   951→    else:
+   952→   952→        # LIVE: Fetch latest real balances from exchange
+   953→   953→        current_btc = _get_btc_balance(exchange)
+   954→   954→        current_cash = _get_cash_balance(exchange)
+   955→   955→        # Track sell proceeds for reserve (sell_proceeds_actual is net-of-fee for Bitkub)
+   956→   956→        if sell_proceeds_actual > 0:
+   957→   957→            bot_state['sell_proceeds_reserve'] = bot_state.get('sell_proceeds_reserve', 0.0) + sell_proceeds_actual
+   958→   958→    portfolio = current_btc * price + current_cash
+   959→   959→
+   960→   960→    peak = bot_state.get('peak_value', 0.0)
+   961→   961→    if portfolio > peak:
+   962→   962→        bot_state['peak_value'] = portfolio
+   963→   963→        peak = portfolio
+   964→   964→    if peak > 0:
+   965→   965→        dd = (bot_state['peak_value'] - portfolio) / bot_state['peak_value']
+   966→   966→        if dd > bot_state['max_drawdown']:
+   967→   967→            bot_state['max_drawdown'] = dd
+   968→   968→
+   969→   969→    # ── 11. Snapshot indicators for dashboard ──
+   970→   970→    m_for_snap = {**m, 'price': price,
+   971→   971→                   'sell_score': decision.get('sell_score', 0),
+   972→   972→                   'path_taken': decision.get('path_taken', 'none'),
+   973→   973→                   'in_bear': decision.get('in_bear', False),
+   974→   974→                   'cooldown': decision.get('new_cooldown', 0)}
+   975→   975→    bot_state['last_indicators'] = _build_indicators_snapshot(m_for_snap)
+   976→   976→    bot_state['last_decision'] = _build_decision_metadata(decision, monday_boost, in_dca_window)
+   977→   977→    _update_state_metadata(bot_state, exchange, current_btc, current_cash, portfolio, price)
+   978→   978→    bot_state['last_dry_run'] = dry_run
+   979→   979→
+   980→   980→    # ── 11b. B18: Append indicator history for retrospective analysis ──
+   981→   981→    try:
+   982→   982→        ih_path = os.path.join(os.path.dirname(trade_log_path), 'indicator_history.json')
+   983→   983→        state_mod.append_indicator_history(
+   984→   984→            ih_path,
+   985→   985→            bot_state.get('last_indicators', {}),
+   986→   986→            bot_state.get('last_decision', {}),
+   987→   987→        )
+   988→   988→        print(f'[BOT] Indicator history appended')
+   989→   989→    except Exception as e:
+   990→   990→        print(f'[BOT] Indicator history append failed (non-critical): {e}')
+   991→   991→
+   992→   992→    # ── 12. Low balance warning ──
+   993→   993→    daily_budget = config.get_daily_budget()
+   994→   994→    if current_cash > 0 and daily_budget > 0:
+   995→   995→        days_remaining = current_cash / daily_budget
+   996→   996→        if days_remaining <= config.LOW_BALANCE_DAYS:
+   997→   997→            warning_msg = (
+   998→   998→                f'\n⚠ LOW BALANCE WARNING\n'
+   999→   999→                f'Cash: {current_cash:,.2f} {currency}\n'
+  1000→  1000→                f'Daily budget: {daily_budget:,.2f} {currency}\n'
+  1001→  1001→                f'Runs remaining: ~{days_remaining:.1f}\n'
+  1002→  1002→                f'Consider adding funds or reducing DCA budget.'
+  1003→  1003→            )
+  1004→  1004→            print(f'[BOT] {warning_msg}')
+  1005→  1005→            notifier.send_telegram(warning_msg)
+  1006→  1006→
+  1007→  1007→    # ── 13. Send notification ──
+  1008→  1008→    # DI-4: Pass actual fill amounts for accurate Telegram display
+  1009→  1009→    msg = notifier.format_report(
+  1010→  1010→        decision, price, mvrv_val, current_btc, current_cash,
+  1011→  1011→        currency, is_dry_run=dry_run,
+  1012→  1012→        monday_boost=config.MONDAY_DCA_MULTIPLIER if monday_boost else 1.0,
+  1013→  1013→        actual_buy=buy_cost_actual,
+  1014→  1014→        actual_sell=sell_proceeds_actual,
+  1015→  1015→    )
+  1016→  1016→    if notifier.send_telegram(msg):
+  1017→  1017→        print('[BOT] Telegram notification sent')
+  1018→  1018→    else:
+  1019→  1019→        print('[BOT] Telegram not configured or failed')
+  1020→  1020→
+  1021→  1021→    print(f'[BOT] Done. Portfolio: {portfolio:,.2f} {currency}')
+  1022→  1022→    return bot_state
+  1023→  1023→
+  1024→  1024→
+  1025→  1025→def refresh_dashboard(exchange, bot_state: dict, dry_run: bool = False,
+  1026→  1026→                      trade_log_path: str = 'trade_log.json',
+  1027→  1027→                      kill_switch_path: str = 'kill_switch.json') -> dict:
+  1028→  1028→    '''Refresh dashboard data WITHOUT executing any trades.
+  1029→  1029→
+  1030→  1030→    Fetches: price, indicators, MVRV, on-chain metrics, balances.
+  1031→  1031→    Snapshots everything to state for dashboard generation.
+  1032→  1032→    Used by dashboard "Update" button — always runs, never trades.
+  1033→  1033→
+  1034→  1034→    Returns updated state dict.
+  1035→  1035→    '''
+  1036→  1036→    currency = exchange.currency
+  1037→  1037→    today = _thai_today()
+  1038→  1038→
+  1039→  1039→    print(f'[REFRESH] ═══════════════════════════════════════════════════')
+  1040→  1040→    print(f'[REFRESH]   DASHBOARD REFRESH MODE — NO TRADES')
+  1041→  1041→    print(f'[REFRESH]   Exchange: {exchange.__class__.__name__} | Dry-run: {dry_run}')
+  1042→  1042→    print(f'[REFRESH] ═══════════════════════════════════════════════════')
+  1043→  1043→
+  1044→  1044→    # ── 1. Fetch current price ──
+  1045→  1045→    print(f'[REFRESH] Fetching price...')
+  1046→  1046→    price = exchange.get_price()
+  1047→  1047→    print(f'[REFRESH] Current price: {price:,.2f} {currency}')
+  1048→  1048→
+  1049→  1049→    if price <= 0:
+  1050→  1050→        print(f'[REFRESH] ERROR: Invalid price from exchange: {price}. Aborting.')
+  1051→  1051→        return bot_state
+  1052→  1052→
+  1053→  1053→    # ── 2. Fetch price history for indicators ──
+  1054→  1054→    print('[REFRESH] Fetching price history (500d)...')
+  1055→  1055→    klines = _fetch_price_history_with_dates(exchange)
+  1056→  1056→    closes = [k['close'] for k in klines]
+  1057→  1057→    print(f'[REFRESH] Got {len(closes)} daily closes')
+  1058→  1058→
+  1059→  1059→    if len(closes) < MIN_CLOSES_FOR_INDICATORS:
+  1060→  1060→        print('[REFRESH] ERROR: Not enough price history')
+  1061→  1061→        return bot_state
+  1062→  1062→
+  1063→  1063→    # ── 3+4+4b. Resolve all indicators + on-chain metrics (B22: shared function) ──
+  1064→  1064→    print('[REFRESH] Computing indicators + resolving on-chain metrics...')
+  1065→  1065→    rm = _resolve_onchain_metrics(price, closes, today,
+  1066→  1066→                                      log_prefix='[REFRESH]',
+  1067→  1067→                                      allow_web_fallback=False,
+  1068→  1068→                                      notify_on_fail=False)
+  1069→  1069→
+  1070→  1070→    # ── 5. Get balances ──
+  1071→  1071→    if dry_run:
+  1072→  1072→        btc_balance = bot_state.get('dry_run_btc', 0.0)
+  1073→  1073→        cash_balance = bot_state.get('dry_run_cash', config.DRY_RUN_INITIAL_CASH)
+  1074→  1074→        print(f'[REFRESH] DRY-RUN balances: BTC={btc_balance:.8f} Cash={cash_balance:,.2f} {currency}')
+  1075→  1075→    else:
+  1076→  1076→        btc_balance = _get_btc_balance(exchange)
+  1077→  1077→        cash_balance = _get_cash_balance(exchange)
+  1078→  1078→        print(f'[REFRESH] LIVE balances: BTC={btc_balance:.8f} Cash={cash_balance:,.2f} {currency}')
+  1079→  1079→    portfolio = btc_balance * price + cash_balance
+  1080→  1080→
+  1081→  1081→    # ── 6. Snapshot indicators to state (CQ-9: use resolved metrics dict directly) ──
+  1082→  1082→    rm_for_snap = {**rm, 'price': price,
+  1083→  1083→                   'sell_score': bot_state.get('last_indicators', {}).get('sell_score', 0),
+  1084→  1084→                   'path_taken': bot_state.get('last_indicators', {}).get('path_taken', 'none'),
+  1085→  1085→                   'in_bear': rm['in_bear'],
+  1086→  1086→                   'cooldown': bot_state.get('cooldown', 0)}
+  1087→  1087→    bot_state['last_indicators'] = _build_indicators_snapshot(rm_for_snap, {'refreshed': True})
+  1088→  1088→    _update_state_metadata(bot_state, exchange, btc_balance, cash_balance, portfolio, price)
+  1089→  1089→    # D2: Do NOT overwrite last_dry_run in refresh-only paths.
+  1090→  1090→    # refresh_dashboard() only fetches data for the dashboard, it doesn't trade,
+  1091→  1091→    # so it must not change the provenance flag of existing trade data.
+  1092→  1092→
+  1093→  1093→    # B18: Also append indicator history on refresh
+  1094→  1094→    try:
+  1095→  1095→        ih_path = os.path.join(os.path.dirname(trade_log_path), 'indicator_history.json')
+  1096→  1096→        state_mod.append_indicator_history(
+  1097→  1097→            ih_path,
+  1098→  1098→            bot_state.get('last_indicators', {}),
+  1099→  1099→        )
+  1100→  1100→        print(f'[REFRESH] Indicator history appended')
+  1101→  1101→    except Exception as e:
+  1102→  1102→        print(f'[REFRESH] Indicator history append failed (non-critical): {e}')
+  1103→  1103→
+  1104→  1104→    # Track peak and drawdown
+  1105→  1105→    if portfolio > bot_state.get('peak_value', 0):
+  1106→  1106→        bot_state['peak_value'] = portfolio
+  1107→  1107→    if bot_state['peak_value'] > 0:
+  1108→  1108→        dd = (bot_state['peak_value'] - portfolio) / bot_state['peak_value']
+  1109→  1109→        if dd > bot_state.get('max_drawdown', 0):
+  1110→  1110→            bot_state['max_drawdown'] = dd
+  1111→  1111→
+  1112→  1112→    print(f'[REFRESH] Done. Portfolio: {portfolio:,.2f} {currency} (no trades executed)')
+  1113→  1113→    return bot_state
+  1114→  1114→
+  1115→  1115→
+  1116→  1116→def _snapshot_indicators(bot_state: dict, price: float, currency: str,
+  1117→  1117→                         dry_run: bool, exchange, killed: bool = False,
+  1118→  1118→                         kill_reason: str = ''):
+  1119→  1119→    '''Fetch and snapshot indicators when bot is killed (for dashboard).
+  1120→  1120→
+  1121→  1121→    CQ-3: Refactored to use shared _resolve_onchain_metrics() +
+  1122→  1122→    _build_indicators_snapshot() instead of inline duplicated code.
+  1123→  1123→    '''
+  1124→  1124→    try:
+  1125→  1125→        today = _thai_today()
+  1126→  1126→        klines = _fetch_price_history_with_dates(exchange)
+  1127→  1127→        closes = [k['close'] for k in klines]
+  1128→  1128→        if len(closes) < MIN_CLOSES_FOR_INDICATORS:
+  1129→  1129→            return
+  1130→  1130→
+  1131→  1131→        m = _resolve_onchain_metrics(price, closes, today,
+  1132→  1132→                                      log_prefix='[SNAPSHOT]',
+  1133→  1133→                                      allow_web_fallback=False,
+  1134→  1134→                                      notify_on_fail=False)
+  1135→  1135→        if m.get('_mvrv_all_failed'):
+  1136→  1136→            return
+  1137→  1137→
+  1138→  1138→        m_for_snap = {**m, 'price': price,
+  1139→  1139→                       'sell_score': 0,
+  1140→  1140→                       'path_taken': 'killed',
+  1141→  1141→                       'in_bear': m.get('in_bear', False),
+  1142→  1142→                       'cooldown': bot_state.get('cooldown', 0),
+  1143→  1143→                       'killed': True,
+  1144→  1144→                       'kill_reason': kill_reason}
+  1145→  1145→        bot_state['last_indicators'] = _build_indicators_snapshot(m_for_snap)
+  1146→  1146→        _update_state_metadata(bot_state, exchange, 0.0, 0.0, 0.0, price)
+  1147→  1147→    except Exception as e:
+  1148→  1148→        print(f'[BOT] Indicator snapshot failed: {e}')
+  1149→  1149→
+  1150→  1150→
+  1151→  1151→def run_demo(exchange, demo_state: dict, project_root: str,
+  1152→  1152→             scenario: str = 'default', force: bool = False,
+  1153→  1153→             validate: bool = False) -> dict:
+  1154→  1154→    '''Demo portfolio simulation run.
+  1155→  1155→
+  1156→  1156→    Like run_daily() but:
+  1157→  1157→    - Uses isolated demo state (demo_state.json, demo_trades.json)
+  1158→  1158→    - Simulates slippage on every trade
+  1159→  1159→    - Records portfolio history for charting
+  1160→  1160→    - Generates validation report on --validate
+  1161→  1161→    - NEVER calls exchange trade APIs
+  1162→  1162→
+  1163→  1163→    Returns updated demo_state dict.
+  1164→  1164→    '''
+  1165→  1165→    from . import demo_portfolio as dp
+  1166→  1166→
+  1167→  1167→    currency = exchange.currency
+  1168→  1168→    today = _thai_today()
+  1169→  1169→
+  1170→  1170→    # ── 0. Idempotency guard ──
+  1171→  1171→    if not force and demo_state.get('last_run_date') == today.isoformat():
+  1172→  1172→        print(f'[DEMO] Already ran today ({today} THB). Skipping.')
+  1173→  1173→        print(f'[DEMO] Use --force to override.')
+  1174→  1174→        return demo_state
+  1175→  1175→
+  1176→  1176→    print(f'[DEMO] ═══════════════════════════════════════════════════')
+  1177→  1177→    print(f'[DEMO]   DEMO PORTFOLIO SIMULATION')
+  1178→  1178→    print(f'[DEMO]   Scenario: {scenario}')
+  1179→  1179→    print(f'[DEMO]   Cash: {demo_state["cash"]:,.2f} {currency}')
+  1180→  1180→    print(f'[DEMO]   BTC:  {demo_state["btc"]:.8f}')
+  1181→  1181→    print(f'[DEMO] ═══════════════════════════════════════════════════')
+  1182→  1182→
+  1183→  1183→    # ── 1. Fetch current price ──
+  1184→  1184→    print(f'[DEMO] Fetching price from {exchange.__class__.__name__}...')
+  1185→  1185→    price = exchange.get_price()
+  1186→  1186→    print(f'[DEMO] Current price: {price:,.2f} {currency}')
+  1187→  1187→
+  1188→  1188→    # ── 2. Fetch price history ──
+  1189→  1189→    print('[DEMO] Fetching price history (500d)...')
+  1190→  1190→    klines = _fetch_price_history_with_dates(exchange)
+  1191→  1191→    closes = [k['close'] for k in klines]
+  1192→  1192→    print(f'[DEMO] Got {len(closes)} daily closes')
+  1193→  1193→
+  1194→  1194→    if len(closes) < MIN_CLOSES_FOR_INDICATORS:
+  1195→  1195→        print('[DEMO] ERROR: Not enough price history')
+  1196→  1196→        return demo_state
+  1197→  1197→
+  1198→  1198→    # ── 3+4+4b. Resolve all indicators + on-chain metrics (B22: shared function) ──
+  1199→  1199→    print('[DEMO] Computing indicators + resolving on-chain metrics...')
+  1200→  1200→    dm = _resolve_onchain_metrics(price, closes, today,
+  1201→  1201→                                      log_prefix='[DEMO]',
+  1202→  1202→                                      allow_web_fallback=True,
+  1203→  1203→                                      notify_on_fail=False)
+  1204→  1204→    if dm.get('_mvrv_all_failed'):
+  1205→  1205→        print('[DEMO] WARNING: No MVRV data. Skipping.')
+  1206→  1206→        return demo_state
+  1207→  1207→
+  1208→  1208→    # ── 5. Convert budget ──
+  1209→  1209→    base_budget = config.get_daily_budget()
+  1210→  1210→    max_buy = config.get_max_buy()
+  1211→  1211→    print(f'[DEMO] Budget: {base_budget:.2f} {currency}/run (max buy: {max_buy:.2f})')
+  1212→  1212→
+  1213→  1213→    # ── 5a. Monday DCA boost (CQ: shared helper) ──
+  1214→  1214→    base_budget, monday_boost = _apply_monday_boost(base_budget)
+  1215→  1215→    if monday_boost:
+  1216→  1216→        print(f'[DEMO] MONDAY BOOST: base_budget x{config.MONDAY_DCA_MULTIPLIER} = {base_budget:.2f} {currency}')
+  1217→  1217→
+  1218→  1218→    # ── 5b. DCA time window check (same as run_daily) ──
+  1219→  1219→    # In demo mode, time window is logged but NOT enforced (demo is for simulation, not live trading).
+  1220→  1220→    in_dca_window = _in_dca_time_window()
+  1221→  1221→    if not in_dca_window:
+  1222→  1222→        print(f'[DEMO] Note: outside DCA time window ({config.DCA_TIME_WINDOW_START}:00-{config.DCA_TIME_WINDOW_END}:00 THB). ')
+  1223→  1223→        print(f'[DEMO] Demo mode allows trading any time for simulation purposes.')
+  1224→  1224→
+  1225→  1225→    # ── 5c. Reserve = sell proceeds only ──
+  1226→  1226→    demo_reserve = demo_state.get('sell_proceeds_reserve', 0.0)
+  1227→  1227→    print(f'[DEMO] Sell proceeds reserve: {demo_reserve:,.2f} {currency}')
+  1228→  1228→
+  1229→  1229→    # ── 6. Run strategy (CQ-9: pass dm dict keys directly, no unpacking) ──
+  1230→  1230→    print('[DEMO] Running Phoenix v5.1 strategy...')
+  1231→  1231→    decision = strategy.phoenix_v5_1_decision(
+  1232→  1232→        mvrv=dm['mvrv'], rsi=dm['rsi'], sopr=dm['sopr'], nupl=dm['nupl'],
+  1233→  1233→        price=price, sma_200=dm['sma_200'], sma_365=dm['sma_365'],
+  1234→  1234→        realized_price=dm['realized_price'], lth_realized_price=dm['lth_realized_price'],
+  1235→  1235→        mvrv_pct=dm['mvrv_pct'], mvrv_z=dm['mvrv_z'],
+  1236→  1236→        macd_cross_bear=dm['macd_bear'], macd_hist_declining=dm['macd_declining'],
+  1237→  1237→        rsi_divergence_flag=dm['rsi_div'], ath=dm['ath'],
+  1238→  1238→        btc_balance=demo_state['btc'],
+  1239→  1239→        cash_reserve=demo_reserve,
+  1240→  1240→        cooldown=demo_state['cooldown'],
+  1241→  1241→        base_budget=base_budget, max_buy=max_buy,
+  1242→  1242→        reserve_floor=config.get_reserve_floor(),
+  1243→  1243→        max_reserve_injection=config.get_max_reserve_injection(),
+  1244→  1244→        max_reserve_boosted=config.get_max_reserve_boosted(),
+  1245→  1245→        reserve_boost_multiplier=config.RESERVE_BOOST_MULTIPLIER,
+  1246→  1246→        reserve_boost_price_ratio=config.RESERVE_BOOST_PRICE_RATIO,
+  1247→  1247→    )
+  1248→  1248→
+  1249→  1249→    print(f'[DEMO] Decision: buy={decision["buy_amount"]:.2f} '
+  1250→  1250→          f'sell={decision["sell_amount"]:.2f} '
+  1251→  1251→          f'score={decision["sell_score"]} path={decision["path_taken"]}')
+  1252→  1252→
+  1253→  1253→    # ── 7. Process trade through demo portfolio (with slippage) ──
+  1254→  1254→    demo_state = dp.process_demo_trade(
+  1255→  1255→        demo_state, decision, price, currency,
+  1256→  1256→        fee_pct=config.BUY_FEE_PCT,
+  1257→  1257→        use_slippage=True,
+  1258→  1258→        project_root=project_root,
+  1259→  1259→        scenario=scenario,
+  1260→  1260→        monday_boost=config.MONDAY_DCA_MULTIPLIER if monday_boost else 1.0,
+  1261→  1261→    )
+  1262→  1262→
+  1263→  1263→    # ── 8. Snapshot indicators (CQ: shared helper) ──
+  1264→  1264→    dm_for_snap = {**dm, 'price': price,
+  1265→  1265→                   'sell_score': decision.get('sell_score', 0),
+  1266→  1266→                   'path_taken': decision.get('path_taken', 'none'),
+  1267→  1267→                   'in_bear': decision.get('in_bear', False),
+  1268→  1268→                   'cooldown': decision.get('new_cooldown', 0)}
+  1269→  1269→    indicators_snapshot = _build_indicators_snapshot(dm_for_snap)
+  1270→  1270→    demo_state['last_decision'] = _build_decision_metadata(decision, monday_boost, in_dca_window)
+  1271→  1271→    dp.snapshot_indicators(demo_state, indicators_snapshot)
+  1272→  1272→
+  1273→  1273→    # ── 9. Send notification ──
+  1274→  1274→    msg = notifier.format_report(
+  1275→  1275→        decision, price, dm['mvrv'],
+  1276→  1276→        demo_state['btc'], demo_state['cash'],
+  1277→  1277→        currency, is_dry_run=True,
+  1278→  1278→        monday_boost=config.MONDAY_DCA_MULTIPLIER if monday_boost else 1.0,
+  1279→  1279→    )
+  1280→  1280→    msg = msg.replace('DRY RUN', 'DEMO')
+  1281→  1281→    if notifier.send_telegram(msg):
+  1282→  1282→        print('[DEMO] Telegram notification sent')
+  1283→  1283→
+  1284→  1284→    # ── 10. Validation report (optional) ──
+  1285→  1285→    if validate:
+  1286→  1286→        report = dp.generate_validation_report(demo_state, project_root, scenario)
+  1287→  1287→        dp.print_validation_report(report)
+  1288→  1288→
+  1289→  1289→    return demo_state
+  1290→  1290→

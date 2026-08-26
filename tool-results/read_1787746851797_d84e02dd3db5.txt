@@ -1,0 +1,678 @@
+     1→"""BGeometrics on-chain metrics fetcher with file-based cache.
+     2→
+     3→Fetches real on-chain data from BGeometrics API:
+     4→  - STH-SOPR (Short-Term Holder SOPR)
+     5→  - LTH Realized Price
+     6→  - Realized Price
+     7→  - aSOPR (all UTXO SOPR)
+     8→  - STH Realized Price
+     9→
+    10→Cache strategy:
+    11→  - Full history cached in bg_cache.json (up to 5 years)
+    12→  - Historical data is IMMUTABLE — never re-fetched once cached
+    13→  - Only fetches data AFTER the newest cached date (incremental gap-fill)
+    14→  - Live mode: fetches only if cache newest date < yesterday
+    15→  - Backtest: uses full cache as-is, fetches only missing tail
+    16→  - Rate limit: max 10 req/hr on free tier, tracked via timestamps
+    17→  - DAILY GUARD: get_all_metrics_today() fetches once per UTC day,
+    18→    then reuses in-memory snapshot for subsequent calls (0 API calls)
+    19→  - TYPICAL USAGE: 3 API calls/day (1 per metric) on first run,
+    20→    0 API calls on subsequent runs the same day
+    21→
+    22→Usage:
+    23→    # RECOMMENDED: batch fetch (once per day, minimal API calls)
+    24→    from live_bot.bg_metrics import get_all_metrics_today
+    25→    m = get_all_metrics_today()  # {sth_sopr, lth_realized_price, realized_price, sopr_source}
+    26→    sopr_val = m['sth_sopr']
+    27→
+    28→    # Legacy single lookups (still work but load cache independently)
+    29→    from live_bot.bg_metrics import get_sth_sopr, get_lth_realized_price, get_realized_price
+    30→    val = get_sth_sopr(date.today())
+    31→
+    32→    # Backtest: pre-load full history
+    33→    from live_bot.bg_metrics import ensure_cache, get_cached_series
+    34→    ensure_cache()  # fetches only missing data (respects existing cache)
+    35→    series = get_cached_series('sth_sopr')  # {date: float, ...}
+    36→"""
+    37→
+    38→import json
+    39→import os
+    40→import time
+    41→import math
+    42→import tempfile
+    43→from datetime import date, datetime, timezone, timedelta
+    44→from typing import Optional, Dict, List, Tuple
+    45→import urllib.request
+    46→
+    47→
+    48→# ── Config ──────────────────────────────────────────────────────────────
+    49→
+    50→_API_BASE = 'https://api.bgeometrics.com/v1'
+    51→_TOKEN = os.environ.get('BGEOMETRICS_TOKEN', '')
+    52→
+    53→# Metric name mapping: (endpoint_path, json_key_in_response)
+    54→_METRIC_DEFS = {
+    55→    'sth_sopr':           ('sth-sopr',           'sthSopr'),
+    56→    'lth_sopr':           ('lth-sopr',           'lthSopr'),
+    57→    'sopr':               ('sopr',               'sopr'),
+    58→    'lth_realized_price': ('lth-realized-price', 'lthRealizedPrice'),
+    59→    'sth_realized_price': ('sth-realized-price', 'sthRealizedPrice'),
+    60→    'realized_price':     ('realized-price',     'realizedPrice'),
+    61→    'mvrv':               ('mvrv',               'mvrv'),
+    62→    'mvrv_zscore':        ('mvrv-zscore',        'mvrvZscore'),
+    63→}
+    64→
+    65→# Metrics where the API historically returned only a few recent values.
+    66→# NOTE: BG now returns full history for most metrics.  Keeping sth_realized_price
+    67→# only because it's not used in live mode and rarely needs full history.
+    68→_SINGLE_VALUE_METRICS = {'sth_realized_price'}
+    69→
+    70→# For live mode: how far back from today we consider "needs fresh data"
+    71→# If cache newest date >= (today - LIVE_FRESHNESS_DAYS), skip fetch
+    72→# BG API data is inherently 1-2 days behind, so 3 days avoids unnecessary fetches
+    73→# while keeping data within D-2 to D-4 range (acceptable for daily DCA).
+    74→_LIVE_FRESHNESS_DAYS = 3  # cache covers up to yesterday = fresh enough
+    75→
+    76→# Rate limit tracking
+    77→_MAX_REQUESTS_PER_HOUR = 10
+    78→_request_times: List[float] = []  # timestamps of recent requests
+    79→
+    80→
+    81→def _get_cache_path() -> str:
+    82→    """Path to cache file (next to state.json)."""
+    83→    # Same dir as this module
+    84→    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bg_cache.json')
+    85→
+    86→
+    87→def _load_cache() -> dict:
+    88→    """Load cache from disk."""
+    89→    path = _get_cache_path()
+    90→    if os.path.exists(path):
+    91→        try:
+    92→            with open(path, 'r') as f:
+    93→                return json.load(f)
+    94→        except (json.JSONDecodeError, OSError):
+    95→            pass
+    96→    return {'metrics': {}, 'request_log': []}
+    97→
+    98→
+    99→def _save_cache(cache: dict):
+   100→    """Save cache to disk atomically."""
+   101→    path = _get_cache_path()
+   102→    dir_name = os.path.dirname(path) or '.'
+   103→    os.makedirs(dir_name, exist_ok=True)
+   104→    tmp_path = None
+   105→    try:
+   106→        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
+   107→        with os.fdopen(fd, 'w') as f:
+   108→            json.dump(cache, f)
+   109→        os.replace(tmp_path, path)
+   110→    except Exception:
+   111→        if tmp_path is not None and os.path.exists(tmp_path):
+   112→            os.unlink(tmp_path)
+   113→        raise
+   114→
+   115→
+   116→def _can_make_request() -> bool:
+   117→    """Check if we can make an API request without exceeding rate limit."""
+   118→    now = time.time()
+   119→    # Clean old entries (older than 1 hour)
+   120→    global _request_times
+   121→    _request_times = [t for t in _request_times if now - t < 3600]
+   122→    return len(_request_times) < _MAX_REQUESTS_PER_HOUR
+   123→
+   124→
+   125→def _record_request():
+   126→    """Record that we made an API request."""
+   127→    global _request_times
+   128→    _request_times.append(time.time())
+   129→
+   130→
+   131→def _fetch_endpoint(endpoint: str, token: str, timeout: int = 20) -> Optional[List[dict]]:
+   132→    """Fetch data from a BGeometrics endpoint.
+   133→
+   134→    Returns list of raw records, or None on failure.
+   135→    """
+   136→    if not _can_make_request():
+   137→        print(f'[BG] Rate limited ({len(_request_times)}/{_MAX_REQUESTS_PER_HOUR} in last hour). Skipping.')
+   138→        return None
+   139→
+   140→    url = f'{_API_BASE}/{endpoint}?token={token}'
+   141→    try:
+   142→        req = urllib.request.Request(url, headers={
+   143→            'User-Agent': 'Mozilla/5.0',
+   144→            'Accept': 'application/json',
+   145→        })
+   146→        _record_request()
+   147→        with urllib.request.urlopen(req, timeout=timeout) as resp:
+   148→            data = json.loads(resp.read().decode())
+   149→
+   150→        if isinstance(data, dict) and 'error' in data:
+   151→            print(f'[BG] API error: {data["error"]}')
+   152→            return None
+   153→
+   154→        if not isinstance(data, list) or len(data) == 0:
+   155→            print(f'[BG] No data from {endpoint}')
+   156→            return None
+   157→
+   158→        return data
+   159→
+   160→    except Exception as e:
+   161→        print(f'[BG] Fetch error ({endpoint}): {e}')
+   162→        return None
+   163→
+   164→
+   165→def _parse_series(raw: List[dict], json_key: str, metric_name: str = '') -> Dict[str, float]:
+   166→    """Parse API response into {date_str: float} dict.
+   167→
+   168→    Smart key detection: if the expected json_key yields 0 results,
+   169→    auto-detect the value key by finding the first non-'d' key
+   170→    with numeric values.
+   171→    """
+   172→    result = {}
+   173→    for row in raw:
+   174→        d_str = row.get('d', '')
+   175→        val = row.get(json_key)
+   176→        if not d_str or val is None:
+   177→            continue
+   178→        try:
+   179→            fval = float(val)
+   180→            if not math.isnan(fval):
+   181→                result[d_str] = fval
+   182→        except (ValueError, TypeError):
+   183→            continue
+   184→
+   185→    # Smart fallback: if expected key yielded nothing, try auto-detect
+   186→    if not result and len(raw) > 0:
+   187→        sample = raw[0]
+   188→        for key, val in sample.items():
+   189→            if key == 'd':
+   190→                continue
+   191→            # Try this key
+   192→            candidate = {}
+   193→            for row in raw:
+   194→                d_str = row.get('d', '')
+   195→                v = row.get(key)
+   196→                if not d_str or v is None:
+   197→                    continue
+   198→                try:
+   199→                    fval = float(v)
+   200→                    if not math.isnan(fval):
+   201→                        candidate[d_str] = fval
+   202→                except (ValueError, TypeError):
+   203→                    continue
+   204→            if len(candidate) > len(result):
+   205→                result = candidate
+   206→                if metric_name:
+   207→                    print(f'[BG] {metric_name}: auto-detected key "{key}" ' +
+   208→                          f'(expected "{json_key}", got {len(result)} records)')
+   209→
+   210→    return result
+   211→
+   212→
+   213→# ── Public API: cache-only lookup (ZERO API calls) ─────────────────
+   214→
+   215→def get_cached_value(metric_name: str, target_date=None) -> float:
+   216→    """Look up a single metric from DISK CACHE ONLY.  Never calls the API.
+   217→
+   218→    Use this for early/preview reads where you want to avoid triggering
+   219→    any network requests.  The actual fetch is deferred to
+   220→    get_all_metrics_today() later in the pipeline.
+   221→
+   222→    Args:
+   223→        metric_name: e.g. 'mvrv', 'mvrv_zscore', 'sth_sopr'
+   224→        target_date: date to look up (default: today)
+   225→
+   226→    Returns:
+   227→        float value, or NaN if not in cache.
+   228→    """
+   229→    if target_date is None:
+   230→        target_date = date.today()
+   231→    cache = _load_cache()
+   232→    series = cache.get('metrics', {}).get(metric_name, {})
+   233→    if not series:
+   234→        return float('nan')
+   235→    return _lookup(series, target_date)
+   236→
+   237→
+   238→# ── Public API: batch fetch (1 API call per metric, once per day) ─────
+   239→
+   240→# In-memory daily snapshot: once populated, reused for the rest of the day
+   241→_daily_snapshot: Optional[Dict[str, float]] = None
+   242→_daily_snapshot_date: Optional[str] = None
+   243→# B19: Cache the full series dict alongside daily snapshot to avoid
+   244→# re-reading bg_cache.json from disk on every _lookup_from_snapshot call.
+   245→_daily_series_cache: Optional[Dict[str, Dict[str, float]]] = None
+   246→
+   247→
+   248→def get_all_metrics_today(
+   249→    target_date=None,
+   250→    token=None,
+   251→    force_refetch: bool = False,
+   252→) -> Dict[str, float]:
+   253→    """Fetch ALL on-chain metrics for today in ONE batch.
+   254→
+   255→    Daily guard: if we already fetched today (same UTC date), returns
+   256→    cached snapshot immediately — ZERO API calls.
+   257→
+   258→    Args:
+   259→        target_date: date to look up (default: today)
+   260→        token: BGeometrics token (default: from env)
+   261→        force_refetch: ignore daily guard, re-fetch from API
+   262→
+   263→    Returns:
+   264→        Dict with keys: sth_sopr, lth_realized_price, realized_price, sopr_source
+   265→        Values are float (NaN if unavailable).
+   266→    """
+   267→    global _daily_snapshot, _daily_snapshot_date, _daily_series_cache
+   268→
+   269→    if target_date is None:
+   270→        target_date = date.today()
+   271→    # B21: Use Thai TZ for daily guard to match bot's timezone.
+   272→    # Bot runs on Thai time (UTC+7); using UTC caused stale snapshots
+   273→    # between 00:00-07:00 UTC (07:00-14:00 THB).
+   274→    today_guard = datetime.now(timezone(timedelta(hours=7))).strftime('%Y-%m-%d')
+   275→
+   276→    # Daily guard: reuse today's snapshot
+   277→    if (not force_refetch
+   278→            and _daily_snapshot is not None
+   279→            and _daily_snapshot_date == today_guard):
+   280→        print(f'[BG] Using today\'s snapshot (fetched at {_daily_snapshot_date})')
+   281→        result = {}
+   282→        for metric_name in ['sth_sopr', 'lth_realized_price', 'realized_price', 'mvrv', 'mvrv_zscore']:
+   283→            # B19: Use cached series instead of re-reading disk
+   284→            series = _daily_series_cache.get(metric_name, {}) if _daily_series_cache else {}
+   285→            if series:
+   286→                val = _lookup(series, target_date)
+   287→            else:
+   288→                val = float('nan')
+   289→            result[metric_name] = val
+   290→        # Update source tags based on whether we actually found values
+   291→        result['sopr_source'] = 'cache' if not math.isnan(result.get('sth_sopr', float('nan'))) else _daily_snapshot.get('sopr_source', 'N/A')
+   292→        result['mvrv_source'] = 'cache' if not math.isnan(result.get('mvrv', float('nan'))) else _daily_snapshot.get('mvrv_source', 'N/A')
+   293→        return result
+   294→
+   295→    tkn = token or _TOKEN
+   296→    metrics_to_fetch = ['sth_sopr', 'lth_realized_price', 'realized_price', 'mvrv', 'mvrv_zscore']
+   297→
+   298→    if not tkn:
+   299→        print('[BG] No BGEOMETRICS_TOKEN — reading from cache only')
+   300→        cache = _load_cache()
+   301→        snapshot = {}
+   302→        no_token_series = {}  # B19: build series cache for daily guard reuse
+   303→        for metric_name in ['sth_sopr', 'lth_realized_price', 'realized_price', 'mvrv', 'mvrv_zscore']:
+   304→            series = cache.get('metrics', {}).get(metric_name, {})
+   305→            no_token_series[metric_name] = series
+   306→            snapshot[metric_name] = _lookup(series, target_date) if series else float('nan')
+   307→        snapshot['sopr_source'] = 'cache' if not math.isnan(snapshot.get('sth_sopr', float('nan'))) else 'no-token'
+   308→        snapshot['mvrv_source'] = 'cache' if not math.isnan(snapshot.get('mvrv', float('nan'))) else 'no-token'
+   309→        _daily_snapshot = snapshot
+   310→        _daily_snapshot_date = today_guard
+   311→        _daily_series_cache = no_token_series  # B19: cache series for daily guard
+   312→        return dict(snapshot)
+   313→
+   314→    # Load cache ONCE for all metrics
+   315→    cache = _load_cache()
+   316→    api_calls_made = 0
+   317→    series_cache = {}  # metric_name -> {date_str: float}
+   318→
+   319→    for metric_name in metrics_to_fetch:
+   320→        metric_data = cache.get('metrics', {}).get(metric_name, {})
+   321→
+   322→        if not _needs_incremental_fetch(metric_data, metric_name=metric_name):
+   323→            newest = max(metric_data.keys()) if metric_data else 'N/A'
+   324→            print(f'[BG] {metric_name}: cache fresh ({len(metric_data)}d, newest={newest})')
+   325→            series_cache[metric_name] = metric_data
+   326→            continue
+   327→
+   328→        # Fetch from API
+   329→        endpoint, json_key = _METRIC_DEFS[metric_name]
+   330→        newest_cached = max(metric_data.keys()) if metric_data else 'empty'
+   331→        print(f'[BG] {metric_name}: cache ends {newest_cached}, fetching...')
+   332→        raw = _fetch_endpoint(endpoint, tkn)
+   333→        if raw is None:
+   334→            print(f'[BG] {metric_name}: fetch failed, using stale cache')
+   335→            series_cache[metric_name] = metric_data
+   336→            continue
+   337→
+   338→        api_calls_made += 1
+   339→        new_series = _parse_series(raw, json_key, metric_name=metric_name)
+   340→        if new_series:
+   341→            merged = _merge_and_trim(metric_data, new_series, metric_name, cache)
+   342→            series_cache[metric_name] = merged
+   343→            cache = _load_cache()  # re-read after save
+   344→            print(f'[BG] {metric_name}: cached successfully ({len(new_series)} new records)')
+   345→        else:
+   346→            print(f'[BG] {metric_name}: API returned no usable data (key={json_key})')
+   347→            series_cache[metric_name] = metric_data
+   348→
+   349→    # Build snapshot with values for target_date
+   350→    snapshot = {}
+   351→    for metric_name in metrics_to_fetch:
+   352→        series = series_cache.get(metric_name, {})
+   353→        snapshot[metric_name] = _lookup(series, target_date) if series else float('nan')
+   354→    snapshot['sopr_source'] = 'BG' if not math.isnan(snapshot.get('sth_sopr', float('nan'))) else 'cache-stale'
+   355→    snapshot['mvrv_source'] = 'BG' if not math.isnan(snapshot.get('mvrv', float('nan'))) else 'cache-stale'
+   356→    snapshot['mvrv_z_source'] = 'BG' if not math.isnan(snapshot.get('mvrv_zscore', float('nan'))) else 'embedded-365d'
+   357→
+   358→    # Store in memory for the rest of the day
+   359→    _daily_snapshot = snapshot
+   360→    _daily_snapshot_date = today_guard
+   361→    # B19: Also cache the full series dict for _lookup_from_snapshot
+   362→    _daily_series_cache = series_cache
+   363→
+   364→    print(f'[BG] Batch complete: {api_calls_made} API calls, '
+   365→          f'snapshot cached for {today_guard}')
+   366→    return dict(snapshot)
+   367→
+   368→
+   369→def _lookup_from_snapshot(metric_name: str, target_date) -> float:
+   370→    """Look up a metric value from the in-memory series cache for a specific date.
+   371→
+   372→    Used by get_all_metrics_today() when reusing a daily snapshot
+   373→    to get the value for a possibly different target_date.
+   374→
+   375→    B19: Uses in-memory _daily_series_cache instead of re-reading
+   376→    bg_cache.json from disk on every call.
+   377→    """
+   378→    global _daily_series_cache
+   379→    # Use in-memory cache first, fall back to disk only if needed
+   380→    series = _daily_series_cache.get(metric_name, {}) if _daily_series_cache else {}
+   381→    if not series:
+   382→        cache = _load_cache()
+   383→        series = cache.get('metrics', {}).get(metric_name, {})
+   384→    if series:
+   385→        return _lookup(series, target_date)
+   386→    return float('nan')
+   387→
+   388→
+   389→def invalidate_daily_snapshot():
+   390→    """Force next call to get_all_metrics_today() to re-fetch from API."""
+   391→    global _daily_snapshot, _daily_snapshot_date, _daily_series_cache
+   392→    _daily_snapshot = None
+   393→    _daily_snapshot_date = None
+   394→    _daily_series_cache = None
+   395→
+   396→
+   397→# ── Public API: single-value lookups (legacy, still work) ──────────────
+   398→
+   399→def get_sth_sopr(target_date, cache=None, token=None) -> float:
+   400→    """Get STH-SOPR for a specific date. Returns NaN if unavailable."""
+   401→    series = _get_metric_series('sth_sopr', cache, token)
+   402→    if series is None:
+   403→        return float('nan')
+   404→    return _lookup(series, target_date)
+   405→
+   406→
+   407→def get_lth_realized_price(target_date, cache=None, token=None) -> float:
+   408→    """Get LTH Realized Price for a specific date. Returns NaN if unavailable."""
+   409→    series = _get_metric_series('lth_realized_price', cache, token)
+   410→    if series is None:
+   411→        return float('nan')
+   412→    return _lookup(series, target_date)
+   413→
+   414→
+   415→def get_realized_price(target_date, cache=None, token=None) -> float:
+   416→    """Get Realized Price for a specific date. Returns NaN if unavailable."""
+   417→    series = _get_metric_series('realized_price', cache, token)
+   418→    if series is None:
+   419→        return float('nan')
+   420→    return _lookup(series, target_date)
+   421→
+   422→
+   423→def get_sopr(target_date, cache=None, token=None) -> float:
+   424→    """Get aSOPR for a specific date. Returns NaN if unavailable."""
+   425→    series = _get_metric_series('sopr', cache, token)
+   426→    if series is None:
+   427→        return float('nan')
+   428→    return _lookup(series, target_date)
+   429→
+   430→
+   431→def _merge_and_trim(metric_data: Dict[str, float], new_series: Dict[str, float], metric_name: str, cache: dict) -> Dict[str, float]:
+   432→    """Merge new data into existing cache, trim to 5 years, save to disk."""
+   433→    merged = {**metric_data, **new_series}
+   434→
+   435→    # Trim to max 5 years (1826 days) from newest
+   436→    if merged:
+   437→        newest_date = max(merged.keys())
+   438→        cutoff = (date.fromisoformat(newest_date) - timedelta(days=1826)).isoformat()
+   439→        merged = {d: v for d, v in merged.items() if d >= cutoff}
+   440→
+   441→    if 'metrics' not in cache:
+   442→        cache['metrics'] = {}
+   443→    cache['metrics'][metric_name] = merged
+   444→    if 'last_fetch' not in cache:
+   445→        cache['last_fetch'] = {}
+   446→    cache['last_fetch'][metric_name] = datetime.now(timezone.utc).isoformat()
+   447→    _save_cache(cache)
+   448→    print(f'[BG] {metric_name}: cached {len(merged)} days '
+   449→          f'({min(merged.keys())} → {max(merged.keys())})')
+   450→    return merged
+   451→
+   452→
+   453→def _needs_incremental_fetch(metric_data: Dict[str, float], metric_name: str = '', min_days: int = 30) -> bool:
+   454→    """Check if there's a gap between cached data and today.
+   455→
+   456→    Historical data is immutable, so we ONLY fetch if the cache doesn't
+   457→    reach recent dates. Returns True if we need to fetch.
+   458→
+   459→    Args:
+   460→        metric_data: existing cached {date_str: float} dict
+   461→        metric_name: metric name (used to detect single-value metrics)
+   462→        min_days: minimum days of data to consider cache "complete enough"
+   463→                   to skip re-fetch. If cache has fewer days, it's likely
+   464→                   a failed partial fetch (e.g. only 1 day due to key mismatch).
+   465→    """
+   466→    # Single-value metrics (mvrv_zscore, etc.) only need 1 cached day
+   467→    effective_min = 1 if metric_name in _SINGLE_VALUE_METRICS else min_days
+   468→
+   469→    if not metric_data or len(metric_data) < effective_min:
+   470→        return True  # No data or too little — must fetch
+   471→
+   472→    newest = max(metric_data.keys())
+   473→    gap_days = _days_ago(newest)
+   474→
+   475→    if gap_days <= _LIVE_FRESHNESS_DAYS:
+   476→        return False
+   477→
+   478→    return True
+   479→
+   480→
+   481→def _get_metric_series(metric_name: str, cache=None, token=None) -> Optional[Dict[str, float]]:
+   482→    """Get full series for a metric, fetching only if gap detected.
+   483→
+   484→    Key behavior: HISTORICAL DATA IS NEVER RE-FETCHED.
+   485→    Only the gap between newest cached date and today is filled.
+   486→    """
+   487→    tkn = token or _TOKEN
+   488→    if not tkn:
+   489→        return None
+   490→
+   491→    if cache is None:
+   492→        cache = _load_cache()
+   493→
+   494→    metrics = cache.get('metrics', {})
+   495→    metric_data = metrics.get(metric_name, {})
+   496→
+   497→    # Check if we need to fetch (only for missing recent data)
+   498→    if not _needs_incremental_fetch(metric_data, metric_name=metric_name):
+   499→        return metric_data
+   500→
+   501→    # Need to fetch — but API returns ALL history, we just merge
+   502→    endpoint, json_key = _METRIC_DEFS[metric_name]
+   503→    newest_cached = max(metric_data.keys()) if metric_data else ''
+   504→    print(f'[BG] {metric_name}: cache ends {newest_cached}, fetching incremental...')
+   505→    raw = _fetch_endpoint(endpoint, tkn)
+   506→    if raw is None:
+   507→        # Return existing cache even if stale
+   508→        return metric_data if metric_data else None
+   509→
+   510→    # Parse and merge
+   511→    new_series = _parse_series(raw, json_key, metric_name=metric_name)
+   512→    if new_series:
+   513→        merged = _merge_and_trim(metric_data, new_series, metric_name, cache)
+   514→        return merged
+   515→
+   516→    return metric_data if metric_data else None
+   517→
+   518→
+   519→def _lookup(series: Dict[str, float], target_date) -> float:
+   520→    """Look up a value for a date, with 1-day fallback."""
+   521→    if isinstance(target_date, date):
+   522→        d_str = target_date.isoformat()
+   523→    else:
+   524→        d_str = str(target_date)[:10]
+   525→
+   526→    if d_str in series:
+   527→        return series[d_str]
+   528→
+   529→    # 1-day fallback (API data might be 1 day behind)
+   530→    try:
+   531→        d = date.fromisoformat(d_str) - timedelta(days=1)
+   532→        fb = d.isoformat()
+   533→        if fb in series:
+   534→            return series[fb]
+   535→    except (ValueError, TypeError):
+   536→        pass
+   537→
+   538→    return float('nan')
+   539→
+   540→
+   541→def _days_ago(date_str: str) -> int:
+   542→    """Days since a date string."""
+   543→    try:
+   544→        return (date.today() - date.fromisoformat(date_str)).days
+   545→    except (ValueError, TypeError):
+   546→        return 999
+   547→
+   548→
+   549→def _seconds_ago(iso_str: str) -> float:
+   550→    """Seconds since an ISO timestamp."""
+   551→    try:
+   552→        dt = datetime.fromisoformat(iso_str.replace('Z', '+00:00'))
+   553→        return (datetime.now(timezone.utc) - dt).total_seconds()
+   554→    except (ValueError, TypeError):
+   555→        return 999999
+   556→
+   557→
+   558→# ── Public API: backtest support ────────────────────────────────────────
+   559→
+   560→def ensure_cache(token=None, metrics=None, force_refetch=False) -> dict:
+   561→    """Ensure cache is populated for backtest.
+   562→
+   563→    SMART FETCH: Only fetches if there's a gap between cached data and today.
+   564→    Historical data (already in cache) is NEVER re-fetched.
+   565→    Use force_refetch=True only if you suspect data corruption.
+   566→
+   567→    Args:
+   568→        token: BGeometrics token (default: from env)
+   569→        metrics: list of metric names to fetch (default: core 3)
+   570→        force_refetch: if True, ignore cache and re-fetch everything
+   571→
+   572→    Returns:
+   573→        The full cache dict.
+   574→    """
+   575→    tkn = token or _TOKEN
+   576→    if not tkn:
+   577→        print('[BG] No BGEOMETRICS_TOKEN set, cannot fetch')
+   578→        return _load_cache()
+   579→
+   580→    if metrics is None:
+   581→        metrics = ['sth_sopr', 'lth_realized_price', 'realized_price', 'mvrv', 'mvrv_zscore']
+   582→
+   583→    cache = _load_cache()
+   584→
+   585→    for metric_name in metrics:
+   586→        metric_data = cache.get('metrics', {}).get(metric_name, {})
+   587→
+   588→        if force_refetch:
+   589→            # Wipe and re-fetch
+   590→            print(f'[BG] {metric_name}: force re-fetching...')
+   591→            metric_data = {}
+   592→        elif not _needs_incremental_fetch(metric_data, metric_name=metric_name):
+   593→            # Cache has recent data — no fetch needed
+   594→            newest = max(metric_data.keys()) if metric_data else 'N/A'
+   595→            print(f'[BG] {metric_name}: using cache ({len(metric_data)} days, newest={newest})')
+   596→            continue
+   597→
+   598→        # Need to fetch (first time or gap detected)
+   599→        endpoint, json_key = _METRIC_DEFS[metric_name]
+   600→        newest_cached = max(metric_data.keys()) if metric_data else 'empty'
+   601→        print(f'[BG] {metric_name}: cache ends {newest_cached}, fetching...')
+   602→        raw = _fetch_endpoint(endpoint, tkn)
+   603→        if raw is None:
+   604→            if metric_data:
+   605→                print(f'[BG] {metric_name}: fetch failed, using existing cache ({len(metric_data)} days)')
+   606→            else:
+   607→                print(f'[BG] {metric_name}: no data available')
+   608→            continue
+   609→
+   610→        new_series = _parse_series(raw, json_key, metric_name=metric_name)
+   611→        if new_series:
+   612→            _merge_and_trim(metric_data, new_series, metric_name, cache)
+   613→            cache = _load_cache()  # re-read after save
+   614→        else:
+   615→            print(f'[BG] {metric_name}: API returned no usable data')
+   616→
+   617→    return cache
+   618→
+   619→
+   620→def get_cached_series(metric_name: str, cache=None) -> Dict[str, float]:
+   621→    """Get full cached series for a metric.
+   622→
+   623→    Returns {date_str: float} dict. Empty dict if not cached.
+   624→    """
+   625→    if cache is None:
+   626→        cache = _load_cache()
+   627→    return dict(cache.get('metrics', {}).get(metric_name, {}))
+   628→
+   629→
+   630→def get_cached_series_as_dates(metric_name: str, cache=None) -> Dict[date, float]:
+   631→    """Get full cached series with date objects as keys."""
+   632→    raw = get_cached_series(metric_name, cache)
+   633→    return {date.fromisoformat(d): v for d, v in raw.items()}
+   634→
+   635→
+   636→def cache_info() -> dict:
+   637→    """Return info about current cache state."""
+   638→    cache = _load_cache()
+   639→    info = {'metrics': {}}
+   640→    for name, data in cache.get('metrics', {}).items():
+   641→        if data:
+   642→            dates = sorted(data.keys())
+   643→            info['metrics'][name] = {
+   644→                'days': len(data),
+   645→                'range': f'{dates[0]} → {dates[-1]}' if dates else 'empty',
+   646→                'last_fetch': cache.get('last_fetch', {}).get(name, 'never'),
+   647→            }
+   648→    return info
+   649→
+   650→
+   651→if __name__ == '__main__':
+   652→    import sys
+   653→    os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+   654→
+   655→    print('=== BGeometrics Cache Manager ===')
+   656→    print()
+   657→
+   658→    if not _TOKEN:
+   659→        print('WARNING: BGEOMETRICS_TOKEN not set')
+   660→        print('Set it via: export BGEOMETRICS_TOKEN=your_token')
+   661→        sys.exit(1)
+   662→
+   663→    # Fetch core metrics
+   664→    print('Fetching core metrics (STH-SOPR, LTH-RP, RP)...')
+   665→    cache = ensure_cache()
+   666→
+   667→    print()
+   668→    info = cache_info()
+   669→    for name, minfo in info['metrics'].items():
+   670→        print(f'  {name}: {minfo["days"]}d {minfo["range"]}')
+   671→
+   672→    # Demo lookups
+   673→    print()
+   674→    today = date.today()
+   675→    print(f'STH-SOPR ({today}): {get_sth_sopr(today)}')
+   676→    print(f'LTH-RP ({today}):   {get_lth_realized_price(today)}')
+   677→    print(f'RP ({today}):       {get_realized_price(today)}')
+   678→

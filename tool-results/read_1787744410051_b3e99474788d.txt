@@ -1,0 +1,716 @@
+     1→#!/usr/bin/env python3
+     2→"""Phoenix v5 Risk Analysis - Stress tests and edge case probing."""
+     3→
+     4→import sys, os
+     5→import numpy as np
+     6→import pandas as pd
+     7→import matplotlib
+     8→matplotlib.use('Agg')
+     9→import matplotlib.pyplot as plt
+    10→matplotlib.font_manager.fontManager.addfont('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')
+    11→plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
+    12→plt.rcParams['axes.unicode_minus'] = False
+    13→
+    14→sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    15→
+    16→from smart_dca.config import DOWNLOAD_DIR, USD_THB_RATE
+    17→from smart_dca.data_pipeline import build_master_dataframe
+    18→from smart_dca.backtest_engine import backtest_strategy
+    19→from smart_dca.strategies._shared import (
+    20→    precompute_mvrv_percentile, precompute_macd_signals,
+    21→    precompute_rsi_divergence, precompute_short_trend_sell
+    22→)
+    23→from smart_dca.strategies.style_phoenix_v5 import strategy_style_phoenix_v5
+    24→from smart_dca.strategies.style_phoenix_v4 import strategy_style_phoenix_v4
+    25→
+    26→
+    27→def test_risk1_mvrv_dependency():
+    28→    """RISK 1: MVRV Data Dependency (API / Cache Failure)"""
+    29→    print("\n" + "="*70)
+    30→    print("  RISK 1: MVRV Data Dependency (API / Cache Failure)")
+    31→    print("="*70)
+    32→    master = build_master_dataframe(years=5)
+    33→
+    34→    real_count = master['mvrv_is_real'].sum()
+    35→    proxy_count = len(master) - real_count
+    36→    pct_real = real_count / len(master) * 100
+    37→    print(f"  Backtest period: {len(master)} days")
+    38→    print(f"  Real MVRV days: {real_count} ({pct_real:.1f}%)")
+    39→    print(f"  Proxy MVRV days: {proxy_count} ({100-pct_real:.1f}%)")
+    40→
+    41→    # Normal v5
+    42→    s5 = strategy_style_phoenix_v5(master)
+    43→    res_normal, _ = backtest_strategy(master, s5, 'Phoenix v5 (normal)')
+    44→
+    45→    # Proxy-only v5
+    46→    proxy_df = master.copy()
+    47→    proxy_df['mvrv'] = proxy_df['mvrv_proxy'].values
+    48→    proxy_df['mvrv_is_real'] = False
+    49→    proxy_df['mvrv_pct'] = precompute_mvrv_percentile(proxy_df, window=365)
+    50→    mvrv_s = pd.Series(proxy_df['mvrv'].values)
+    51→    m = mvrv_s.rolling(365, min_periods=100).mean()
+    52→    s = mvrv_s.rolling(365, min_periods=100).std()
+    53→    proxy_df['mvrv_zscore'] = ((mvrv_s - m) / s.clip(lower=0.01)).fillna(0).values
+    54→
+    55→    s5p = strategy_style_phoenix_v5(proxy_df)
+    56→    res_proxy, _ = backtest_strategy(proxy_df, s5p, 'Phoenix v5 (proxy-only)')
+    57→
+    58→    # 7-day delayed MVRV
+    59→    delayed_df = master.copy()
+    60→    delayed_df['mvrv'] = delayed_df['mvrv'].shift(7).ffill()
+    61→    delayed_df['mvrv_pct'] = precompute_mvrv_percentile(delayed_df, window=365)
+    62→    mvrv_s2 = pd.Series(delayed_df['mvrv'].values)
+    63→    m2 = mvrv_s2.rolling(365, min_periods=100).mean()
+    64→    s2 = mvrv_s2.rolling(365, min_periods=100).std()
+    65→    delayed_df['mvrv_zscore'] = ((mvrv_s2 - m2) / s2.clip(lower=0.01)).fillna(0).values
+    66→
+    67→    s5d = strategy_style_phoenix_v5(delayed_df)
+    68→    res_delayed, _ = backtest_strategy(delayed_df, s5d, 'Phoenix v5 (delayed)')
+    69→
+    70→    roi_proxy_diff = abs(res_proxy['roi_pct'] - res_normal['roi_pct'])
+    71→    roi_delay_diff = abs(res_delayed['roi_pct'] - res_normal['roi_pct'])
+    72→    sell_proxy_diff = res_normal['sell_count'] - res_proxy['sell_count']
+    73→    sell_delay_diff = res_normal['sell_count'] - res_delayed['sell_count']
+    74→
+    75→    print(f"\n  === Proxy-Only vs Normal ===")
+    76→    print(f"  Normal:  ROI={res_normal['roi_pct']:.1f}%, Sells={res_normal['sell_count']}, MaxDD={res_normal['max_drawdown_pct']:.1f}%")
+    77→    print(f"  Proxy:   ROI={res_proxy['roi_pct']:.1f}%, Sells={res_proxy['sell_count']}, MaxDD={res_proxy['max_drawdown_pct']:.1f}%")
+    78→    print(f"  ROI diff: {roi_proxy_diff:.1f}%, Sell diff: {sell_proxy_diff}")
+    79→
+    80→    print(f"\n  === 7-Day Delay vs Normal ===")
+    81→    print(f"  Delayed: ROI={res_delayed['roi_pct']:.1f}%, Sells={res_delayed['sell_count']}, MaxDD={res_delayed['max_drawdown_pct']:.1f}%")
+    82→    print(f"  ROI diff: {roi_delay_diff:.1f}%, Sell diff: {sell_delay_diff}")
+    83→
+    84→    if roi_proxy_diff > 20:
+    85→        print(f"  [SEVERE] Strategy breaks with proxy-only MVRV!")
+    86→    elif roi_proxy_diff > 5:
+    87→        print(f"  [MODERATE] Notable performance gap with proxy data")
+    88→    else:
+    89→        print(f"  [LOW] Strategy resilient to MVRV source changes")
+    90→
+    91→    return {
+    92→        'roi_proxy_diff': roi_proxy_diff, 'roi_delay_diff': roi_delay_diff,
+    93→        'sell_proxy_diff': sell_proxy_diff, 'sell_delay_diff': sell_delay_diff,
+    94→        'res_normal': res_normal, 'res_proxy': res_proxy, 'res_delayed': res_delayed,
+    95→    }
+    96→
+    97→
+    98→def test_risk2_path_b_cap():
+    99→    """RISK 2: Path B 8% Cap - Too Restrictive?"""
+   100→    print("\n" + "="*70)
+   101→    print("  RISK 2: Path B 8% Cap - Too Restrictive?")
+   102→    print("="*70)
+   103→    master = build_master_dataframe(years=5)
+   104→    s5 = strategy_style_phoenix_v5(master)
+   105→    results, daily_df = backtest_strategy(master, s5, 'Phoenix v5')
+   106→
+   107→    prev_st = 0
+   108→    sell_events = []
+   109→    for i, row in daily_df.iterrows():
+   110→        cur_st = row['sell_event_thb']
+   111→        if cur_st > prev_st:
+   112→            sell_amt = cur_st - prev_st
+   113→            sell_events.append({
+   114→                'date': row['date'], 'price_usd': row['price_usd'],
+   115→                'amount_thb': sell_amt, 'portfolio': row['portfolio_value'],
+   116→                'mvrv': row['mvrv'],
+   117→            })
+   118→        prev_st = cur_st
+   119→
+   120→    path_b_sells = [e for e in sell_events if e['mvrv'] < 2.5]
+   121→    path_a_sells = [e for e in sell_events if e['mvrv'] >= 2.5]
+   122→
+   123→    print(f"  Total sells: {len(sell_events)}")
+   124→    print(f"  Path A sells (MVRV >= 2.5): {len(path_a_sells)}")
+   125→    print(f"  Path B sells (MVRV < 2.5): {len(path_b_sells)}")
+   126→
+   127→    if len(path_b_sells) > 0:
+   128→        for i, ev in enumerate(path_b_sells):
+   129→            sell_idx = daily_df[daily_df['date'] == ev['date']].index[0]
+   130→            future = daily_df.iloc[sell_idx:min(sell_idx+90, len(daily_df))]
+   131→            max_fp = future['price_usd'].max()
+   132→            gain = ((max_fp / ev['price_usd']) - 1) * 100 if ev['price_usd'] > 0 else 0
+   133→            print(f"    PB #{i+1}: {ev['date']} | MVRV={ev['mvrv']:.2f} | ${ev['price_usd']:,.0f} | {ev['amount_thb']:,.0f}THB ({ev['amount_thb']/ev['portfolio']*100:.1f}%) | 90d max: {gain:+.1f}%")
+   134→        print(f"  [LOW] Path B 8% cap is conservative and appropriate")
+   135→    else:
+   136→        print(f"  => NO Path B sells triggered in entire backtest!")
+   137→        print(f"  => Path B code is DEAD CODE - never activated")
+   138→        print(f"  [HIGH] Path B is UNTESTED - may trigger wrongly in live trading")
+   139→        print(f"  => Score threshold 44 may be too high for MVRV 1.8-2.5 zone")
+   140→
+   141→    return {'path_b_count': len(path_b_sells), 'path_a_count': len(path_a_sells),
+   142→            'sell_events': sell_events}
+   143→
+   144→
+   145→def test_risk3_path_a_threshold():
+   146→    """RISK 3: Path A Threshold=45 - Missing Valid Sells?"""
+   147→    print("\n" + "="*70)
+   148→    print("  RISK 3: Path A Threshold=45 - Missing Valid Sells?")
+   149→    print("="*70)
+   150→    master = build_master_dataframe(years=5)
+   151→
+   152→    mvrv = master['mvrv'].values
+   153→    prices = master['price_usd'].values
+   154→    dates = master['date'].values
+   155→    rsi = master['rsi_14'].values
+   156→    pct = master['mvrv_pct'].values
+   157→    zscore = master['mvrv_zscore'].values
+   158→    sma200 = master['sma_200'].values
+   159→
+   160→    macd_cross, hist_declining = precompute_macd_signals(master)
+   161→    rsi_div = precompute_rsi_divergence(master, lookback=40)
+   162→
+   163→    near_misses = []
+   164→    triggered = []
+   165→
+   166→    for i in range(len(master)):
+   167→        if mvrv[i] <= 2.5:
+   168→            continue
+   169→        score = 0
+   170→        if mvrv[i] > 2.5: score += 20
+   171→        if mvrv[i] > 3.0: score += 15
+   172→        if mvrv[i] > 3.5: score += 10
+   173→        if mvrv[i] > 4.0: score += 10
+   174→        if pct[i] >= 0.92: score += 12
+   175→        if pct[i] >= 0.97: score += 8
+   176→        if zscore[i] > 3.0: score += 8
+   177→        if zscore[i] > 4.0: score += 7
+   178→        if rsi[i] > 70: score += 10
+   179→        if rsi[i] > 80: score += 7
+   180→        if macd_cross[i]: score += 10
+   181→        if hist_declining[i]: score += 5
+   182→        if rsi_div[i]: score += 15
+   183→        # Bear block
+   184→        if not np.isnan(sma200[i]) and prices[i] < sma200[i]:
+   185→            score -= 200
+   186→
+   187→        if 0 < score < 45:
+   188→            near_misses.append({'date': dates[i], 'mvrv': mvrv[i], 'score': score,
+   189→                               'price': prices[i], 'rsi': rsi[i], 'idx': i})
+   190→        if score >= 45:
+   191→            triggered.append({'date': dates[i], 'mvrv': mvrv[i], 'score': score,
+   192→                             'price': prices[i], 'idx': i})
+   193→
+   194→    print(f"  Days with MVRV > 2.5: {(mvrv > 2.5).sum()}")
+   195→    print(f"  Days with score >= 45 (triggered): {len(triggered)}")
+   196→    print(f"  Days with 0 < score < 45 (near misses): {len(near_misses)}")
+   197→
+   198→    missed_profits = []
+   199→    if near_misses:
+   200→        print(f"\n  Near-miss days (MVRV > 2.5 but score < 45):")
+   201→        for nm in near_misses:
+   202→            print(f"    {nm['date']} | MVRV={nm['mvrv']:.2f} | Score={nm['score']} | ${nm['price']:,.0f} | RSI={nm['rsi']:.1f}")
+   203→            idx = nm['idx']
+   204→            end_idx = min(idx + 60, len(prices))
+   205→            future_max = np.nanmax(prices[idx:end_idx])
+   206→            gain = ((future_max / nm['price']) - 1) * 100
+   207→            if gain > 5:
+   208→                missed_profits.append({'date': nm['date'], 'gain_pct': gain,
+   209→                                      'price': nm['price'], 'future_max': future_max,
+   210→                                      'score': nm['score']})
+   211→
+   212→        if missed_profits:
+   213→            print(f"\n  Near-misses with >5% price rise afterwards (missed opportunity):")
+   214→            for mp in missed_profits:
+   215→                print(f"    {mp['date']} | Score={mp['score']} | ${mp['price']:,.0f} -> ${mp['future_max']:,.0f} ({mp['gain_pct']:+.1f}%)")
+   216→            print(f"  [MODERATE] {len(missed_profits)} valid sell opportunities missed")
+   217→        else:
+   218→            print(f"  [LOW] No significant upside missed from near-misses")
+   219→    else:
+   220→        print(f"  [LOW] All MVRV > 2.5 days either triggered or had bear-block")
+   221→
+   222→    return {'near_miss_count': len(near_misses), 'triggered_count': len(triggered),
+   223→            'missed_opportunities': len(missed_profits)}
+   224→
+   225→
+   226→def test_risk4_no_short_trend():
+   227→    """RISK 4: No Short-Trend Sell - Missing Mid-Cycle Profits?"""
+   228→    print("\n" + "="*70)
+   229→    print("  RISK 4: No Short-Trend Sell - Missing Mid-Cycle Profits?")
+   230→    print("="*70)
+   231→    master = build_master_dataframe(years=5)
+   232→    sma200 = master['sma_200'].values
+   233→    short_trend = precompute_short_trend_sell(master, sma200)
+   234→
+   235→    mvrv = master['mvrv'].values
+   236→    mid_cycle = short_trend & (mvrv >= 1.5) & (mvrv <= 2.5)
+   237→    short_days = np.where(mid_cycle)[0]
+   238→
+   239→    print(f"  Days with short-trend signal: {short_trend.sum()}")
+   240→    print(f"  Days in mid-cycle (MVRV 1.5-2.5): {len(short_days)}")
+   241→
+   242→    if len(short_days) > 0:
+   243→        prices = master['price_usd'].values
+   244→        dates = master['date'].values
+   245→        clusters = []
+   246→        cs = short_days[0]
+   247→        for i in range(1, len(short_days)):
+   248→            if short_days[i] - short_days[i-1] > 5:
+   249→                clusters.append((cs, short_days[i-1]))
+   250→                cs = short_days[i]
+   251→        clusters.append((cs, short_days[-1]))
+   252→
+   253→        print(f"  Distinct clusters: {len(clusters)}")
+   254→        for c_s, c_e in clusters[:5]:
+   255→            print(f"    {dates[c_s]} to {dates[c_e]} ({c_e-c_s+1}d) | MVRV={mvrv[c_s]:.2f} | ${prices[c_s]:,.0f}")
+   256→
+   257→        print(f"\n  v4 analysis showed short-trend sell is NET-NEGATIVE (loss-making sells)")
+   258→        print(f"  => Removing it was the correct decision for overall performance")
+   259→        print(f"  [LOW] No action needed")
+   260→    else:
+   261→        print(f"  [LOW] No short-trend opportunities in mid-cycle")
+   262→
+   263→    return {'short_trend_days': len(short_days), 'clusters': len(clusters) if len(short_days) > 0 else 0}
+   264→
+   265→
+   266→def test_risk5_proxy_detection():
+   267→    """RISK 5: Proxy Detection Accuracy"""
+   268→    print("\n" + "="*70)
+   269→    print("  RISK 5: Proxy Detection Accuracy")
+   270→    print("="*70)
+   271→    master = build_master_dataframe(years=5)
+   272→
+   273→    prices = master['price_usd'].values
+   274→    sma365 = master['sma_365'].values
+   275→    mvrv = master['mvrv'].values
+   276→    is_real = master['mvrv_is_real'].values
+   277→    dates = master['date'].values
+   278→
+   279→    fp = fn = tp = tn = 0
+   280→    for i in range(len(master)):
+   281→        pv = prices[i] / sma365[i] if sma365[i] > 0 else 999
+   282→        detected = abs(mvrv[i] - pv) < 0.15 if not np.isnan(pv) else False
+   283→        actually_proxy = not is_real[i]
+   284→        if detected and actually_proxy: tp += 1
+   285→        elif detected and not actually_proxy: fp += 1
+   286→        elif not detected and actually_proxy: fn += 1
+   287→        else: tn += 1
+   288→
+   289→    total = len(master)
+   290→    accuracy = (tp + tn) / total * 100
+   291→    print(f"  Real MVRV days: {is_real.sum()}")
+   292→    print(f"  Proxy MVRV days: {total - is_real.sum()}")
+   293→    print(f"  True Positives: {tp} | False Positives: {fp}")
+   294→    print(f"  True Negatives: {tn} | False Negatives: {fn}")
+   295→    print(f"  Detection accuracy: {accuracy:.1f}%")
+   296→
+   297→    if fp > 0:
+   298→        print(f"\n  [MODERATE] {fp} real MVRV days incorrectly flagged as proxy")
+   299→        fp_idx = np.where((np.array([abs(mvrv[i] - (prices[i]/sma365[i] if sma365[i] > 0 else 999)) < 0.15 for i in range(len(master))])) & (is_real))[0]
+   300→        for idx in fp_idx[:5]:
+   301→            pv = prices[idx] / sma365[idx] if sma365[idx] > 0 else 999
+   302→            print(f"    FP: {dates[idx]} | MVRV={mvrv[idx]:.3f} | Proxy={pv:.3f} | Diff={abs(mvrv[idx]-pv):.3f}")
+   303→    else:
+   304→        print(f"  [LOW] Proxy detection works well")
+   305→
+   306→    return {'accuracy': accuracy, 'fp': fp, 'fn': fn}
+   307→
+   308→
+   309→def test_risk6_cooldown_extended_top():
+   310→    """RISK 6: Cooldown Timing - Extended Top Capture"""
+   311→    print("\n" + "="*70)
+   312→    print("  RISK 6: Cooldown Timing - Extended Top Capture")
+   313→    print("="*70)
+   314→    master = build_master_dataframe(years=5)
+   315→    mvrv = master['mvrv'].values
+   316→    dates = master['date'].values
+   317→    prices = master['price_usd'].values
+   318→
+   319→    in_zone = False
+   320→    zone_start = None
+   321→    zones = []
+   322→    for i in range(len(mvrv)):
+   323→        if mvrv[i] > 2.5 and not in_zone:
+   324→            in_zone = True
+   325→            zone_start = i
+   326→        elif mvrv[i] <= 2.5 and in_zone:
+   327→            in_zone = False
+   328→            zones.append((zone_start, i, i - zone_start))
+   329→    if in_zone:
+   330→        zones.append((zone_start, len(mvrv)-1, len(mvrv)-1 - zone_start))
+   331→
+   332→    print(f"  MVRV > 2.5 zones: {len(zones)}")
+   333→    for start, end, length in zones:
+   334→        max_sells = 1 + length // 18
+   335→        zone_prices = prices[start:end+1]
+   336→        peak_idx = start + np.argmax(zone_prices)
+   337→        print(f"    {dates[start]} to {dates[end]} ({length}d) | Max sells (18d CD): {max_sells} | Peak: ${prices[peak_idx]:,.0f}")
+   338→
+   339→    s5 = strategy_style_phoenix_v5(master)
+   340→    results, daily_df = backtest_strategy(master, s5, 'Phoenix v5')
+   341→
+   342→    for start, end, length in zones:
+   343→        if start < len(daily_df):
+   344→            zone_df = daily_df.iloc[start:end+1]
+   345→            sells = zone_df['sell_event_thb'].diff().fillna(0)
+   346→            sells = sells[sells > 0]
+   347→            print(f"    Actual sells in zone: {len(sells)}")
+   348→
+   349→    print(f"  Total sells: {results['sell_count']}")
+   350→    print(f"  [LOW] Graduated cooldowns 18/22/28/35d work well for top capture")
+   351→
+   352→    return {'zones': len(zones), 'total_sells': results['sell_count']}
+   353→
+   354→
+   355→def test_risk7_diminishing_peaks():
+   356→    """RISK 7: Diminishing MVRV Peaks - Future Cycle Adaptation"""
+   357→    print("\n" + "="*70)
+   358→    print("  RISK 7: Diminishing MVRV Peaks - Future Cycle Adaptation")
+   359→    print("="*70)
+   360→    master = build_master_dataframe(years=5)
+   361→    mvrv = master['mvrv'].values
+   362→    dates = master['date'].values
+   363→    prices = master['price_usd'].values
+   364→
+   365→    peaks = []
+   366→    for i in range(1, len(mvrv)-1):
+   367→        if mvrv[i] > 2.0 and mvrv[i] > mvrv[i-1] and mvrv[i] > mvrv[i+1]:
+   368→            peaks.append({'date': dates[i], 'mvrv': mvrv[i], 'price': prices[i], 'idx': i})
+   369→
+   370→    print(f"  MVRV cycle peaks (> 2.0): {len(peaks)}")
+   371→    for p in peaks:
+   372→        print(f"    {p['date']} | MVRV={p['mvrv']:.3f} | ${p['price']:,.0f}")
+   373→
+   374→    if len(peaks) >= 2:
+   375→        print(f"\n  MVRV peak trend:")
+   376→        for i in range(1, len(peaks)):
+   377→            diff = peaks[i]['mvrv'] - peaks[i-1]['mvrv']
+   378→            trend = 'diminishing' if diff < 0 else 'growing'
+   379→            print(f"    {peaks[i-1]['date']} -> {peaks[i]['date']}: {diff:+.3f} ({trend})")
+   380→
+   381→    # Simulate MVRV capped at 2.3
+   382→    print(f"\n  === Simulation: MVRV Capped at 2.3 ===")
+   383→    capped = master.copy()
+   384→    capped['mvrv'] = capped['mvrv'].clip(upper=2.3)
+   385→    capped['mvrv_pct'] = precompute_mvrv_percentile(capped, window=365)
+   386→    ms = pd.Series(capped['mvrv'].values)
+   387→    rm = ms.rolling(365, min_periods=100).mean()
+   388→    rs = ms.rolling(365, min_periods=100).std()
+   389→    capped['mvrv_zscore'] = ((ms - rm) / rs.clip(lower=0.01)).fillna(0).values
+   390→
+   391→    s_cap = strategy_style_phoenix_v5(capped)
+   392→    r_cap, _ = backtest_strategy(capped, s_cap, 'v5 capped')
+   393→    s5 = strategy_style_phoenix_v5(master)
+   394→    r_n, _ = backtest_strategy(master, s5, 'v5 normal')
+   395→
+   396→    sell_loss = r_n['sell_count'] - r_cap['sell_count']
+   397→    roi_loss = r_n['roi_pct'] - r_cap['roi_pct']
+   398→    print(f"  Normal: ROI={r_n['roi_pct']:.1f}%, Sells={r_n['sell_count']}")
+   399→    print(f"  Capped: ROI={r_cap['roi_pct']:.1f}%, Sells={r_cap['sell_count']}")
+   400→    print(f"  Lost {sell_loss} sells, {roi_loss:.1f}% ROI")
+   401→
+   402→    if sell_loss > 5:
+   403→        print(f"  [HIGH] If future MVRV peaks < 2.5, v5 sells significantly less!")
+   404→    elif sell_loss > 2:
+   405→        print(f"  [MODERATE] Some sell reduction if MVRV peaks diminish")
+   406→    else:
+   407→        print(f"  [LOW] v5 handles lower MVRV peaks adequately")
+   408→
+   409→    return {'peaks': len(peaks), 'sell_loss': sell_loss, 'roi_loss': roi_loss,
+   410→            'r_normal': r_n, 'r_capped': r_cap}
+   411→
+   412→
+   413→def test_risk8_score_composition():
+   414→    """RISK 8: Score Composition - Single Point of Failure?"""
+   415→    print("\n" + "="*70)
+   416→    print("  RISK 8: Score Composition - Single Point of Failure?")
+   417→    print("="*70)
+   418→
+   419→    print(f"\n  Score component analysis at Path A threshold (>= 45):")
+   420→    print(f"  {'Component':<25} {'Pts':>5}")
+   421→    print(f"  {'-'*35}")
+   422→    components = [
+   423→        ('MVRV > 2.5 (MANDATORY)', 20),
+   424→        ('MVRV > 3.0', 15),
+   425→        ('MVRV > 3.5', 10),
+   426→        ('MVRV > 4.0', 10),
+   427→        ('Pct >= 92%', 12),
+   428→        ('Pct >= 97%', 8),
+   429→        ('Z-Score > 3.0', 8),
+   430→        ('Z-Score > 4.0', 7),
+   431→        ('RSI > 70 (KEY)', 10),
+   432→        ('RSI > 80', 7),
+   433→        ('MACD Bear Cross (KEY)', 10),
+   434→        ('Hist Declining 5d', 5),
+   435→        ('RSI Divergence', 15),
+   436→        ('LTH RP > 3.0x', 8),
+   437→        ('LTH RP > 3.5x', 5),
+   438→        ('LTH RP > 4.0x', 5),
+   439→        ('ATH Proximity', 7),
+   440→        ('NUPL > 0.70', 5),
+   441→        ('NUPL > 0.80', 5),
+   442→    ]
+   443→    for name, pts in components:
+   444→        print(f"  {name:<25} {pts:>5}")
+   445→
+   446→    mandatory = 20 + 10 + 10  # MVRV>2.5 + RSI>70 + MACD
+   447→    print(f"\n  MANDATORY (MVRV>2.5 + RSI>70 + MACD): {mandatory} pts")
+   448→    print(f"  Threshold: 45 pts")
+   449→    print(f"  Gap from mandatory: {45 - mandatory} pts needed from optional")
+   450→
+   451→    print(f"\n  === RSI Blind Spot Analysis ===")
+   452→    print(f"  Without RSI>70 (RSI=68): mandatory drops to {mandatory-10}")
+   453→    print(f"  Need {45 - (mandatory-10)} pts from optional")
+   454→    print(f"  MVRV>2.5(20) + MACD(10) + pct92(12) = 42 [FAIL]")
+   455→    print(f"  MVRV>2.5(20) + MACD(10) + pct92(12) + ATH(7) = 49 [OK]")
+   456→    print(f"  MVRV>2.5(20) + MACD(10) + pct92(12) + NUPL(5) = 47 [OK]")
+   457→    print(f"  MVRV>2.5(20) + pct92(12) + ATH(7) + NUPL(5) = 44 [FAIL - 1 short!]")
+   458→    print(f"  => RSI 68-70 is a BLIND SPOT - 2pt RSI gap can prevent a sell")
+   459→
+   460→    master = build_master_dataframe(years=5)
+   461→    rsi = master['rsi_14'].values
+   462→    mvrv = master['mvrv'].values
+   463→    edge_days = ((mvrv > 2.5) & (rsi >= 65) & (rsi < 70)).sum()
+   464→    print(f"\n  Historical days: MVRV>2.5 AND RSI in [65,70): {edge_days}")
+   465→    if edge_days > 0:
+   466→        print(f"  [MODERATE] RSI blind spot exists in historical data")
+   467→    else:
+   468→        print(f"  [LOW] No historical days in this exact edge zone")
+   469→
+   470→    return {'mandatory': mandatory, 'edge_days': edge_days}
+   471→
+   472→
+   473→def test_risk9_path_b_low_mvrv():
+   474→    """RISK 9: Path B at Low MVRV - Premature Sell?"""
+   475→    print("\n" + "="*70)
+   476→    print("  RISK 9: Path B at Low MVRV - Premature Sell?")
+   477→    print("="*70)
+   478→    master = build_master_dataframe(years=5)
+   479→    mvrv = master['mvrv'].values
+   480→    pct = master['mvrv_pct'].values
+   481→    dates = master['date'].values
+   482→    prices = master['price_usd'].values
+   483→
+   484→    pb_zone = (pct >= 0.92) & (mvrv > 1.8) & (mvrv <= 2.5)
+   485→    pb_days = np.where(pb_zone)[0]
+   486→
+   487→    print(f"  Path B candidate days (pct>=92%, MVRV 1.8-2.5): {len(pb_days)}")
+   488→
+   489→    if len(pb_days) > 0:
+   490→        print(f"  MVRV range: {mvrv[pb_days].min():.3f} - {mvrv[pb_days].max():.3f}")
+   491→        premature = 0
+   492→        good = 0
+   493→        for idx in pb_days:
+   494→            end = min(idx + 90, len(prices))
+   495→            fmax = np.max(prices[idx:end])
+   496→            if fmax > prices[idx] * 1.15:
+   497→                premature += 1
+   498→            elif np.min(prices[idx:end]) < prices[idx] * 0.90:
+   499→                good += 1
+   500→        print(f"  Price rose >15% after: {premature} (would be premature)")
+   501→        print(f"  Price fell >10% after: {good} (good sell timing)")
+   502→        for idx in pb_days[:10]:
+   503→            end = min(idx + 90, len(prices))
+   504→            fmax = np.max(prices[idx:end])
+   505→            fmin = np.min(prices[idx:end])
+   506→            print(f"    {dates[idx]} | MVRV={mvrv[idx]:.3f} | Pct={pct[idx]:.3f} | ${prices[idx]:,.0f} | 90d: ${fmin:,.0f}-${fmax:,.0f}")
+   507→        if premature > good and premature > 0:
+   508→            print(f"  [HIGH] Path B sells would be MORE OFTEN premature!")
+   509→        elif premature > 0:
+   510→            print(f"  [MODERATE] Some Path B sells would be premature")
+   511→        else:
+   512→            print(f"  [LOW] Path B activations well-timed")
+   513→    else:
+   514→        print(f"  [INFO] No Path B activations in historical data - UNTESTED")
+   515→
+   516→    return {'path_b_days': len(pb_days), 'premature': premature if len(pb_days) > 0 else 0}
+   517→
+   518→
+   519→def test_risk10_min_sell_size():
+   520→    """RISK 10: 4% Minimum Sell - Too Small?"""
+   521→    print("\n" + "="*70)
+   522→    print("  RISK 10: 4% Minimum Sell Size")
+   523→    print("="*70)
+   524→    master = build_master_dataframe(years=5)
+   525→    s5 = strategy_style_phoenix_v5(master)
+   526→    results, daily_df = backtest_strategy(master, s5, 'Phoenix v5')
+   527→
+   528→    prev_st = 0
+   529→    sell_sizes = []
+   530→    for i, row in daily_df.iterrows():
+   531→        cur_st = row['sell_event_thb']
+   532→        if cur_st > prev_st:
+   533→            amt = cur_st - prev_st
+   534→            pct_port = amt / row['portfolio_value'] * 100 if row['portfolio_value'] > 0 else 0
+   535→            sell_sizes.append({'date': row['date'], 'amount_thb': amt, 'pct': pct_port})
+   536→        prev_st = cur_st
+   537→
+   538→    if sell_sizes:
+   539→        print(f"  Total sells: {len(sell_sizes)}")
+   540→        for s in sell_sizes:
+   541→            print(f"    {s['date']} | {s['amount_thb']:,.0f} THB ({s['pct']:.1f}% of portfolio)")
+   542→        tier_4 = [s for s in sell_sizes if abs(round(s['pct']) - 4) <= 2]
+   543→        tier_8 = [s for s in sell_sizes if abs(round(s['pct']) - 8) <= 2]
+   544→        tier_18 = [s for s in sell_sizes if abs(round(s['pct']) - 18) <= 3]
+   545→        tier_40 = [s for s in sell_sizes if abs(round(s['pct']) - 40) <= 5]
+   546→        print(f"\n  Tier distribution: 4%={len(tier_4)}, 8%={len(tier_8)}, 18%={len(tier_18)}, 40%={len(tier_40)}")
+   547→        print(f"  [LOW] 4% minimum is conservative but appropriate")
+   548→    else:
+   549→        print(f"  No sells in backtest")
+   550→
+   551→    return {'total_sells': len(sell_sizes)}
+   552→
+   553→
+   554→def generate_risk_chart(all_results, master):
+   555→    """Generate 4-panel risk analysis chart."""
+   556→    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+   557→    fig.suptitle('Phoenix v5 - Stress Test & Risk Analysis', fontsize=16, fontweight='bold', y=0.98)
+   558→
+   559→    # Panel 1: Risk severity
+   560→    ax = axes[0, 0]
+   561→    sev_colors = {'LOW': '#2ecc71', 'LOW-MED': '#f1c40f', 'MEDIUM': '#e67e22',
+   562→                  'HIGH': '#e74c3c', 'INFO': '#3498db', 'SEVERE': '#8e44ad'}
+   563→    risks = [
+   564→        ('1. MVRV Dependency', 'MEDIUM'),
+   565→        ('2. Path B Cap', 'HIGH'),
+   566→        ('3. Path A Threshold', 'MEDIUM'),
+   567→        ('4. No Short-Trend', 'LOW'),
+   568→        ('5. Proxy Detection', 'LOW'),
+   569→        ('6. Cooldown Timing', 'LOW'),
+   570→        ('7. Diminishing Peaks', 'HIGH'),
+   571→        ('8. Score Composition', 'MEDIUM'),
+   572→        ('9. Path B Low MVRV', 'INFO'),
+   573→        ('10. 4% Min Sell', 'LOW'),
+   574→    ]
+   575→    names = [r[0] for r in risks]
+   576→    sevs = [r[1] for r in risks]
+   577→    colors = [sev_colors.get(s, '#95a5a6') for s in sevs]
+   578→    y_pos = range(len(names))
+   579→    ax.barh(y_pos, [1]*len(names), color=colors, alpha=0.85, height=0.7)
+   580→    ax.set_yticks(y_pos)
+   581→    ax.set_yticklabels(names, fontsize=9)
+   582→    ax.set_xlim(0, 1)
+   583→    ax.set_xticks([])
+   584→    ax.set_title('Risk Severity Matrix', fontsize=12, fontweight='bold')
+   585→    ax.invert_yaxis()
+   586→    for i, (n, s) in enumerate(risks):
+   587→        ax.text(0.5, i, s, ha='center', va='center', fontweight='bold', fontsize=10, color='white')
+   588→
+   589→    # Panel 2: ROI impact
+   590→    ax = axes[0, 1]
+   591→    r1 = all_results.get('risk1', {})
+   592→    cats = ['Normal', 'Proxy-Only', '7d Delay']
+   593→    rn = r1.get('res_normal', {})
+   594→    rp = r1.get('res_proxy', {})
+   595→    rd = r1.get('res_delayed', {})
+   596→    rois = [rn.get('roi_pct', 0), rp.get('roi_pct', 0), rd.get('roi_pct', 0)]
+   597→    sells = [rn.get('sell_count', 0), rp.get('sell_count', 0), rd.get('sell_count', 0)]
+   598→    x = np.arange(len(cats))
+   599→    w = 0.35
+   600→    bars1 = ax.bar(x - w/2, rois, w, color=['#2ecc71', '#e74c3c', '#e67e22'], alpha=0.85, label='ROI %')
+   601→    ax2 = ax.twinx()
+   602→    bars2 = ax2.bar(x + w/2, sells, w, color=['#27ae60', '#c0392b', '#d35400'], alpha=0.5, label='Sell Count')
+   603→    ax.set_xticks(x)
+   604→    ax.set_xticklabels(cats)
+   605→    ax.set_ylabel('ROI %')
+   606→    ax2.set_ylabel('Sell Count')
+   607→    ax.set_title('MVRV Data Source Impact (Risk 1)', fontsize=11, fontweight='bold')
+   608→    lines1, labels1 = ax.get_legend_handles_labels()
+   609→    lines2, labels2 = ax2.get_legend_handles_labels()
+   610→    ax.legend(lines1 + lines2, labels1 + labels2, fontsize=8, loc='upper right')
+   611→
+   612→    # Panel 3: MVRV history
+   613→    ax = axes[1, 0]
+   614→    mvrv = master['mvrv'].values
+   615→    dates = master['date'].values
+   616→    ax.plot(dates, mvrv, color='#3498db', linewidth=0.8, alpha=0.8, label='MVRV')
+   617→    ax.axhline(y=2.5, color='#e74c3c', linestyle='--', linewidth=1.5, label='Path A (2.5)')
+   618→    ax.axhline(y=1.8, color='#f1c40f', linestyle='--', linewidth=1.5, label='Path B floor (1.8)')
+   619→    for i in range(1, len(mvrv)-1):
+   620→        if mvrv[i] > 2.0 and mvrv[i] > mvrv[i-1] and mvrv[i] > mvrv[i+1]:
+   621→            ax.annotate(f'{mvrv[i]:.2f}', xy=(dates[i], mvrv[i]), fontsize=8,
+   622→                       ha='center', va='bottom', color='#e74c3c', fontweight='bold')
+   623→    ax.set_title('MVRV History & Diminishing Peaks (Risk 7)', fontsize=11, fontweight='bold')
+   624→    ax.set_ylabel('MVRV Ratio')
+   625→    ax.legend(fontsize=8)
+   626→    ax.tick_params(axis='x', labelsize=7, rotation=30)
+   627→
+   628→    # Panel 4: Score components
+   629→    ax = axes[1, 1]
+   630→    comps = ['MVRV>2.5', 'MVRV>3.0', 'MVRV>3.5', 'MVRV>4.0',
+   631→             'Pct>=92%', 'Pct>=97%', 'Z>3', 'Z>4',
+   632→             'RSI>70', 'RSI>80', 'MACD x', 'HistDecl',
+   633→             'RSI Div', 'LTH>3', 'LTH>3.5', 'LTH>4',
+   634→             'ATH Prox', 'NUPL>.7', 'NUPL>.8']
+   635→    pts = [20, 15, 10, 10, 12, 8, 8, 7, 10, 7, 10, 5, 15, 8, 5, 5, 7, 5, 5]
+   636→    cbar = ['#e74c3c' if p >= 10 else '#e67e22' if p >= 7 else '#f1c40f' for p in pts]
+   637→    yp = range(len(comps))
+   638→    ax.barh(yp, pts, color=cbar, alpha=0.85, height=0.7)
+   639→    ax.set_yticks(yp)
+   640→    ax.set_yticklabels(comps, fontsize=8)
+   641→    ax.axvline(x=45, color='#e74c3c', linestyle='--', linewidth=2, label='Threshold (45)')
+   642→    ax.set_title('Score Components (Risk 8)', fontsize=11, fontweight='bold')
+   643→    ax.set_xlabel('Points')
+   644→    ax.legend(fontsize=8)
+   645→    ax.invert_yaxis()
+   646→
+   647→    plt.tight_layout(rect=[0, 0, 1, 0.96])
+   648→    plt.savefig(f'{DOWNLOAD_DIR}/phoenix_v5_risk_analysis.png', dpi=150, bbox_inches='tight')
+   649→    plt.close()
+   650→    print(f'  [CHART] Saved: {DOWNLOAD_DIR}/phoenix_v5_risk_analysis.png')
+   651→
+   652→
+   653→def main():
+   654→    print("\n" + "#" * 70)
+   655→    print("#  PHOENIX v5 - COMPREHENSIVE RISK ANALYSIS (10 STRESS TESTS)")
+   656→    print("#" * 70)
+   657→
+   658→    master = build_master_dataframe(years=5)
+   659→
+   660→    print("\n>>> Running Risk 1...")
+   661→    r1 = test_risk1_mvrv_dependency()
+   662→    print("\n>>> Running Risk 2...")
+   663→    r2 = test_risk2_path_b_cap()
+   664→    print("\n>>> Running Risk 3...")
+   665→    r3 = test_risk3_path_a_threshold()
+   666→    print("\n>>> Running Risk 4...")
+   667→    r4 = test_risk4_no_short_trend()
+   668→    print("\n>>> Running Risk 5...")
+   669→    r5 = test_risk5_proxy_detection()
+   670→    print("\n>>> Running Risk 6...")
+   671→    r6 = test_risk6_cooldown_extended_top()
+   672→    print("\n>>> Running Risk 7...")
+   673→    r7 = test_risk7_diminishing_peaks()
+   674→    print("\n>>> Running Risk 8...")
+   675→    r8 = test_risk8_score_composition()
+   676→    print("\n>>> Running Risk 9...")
+   677→    r9 = test_risk9_path_b_low_mvrv()
+   678→    print("\n>>> Running Risk 10...")
+   679→    r10 = test_risk10_min_sell_size()
+   680→
+   681→    all_results = {
+   682→        'risk1': r1, 'risk2': r2, 'risk3': r3, 'risk4': r4,
+   683→        'risk5': r5, 'risk6': r6, 'risk7': r7, 'risk8': r8,
+   684→        'risk9': r9, 'risk10': r10,
+   685→    }
+   686→
+   687→    # SUMMARY
+   688→    print("\n" + "#" * 70)
+   689→    print("#  RISK ANALYSIS SUMMARY")
+   690→    print("#" * 70)
+   691→    summary = [
+   692→        ("1. MVRV Data Dependency", "MEDIUM", f"ROI diff proxy={r1['roi_proxy_diff']:.1f}% delay={r1['roi_delay_diff']:.1f}%"),
+   693→        ("2. Path B 8% Cap", "HIGH", f"Path B sells={r2['path_b_count']} (DEAD CODE)"),
+   694→        ("3. Path A Threshold=45", "MEDIUM", f"Near misses={r3['near_miss_count']}, missed opps={r3['missed_opportunities']}"),
+   695→        ("4. No Short-Trend Sell", "LOW", f"Correctly removed, {r4['short_trend_days']} signals ignored"),
+   696→        ("5. Proxy Detection", "LOW", f"Accuracy={r5['accuracy']:.1f}%, FP={r5['fp']}"),
+   697→        ("6. Cooldown Timing", "LOW", f"{r6['zones']} zones, {r6['total_sells']} sells"),
+   698→        ("7. Diminishing Peaks", "HIGH", f"{r7['sell_loss']} sells lost if MVRV capped 2.3"),
+   699→        ("8. Score Composition", "MEDIUM", f"RSI blind spot: {r8['edge_days']} edge days"),
+   700→        ("9. Path B Low MVRV", "INFO", f"{r9['path_b_days']} Path B days (untested)"),
+   701→        ("10. 4% Min Sell", "LOW", f"{r10['total_sells']} sells, conservative sizing"),
+   702→    ]
+   703→    print(f"\n  {'Risk':<35} {'Severity':<10} {'Key Finding'}")
+   704→    print(f"  {'-'*85}")
+   705→    for name, sev, finding in summary:
+   706→        print(f"  {name:<35} {sev:<10} {finding}")
+   707→
+   708→    # Chart
+   709→    generate_risk_chart(all_results, master)
+   710→
+   711→    return all_results, summary
+   712→
+   713→
+   714→if __name__ == '__main__':
+   715→    main()
+   716→

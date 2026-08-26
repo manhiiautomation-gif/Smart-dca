@@ -1,0 +1,74 @@
+[
+  {
+    "url": "https://es.tradingview.com/scripts/macdhistogram",
+    "name": "Macdhistogram — Indicadores y estrategias",
+    "snippet": "A bearish MACD cross happens when the MACD line crosses below the signal line. This can show that momentum is weakening. divergence occurs when the MACD and ...",
+    "host_name": "es.tradingview.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=xQYrUSRrLYo",
+    "name": "MACD Indicator Trading Explained (For Beginners)",
+    "snippet": "This beginner-friendly trading tutorial explains the MACD indicator (Moving Average Convergence Divergence), how it works, and how traders ...\nThis beginner-friendly trading tutorial explains the MACD indicator (Moving Average Convergence Divergence), how it works, and how traders ...",
+    "host_name": "www.youtube.com",
+    "rank": 1,
+    "date": "Apr 2, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.quantifiedstrategies.com/macd-trading-strategy",
+    "name": "MACD Trading Strategy: Statistics, Facts And Historical",
+    "snippet": "The MACD histogram is a very reliable indicator. Backtests and statistics indicate that you expect to make money about 70% of the time. However, this is based ...",
+    "host_name": "www.quantifiedstrategies.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.a1trading.com/technical-analysis-course/macd-indicator",
+    "name": "Crossovers, Histogram Divergence, and Statistical Analysis",
+    "snippet": "Discover how to use the MACD indicator to spot trend reversals. Learn about bearish crossovers and the statistical analysis of MACD histogram divergence.\nWhen the MACD line crosses below the signal line, it is considered a bearish signal . This suggests that downward momentum may be increasing, prompting traders ... Read more",
+    "host_name": "www.a1trading.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.coinquant.ai/strategies/btc-macd-8h-backtest",
+    "name": "BTC MACD Strategy 8 Hour Backtest Results",
+    "snippet": "The MACD(12,26,9) Crossover strategy generated a total return of 28.28%, indicating strong profitability. The maximum drawdown of 28.87% suggests elevated risk.",
+    "host_name": "www.coinquant.ai",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://changelly.com/blog/macd-moving-average-convergence-divergence-in-crypto",
+    "name": "How to Use MACD in Crypto Trading: Strategies and Signals",
+    "snippet": "MACD divergence diagram with bearish and bullish crossover signals. Divergence between MACD and price often warns a trend shift is coming.\nNov 27, 2025 — MACD divergence diagram with bearish and bullish crossover signals . Divergence between MACD and price often warns a trend shift is coming. Read more",
+    "host_name": "changelly.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.investopedia.com/terms/m/macd.asp",
+    "name": "What Is MACD?",
+    "snippet": "a bearish signal indicates that it may be time to sell when MACD falls below the signal line. But when MACD rises above the signal line, the signal is bullish.\nThe MACD line is ... Read more",
+    "host_name": "www.investopedia.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.quantvps.com/blog/macd-trading-strategy-finding-perfect-entry-and-exit-points?srsltid=AfmBOoqcMRXIJzCjc2xdpmShKm9QIweVG_lXuy525OAAMMVV4UplzOHw",
+    "name": "MACD Trading Strategy: Finding Perfect Entry and Exit Points",
+    "snippet": "The MACD (Moving Average Convergence Divergence) is a trusted tool for traders looking to time their trades effectively.",
+    "host_name": "www.quantvps.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  }
+]
