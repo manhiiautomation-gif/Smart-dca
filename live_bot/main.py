@@ -315,6 +315,12 @@ def main():
             print(f'[BOT] State saved to {state_path}')
         except Exception as save_err:
             print(f'[BOT] FAILED to save state: {save_err}')
+        # Sync state to GitHub for dashboard
+        try:
+            from live_bot import sync_state
+            sync_state.sync_bot_state(bot_state)
+        except Exception as sync_err:
+            print(f'[BOT] State sync failed (non-fatal): {sync_err}')
         _release_lock()
 
 
