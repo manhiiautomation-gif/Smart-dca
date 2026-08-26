@@ -1,0 +1,914 @@
+     1→# Phoenix DCA Bot — Work Log
+     2→
+     3→---
+     4→Task ID: 2-b
+     5→Agent: Explore
+     6→Task: Investigate existing dashboard implementation for BTC Daily Briefing Dashboard
+     7→
+     8→Work Log:
+     9→- Read worklog.md (existing entries for Wave-9/10/11/12)
+    10→- Read scripts/generate_dashboard.py (1820 lines) — full dashboard generator
+    11→- Checked /download/ — no dashboard HTML files (only CSV/PNG/JSON data files)
+    12→- Checked indicator_history.json — file does NOT exist locally (created only on GitHub Actions runs)
+    13→- Read trade_log.json — 4 live buy trades (Aug 22-26, 2026), Bitkub THB, no sells
+    14→- Read .github/workflows/ — 9 workflows: dca-bitkub, dca-binance, dca-bot, dca-demo, dca-test, dashboard-trigger, dashboard-manual, deploy-pages, heartbeat
+    15→- Read PROJECT_CONTEXT.md — full architecture overview
+    16→- Read version.md — latest Wave 11 (Phase 2 Data Integrity), quality 95/100
+    17→- Read dashboard/netlify.toml + netlify/functions/trigger.js — Netlify config exists but deployment is GitHub Pages
+    18→- Read live_bot/state.py — found indicator_history schema definition
+    19→- Examined dashboard/dist/index.html — 61,442 bytes, 1138 lines
+    20→
+    21→Stage Summary:
+    22→
+    23→## EXISTING DASHBOARD ANALYSIS
+    24→
+    25→### 1. GENERATOR: scripts/generate_dashboard.py (1820 lines)
+    26→
+    27→**How it works:**
+    28→- Loads: state.json, trade_log.json (filtered to dry_run=False only), kill_switch.json, indicator_history.json
+    29→- Computes: portfolio value, ROI, avg buy price, unrealized P&L, change since last trade, next action prediction, DCA multiplier estimate
+    30→- Outputs: single-file HTML to `dashboard/dist/index.html`
+    31→- Uses ECharts library (CDN) for all charts
+    32→
+    33→### 2. HTML STRUCTURE & SECTIONS (top to bottom)
+    34→
+    35→The dashboard is a **single-file static HTML** page with inline CSS + JS. Dark theme (#0d1117), max-width 960px, GitHub-dark aesthetic.
+    36→
+    37→**Layout sections in order:**
+    38→1. **Modals/Overlays** (hidden by default): Toast container, Confirm overlay, Token Input Modal, Help Modal
+    39→2. **DRY RUN Banner** (conditional) — shown only when dry_run AND no real trades exist
+    40→3. **Header** — "Phoenix v5.1" + freshness badge + BOT ACTIVE/KILLED status badge
+    41→4. **Control Panel** — 3 buttons: Update (refresh), Kill/Resume Bot, Logs (link to GitHub Actions) + Token status
+    42→5. **Onboarding Hero** (conditional, empty state) — shown only when buy_count=0 and sell_count=0
+    43→6. **Row 1 (grid-2):**
+    44→   - **Portfolio Summary card:** Portfolio Value (hero), 24h/Since-last-trade change, BTC Holdings, Cash Balance, Avg Buy Price, Unrealized P&L, Avg Buy Size, ROI, Total Invested, Peak Value, Max Drawdown
+    45→   - **System Status card:** L1 Kill Switch, L2 Kill Switch, Exchange name, Last Run, Run Count, BTC Price, Next Run time
+    46→7. **DCA Status card:** "Last DCA" sub-card (multiplier, buy amount, base budget, reserve injection, sell amount) + "Next Round Estimate" sub-card (estimated multiplier, estimated buy amount, condition label)
+    47→8. **Row 2 (grid-2):**
+    48→   - **Indicators card:** MVRV (value + zone badge), MVRV %ile, MVRV Z-Score, RSI(14), MACD Hist, NUPL, SOPR (with source tag), SMA 200, SMA 365, Sell Path badge, Sell Score (with progress bar 0-100), Cooldown, ATH
+    49→   - **Sell Decision card:** "Next Expected Action" (color-coded: BUY EXPECTED/SELL WATCHING/HOLD/COOLDOWN), then Trade Statistics grid (Total Buys, Total Sells, BTC bought, BTC sold, Sell Proceeds, Total Reserve Used, Total Fees, Last Trade Date)
+    50→9. **Row 3: Portfolio Value Over Time** — ECharts line chart with buy/sell markers, colored by trade type
+    51→10. **Row 3b: Indicator History** — 5 ECharts mini-charts in 3-column grid: BTC Price (green), MVRV (blue, mark lines at 1.0 and 2.0), RSI (purple, mark lines at 30 and 70), SOPR (yellow, mark line at 1.0), NUPL (color by value, mark lines at 0 and 0.75)
+    52→11. **Row 4: Recent Trades** — Table with columns: Date, Type (BUY/SELL colored), Amount, BTC, Price, Fee. Shows last 10 trades, newest first
+    53→12. **Configuration card** (collapsible, purple border) — Exchange, Currency, USD/THB Rate, Daily DCA Budget, Max Buy/Trade, Max DCA Buys/Day, Reserve Floor, Max Reserve Inject, Boost Multiplier, Boost Price Ratio, Low Balance Alert, Buy Fee, Sell Fee. Has "วิธีตั้งค่า" (How to configure) button → Help Modal
+    54→13. **Footer** — "Phoenix v5.1 DCA Bot | Generated: {timestamp} | Auto-refresh: 5 min | GitHub link"
+    55→
+    56→**JavaScript (inline, bottom):**
+    57→- Token management (localStorage, custom modal — no prompt/alert)
+    58→- GitHub Actions workflow dispatch (direct from browser, replaces Netlify serverless)
+    59→- Actions: doUpdate(), doKillSwitch() (with confirm dialog), toast notifications
+    60→- Freshness badge calculation (Unix timestamp-based, timezone-correct)
+    61→- ECharts: Portfolio chart (line + scatter markers) + 5 indicator history charts
+    62→- Auto-refresh: `<meta http-equiv="refresh" content="300">` (5 min)
+    63→
+    64→### 3. INDICATOR_HISTORY.JSON SCHEMA
+    65→
+    66→File does NOT exist locally (only created on GitHub Actions runs). Path: same dir as trade_log.json.
+    67→
+    68→```json
+    69→[
+    70→  {
+    71→    "date": "2026-08-22 20:37",   // Thai TZ timestamp
+    72→    "price": 2513588.6,
+    73→    "mvrv": 1.85,
+    74→    "mvrv_source": "embedded",
+    75→    "mvrv_pct": 0.45,
+    76→    "mvrv_z": 0.82,
+    77→    "mvrv_z_source": "embedded",
+    78→    "rsi": 55.3,
+    79→    "macd_h": 120.5,
+    80→    "nupl": 0.46,
+    81→    "sopr": 1.02,
+    82→    "sopr_source": "bg",
+    83→    "sma_200": 2450000.0,
+    84→    "sma_365": 2300000.0,
+    85→    "macd_bear": false,
+    86→    "macd_declining": false,
+    87→    "rsi_divergence": false,
+    88→    "ath": 2650000.0,
+    89→    "sell_score": 15,
+    90→    "path_taken": "no-trade-mvrv-low",
+    91→    "in_bear": false,
+    92→    "cooldown": 0,
+    93→    "realized_price": 1350000.0,
+    94→    "lth_realized_price": 1550000.0,
+    95→    "lth_source": "bg",
+    96→    "rp_source": "bg",
+    97→    "refreshed": null,
+    98→    "killed": null,
+    99→    "kill_reason": null,
+   100→    "decision": {  // optional, only when trade occurred
+   101→      "buy_amount": 200.0,
+   102→      "sell_amount": 0.0,
+   103→      "multiplier": 2.0,
+   104→      ...
+   105→    }
+   106→  }
+   107→]
+   108→```
+   109→- Max 730 entries (~2 years daily data)
+   110→- Dashboard reads: date, price, mvrv, rsi, sopr, nupl (last 90 days for charts)
+   111→- Written by `append_indicator_history()` in state.py with fcntl LOCK_EX + atomic write
+   112→
+   113→### 4. TRADE_LOG.JSON CONTENT
+   114→
+   115→```json
+   116→[
+   117→  {"date":"2026-08-22 20:37","type":"buy","amount":200.0,"btc":7.957e-05,"price":2513588.6,"fee":0.0,"dry_run":false,"reserve":0.0},
+   118→  {"date":"2026-08-23 20:37","type":"buy","amount":200.0,"btc":7.912e-05,"price":2527820.13,"fee":0.0,"dry_run":false,"reserve":0.0},
+   119→  {"date":"2026-08-24 20:56","type":"buy","amount":200.0,"btc":7.795e-05,"price":2565875.22,"fee":0.0,"dry_run":false,"reserve":0.0},
+   120→  {"date":"2026-08-26 10:41","type":"buy","amount":200.0,"btc":7.743e-05,"price":2583089.58,"fee":0.0,"dry_run":false,"reserve":0.0}
+   121→]
+   122→```
+   123→- 4 live buys, all Bitkub THB, 200 THB each, no sells yet
+   124→- No `path`, `score` fields (only present on sell trades)
+   125→- Total invested: 800 THB, Total BTC: ~0.000315
+   126→
+   127→### 5. NETLIFY / DEPLOYMENT CONFIG
+   128→
+   129→**Dual deployment setup (Netlify exists but GitHub Pages is active):**
+   130→
+   131→- **dashboard/netlify.toml** — Static site config, publish from `dist/`, serverless functions in `netlify/functions/`, security headers (X-Frame-Options: DENY, nosniff)
+   132→- **dashboard/netlify/functions/trigger.js** — Serverless function: rate-limited (5/min/IP), validates action (update/kill/resume), dispatches GitHub Actions workflow. Legacy — dashboard JS now calls GitHub API directly from browser
+   133→- **Actual deployment: GitHub Pages** via `deploy-pages.yml` (reusable workflow, skip_build=true)
+   134→- **dashboard-trigger.yml** — Manual dispatch from dashboard or GitHub UI. Handles: update (refresh-only run), kill (L2 kill switch), resume (deactivate L2). Commits state + dashboard + deploys
+   135→
+   136→### 6. PROJECT VERSION & ARCHITECTURE
+   137→
+   138→**Latest version:** Wave 11 (Phase 2 Data Integrity), Quality Score: 95/100
+   139→- 11 bug fixes in Wave 11 (data integrity: actual fill prices, historical FX rates, correct searchsorted side, NaN guards)
+   140→- 6 bug fixes in Wave 10 (stability: Binance fee from fills, app-level error check, MVRV NaN fallback, Bitkub retry)
+   141→- Code quality refactoring in Wave 12 (-122 lines, 0 regressions)
+   142→
+   143→**Architecture:**
+   144→```
+   145→GitHub Actions (cron 03:00/03:20/03:40 UTC = 10:00/10:20/10:40 THB)
+   146→  → main.py (CLI)
+   147→    → engine.run_daily()
+   148→      ├── config.py          — env-var config, USD/THB rate
+   149→      ├── bitkub_client.py   — HMAC-SHA256 API, retry logic
+   150→      ├── binance_client.py  — Binance + 4 fallback price sources
+   151→      ├── indicators.py      — SMA, EMA, RSI, MACD (pure numpy)
+   152→      ├── strategy.py        — Phoenix v5.1 DCA + sell scoring
+   153→      ├── bg_metrics.py      — BGeometrics on-chain cache
+   154→      ├── mvrv_fetcher.py    — CoinMetrics + ahasignals web fallback
+   155→      ├── state.py           — JSON persistence, file locking
+   156→      ├── kill_switch.py     — L1 (env) + L2 (JSON) safety
+   157→      └── notifier.py        — Telegram alerts
+   158→    → generate_dashboard.py → dashboard/dist/index.html
+   159→    → git push → deploy-pages.yml → GitHub Pages
+   160→```
+   161→
+   162→### 7. WHAT THE EXISTING DASHBOARD LOOKS LIKE
+   163→
+   164→A **dark-themed single-page operations dashboard** (not a briefing/analysis report):
+   165→- **Purpose:** Real-time bot monitoring + remote control (kill/resume/refresh)
+   166→- **Focus:** Portfolio P&L, trade execution, system health, indicator values
+   167→- **Charts:** 1 portfolio value line chart + 5 indicator time-series mini-charts (Price, MVRV, RSI, SOPR, NUPL)
+   168→- **Language:** Thai (labels, status messages) + English (technical terms)
+   169→- **Data freshness:** Updated every bot run (3x/day), auto-refresh 5 min
+   170→- **Interactivity:** Kill/Resume bot, trigger refresh, set GitHub PAT token, collapsible config
+   171→- **NOT a briefing:** No market analysis, no narrative, no recommendations, no external news
+   172→
+   173→---
+   174→Task ID: Wave-12-Phase3
+   175→Agent: main
+   176→Task: Phase 3 Code Quality — ลด code duplication, แก้ circular import, ใช้ named constants
+   177→
+   178→Work Log:
+   179→- Phase 1: อ่านไฟล์ทั้งหมด (engine.py, strategy.py, state.py, notifier.py, config.py, bitkub_client.py, binance_client.py, indicators.py)
+   180→- Phase 2: ระบุ Code Quality issues 10 รายการ (CQ-1 ถึง CQ-10)
+   181→- Phase 3: Execute refactoring:
+   182→  - CQ-1 (HIGH): ลบ duplicate constant definitions ใน strategy.py (-48 lines)
+   183→  - CQ-2 (HIGH): ลบ circular import (strategy.py ไม่ import จาก engine แล้ว)
+   184→  - CQ-3 (MEDIUM): Refactor _snapshot_indicators ใช้ _resolve_onchain_metrics + _build_indicators_snapshot (-30 lines)
+   185→  - CQ-4 (MEDIUM): load_trade_log ใช้ _load_json_locked แทน inline lock pattern
+   186→  - CQ-5 (MEDIUM): append_trade_log ใช้ _atomic_json_write สำหรับ write step (-15 lines)
+   187→  - CQ-6 (MEDIUM): append_indicator_history ใช้ _atomic_json_write (-15 lines)
+   188→  - CQ-7 (HIGH): False positive — parenthesis ถูกต้องอยู่แล้ว
+   189→  - CQ-8 (LOW): ใช้ named DEPLOY_RATE_* constants แทน inline magic numbers
+   190→  - CQ-9 (LOW): ลบ duplicate metric unpacking ใน refresh_dashboard + run_demo (-40 lines)
+   191→  - CQ-10 (LOW): False positive
+   192→  - Bonus: แก้ pre-existing IndentationError ใน strategy.py path_a_ext
+   193→- Phase 4: Verify — ทุก import ผ่าน, integration test ผ่าน, RSI compute ผ่าน
+   194→- Phase 5: Commit + push (377e3a2)
+   195→
+   196→Stage Summary:
+   197→- CQ-1: Duplicate constants removed (-48 lines)
+   198→- CQ-2: Circular import removed (strategy self-contained)
+   199→- CQ-3: _snapshot_indicators uses shared helpers (-30 lines)
+   200→- CQ-4: load_trade_log uses _load_json_locked
+   201→- CQ-5: append_trade_log uses _atomic_json_write
+   202→- CQ-6: append_indicator_history uses _atomic_json_write
+   203→- CQ-8: Inline deploy_rate replaced with named constants
+   204→- CQ-9: refresh_dashboard + run_demo unpacking removed (-40 lines)
+   205→- Net: -122 lines, 0 regressions
+   206→- Quality score: 93/100 PASS
+   207→
+   208→---
+   209→Task ID: Wave-11-Phase2
+   210→Agent: main + 3 analysis sub-agents + 1 reviewer
+   211→Task: Phase 2 Data Integrity — แก้ไข 11 ปัญหาที่ข้อมูลไม่ตรงค่าจริง
+   212→
+   213→Work Log:
+   214→- Phase 1: ส่ง 3 sub-agents วิเคราะห์ parallel (engine.py, strategy.py, state/client/notifier)
+   215→- พบ 11 ปัญหา Data Integrity: 1 HIGH, 8 MEDIUM, 2 LOW
+   216→- Phase 3: อ่านไฟล์ที่เกี่ยวข้องยืนยัน line numbers + วางแผนแก้ 11 issues
+   217→- Phase 4: Execute ทีละ issue:
+   218→  - DI-1 (HIGH): Timeout-unverified buy → zero decision['buy_amount'] ทั้ง 2 path
+   219→  - H3: คำนวณ buy_fill_price/sell_fill_price จาก actual fills ส่งไป trade_log + update_state
+   220→  - DI-2: adjusted_invested sell fraction ใช้ actual_sell แทน decision['sell_amount']
+   221→  - DI-3: Binance market_sell return net-of-fee (cummulativeQuoteQty - fee)
+   222→  - C7: เพิ่ม _fetch_monthly_usd_thb_rates() ดึง historical rates จาก CoinGecko BTC price ratio
+   223→  - S1: searchsorted side='left' → side='right' ทั้ง 4 ที่ (live + 3 backtest files)
+   224→  - S2: เพิ่ม nupl_valid NaN guard (same pattern as B24)
+   225→  - S3: เพิ่ม rp_valid sanity check (realized_price < 5x price)
+   226→  - DI-6: mvrv_pct/mvrv_z default 0 → float('nan') ทั้ง 4 ที่
+   227→  - DI-4: format_report() รับ actual_buy/actual_sell, แสดงเมื่อต่างจาก intended
+   228→  - DI-5: MVRV NaN แสดง 'N/A' แทน 'nan' ใน Telegram
+   229→- Phase 5: Code review → พบ 2 issues → แก้ทันที:
+   230→  - S1 backtest searchsorted ไม่ sync (3 files: _shared.py, data_pipeline.py, style_phoenix_v5_1.py)
+   231→  - C7 fragile float equality ใน month identification → เปลี่ยนใช้ derived_set
+   232→- Phase 6: Quality scoring 95/100 PASS
+   233→
+   234→Stage Summary:
+   235→- DI-1 (HIGH): Timeout-unverified buy zero decision['buy_amount'] ป้องกัน phantom state counters
+   236→- H3 (MEDIUM): Actual fill prices ใน trade_log + update_state (cost/qty, proceeds/qty)
+   237→- DI-2 (MEDIUM): adjusted_invested sell fraction ใช้ actual proceeds
+   238→- DI-3 (MEDIUM): Binance sell proceeds normalized to net-of-fee
+   239→- C7 (MEDIUM): Historical USD/THB rates per month แทน single today's rate
+   240→- S1 (MEDIUM): MVRV percentile side='right' ทั้ง 4 ที่ (live + backtest sync)
+   241→- S2 (MEDIUM): NUPL explicit NaN guard
+   242→- S3 (MEDIUM): realized_price sanity check (< 5x price)
+   243→- DI-6 (MEDIUM): mvrv_pct/mvrv_z default NaN ไม่ใช่ 0
+   244→- DI-4 (LOW): Telegram แสดง actual exchange fill amounts
+   245→- DI-5 (LOW): MVRV NaN แสดง N/A ใน Telegram
+   246→
+   247→---
+   248→Task ID: Wave-10-Phase1
+   249→Agent: main + 3 analysis sub-agents + 1 reviewer
+   250→Task: วิเคราะห์ระบบทั้งหมด 3 ทีม parallel + แก้ไข Phase 1 Stability & Correctness (6 issues)
+   251→
+   252→Work Log:
+   253→- Phase 1: ส่ง 3 sub-agents วิเคราะห์ parallel (engine.py, config/strategy/notifier/clients, dashboard/workflows)
+   254→- พบปัญหารวม 50+ รายการ (Critical 7, High 27, Medium 34, Low 16)
+   255→- จัดเป็น 5-phase roadmap (24 tasks)
+   256→- Phase 3: อ่านโค้ดทุกไฟล์ที่เกี่ยวข้องยืนยัน line numbers + วางแผนแก้ 6 issues
+   257→- Phase 4: Execute ทีละ issue:
+   258→  - C4: Binance market_buy/sell ดึง fee จาก fills array + commissionAsset check (USDT only)
+   259→  - C3: เพิ่ม Binance app-level error check (code field in HTTP 200 response)
+   260→  - H9: เพิ่ม Bitkub _retry_request() (exponential backoff) wrap get_price, get_balances, market_sell
+   261→  - C5: เปลี่ยน MVRV percentile/zscore คืน NaN แทน 0.0 + NaN guard ทั้ง 5 ที่ใน engine.py
+   262→  - H1: bot_state['cooldown'] → .get('cooldown', 0)
+   263→  - H2: bot_state['peak_value'] → .get('peak_value', 0.0) + local variable
+   264→  - C2: Timeout buy verify ด้วย balance re-fetch (5s delay) แทน assume executed
+   265→- Phase 5: Code review → พบ 2 MEDIUM issues → แก้ทันที:
+   266→  - Missing NaN guards อีก 2 ที่ (idempotency-skip, kill-switch snapshot)
+   267→  - Binance fee ignore commissionAsset (เพิ่ม USDT-only filter)
+   268→- Phase 6: Quality scoring 93/100 PASS
+   269→
+   270→Stage Summary:
+   271→- C2 (CRITICAL): Timeout buy ใช้ balance re-fetch verify แทน blind assumption
+   272→- C3 (CRITICAL): Binance app-level error check ใน market_buy + market_sell
+   273→- C4 (CRITICAL): Binance fee จาก fills array (USDT only, skip BNB)
+   274→- C5 (CRITICAL): MVRV NaN fallback แทน 0.0 + 5 location NaN guards
+   275→- H1 (HIGH): KeyError crash guard สำหรับ cooldown
+   276→- H2 (HIGH): KeyError crash guard สำหรับ peak_value
+   277→- H9 (HIGH): Bitkub retry logic สำหรับ get_price, get_balances, market_sell
+   278→
+   279→---
+   280→Task ID: 2-a
+   281→Agent: Explore
+   282→Task: Investigate Phoenix bot data sources for BTC Daily Briefing Dashboard
+   283→
+   284→Work Log:
+   285→- Read worklog.md (existing entries for Wave-10/11/12)
+   286→- Read live_bot/state.json — mapped full schema with 25+ fields
+   287→- Read live_bot/strategy.py — identified all indicators, sell scoring, reserve deployment
+   288→- Read live_bot/engine.py (1290 lines) — full pipeline: fetch→indicators→strategy→trade→notify
+   289→- Read live_bot/__init__.py — minimal (1-line comment)
+   290→- Read live_bot/config.py — env-var config, USD/THB rate fetching
+   291→- Read live_bot/indicators.py — pure numpy indicator calculations (SMA, EMA, RSI, MACD, divergence)
+   292→- Read live_bot/bg_metrics.py — BGeometrics API client with file cache (678 lines)
+   293→- Read live_bot/mvrv_fetcher.py — CoinMetrics + ahasignals web fallback for MVRV
+   294→- Read live_bot/binance_client.py — Binance + 4 fallback price/kline sources
+   295→- Read live_bot/bitkub_client.py — Bitkub API + Binance Vision for OHLCV
+   296→- Read live_bot/notifier.py — Telegram notification sender
+   297→- Read live_bot/state.py — state persistence, trade log, indicator history
+   298→- Read scripts/smart_dca/data_pipeline.py — backtest data pipeline
+   299→- Checked .github/workflows/ — 9 workflow files found
+   300→- Checked dashboard/ — Netlify-deployed static HTML + serverless trigger
+   301→- Checked trade_log.json, bg_cache.json, usd_thb_rate.json
+   302→
+   303→Stage Summary:
+   304→
+   305→## 1. STATE.JSON FULL SCHEMA
+   306→```json
+   307→{
+   308→  // Trading counters
+   309→  "cooldown": int,              // sell cooldown days remaining
+   310→  "total_invested": float,      // total THB/USDT spent on buys
+   311→  "adjusted_invested": float,   // cost basis after proportional sell reductions
+   312→  "total_sell_proceeds": float, // total received from sells (net-of-fee)
+   313→  "total_reserve_injected": float, // total reserve used for buy-the-dip
+   314→  "peak_value": float,          // all-time high portfolio value
+   315→  "max_drawdown": float,        // worst drawdown (0.0-1.0)
+   316→  "sell_count": int,
+   317→  "buy_count": int,
+   318→  "total_btc_bought": float,
+   319→  "total_btc_sold": float,
+   320→  "cumulative_fees": float,
+   321→  "run_count": int,
+   322→  "sell_proceeds_reserve": float, // cash from BTC sales available for dip buying
+   323→
+   324→  // Timestamps
+   325→  "last_run_date": "YYYY-MM-DD",    // Thai TZ, idempotency guard
+   326→  "last_trade_date": "YYYY-MM-DD HH:MM",
+   327→  "last_sell_date": "YYYY-MM-DD HH:MM",
+   328→
+   329→  // Last computed indicators (snapshot for dashboard)
+   330→  "last_indicators": {
+   331→    "price": float, "mvrv": float|null, "mvrv_source": str,
+   332→    "mvrv_pct": float|null, "mvrv_z": float|null, "mvrv_z_source": str,
+   333→    "rsi": float, "macd_h": float, "nupl": float,
+   334→    "sopr": float|null, "sopr_source": str,
+   335→    "sma_200": float|null, "sma_365": float|null,
+   336→    "macd_bear": bool, "macd_declining": bool, "rsi_divergence": bool,
+   337→    "ath": float, "sell_score": int, "path_taken": str,
+   338→    "in_bear": bool, "cooldown": int,
+   339→    "realized_price": float|null, "lth_realized_price": float|null,
+   340→    "lth_source": str, "rp_source": str,
+   341→    "refreshed": bool|null, "killed": bool|null, "kill_reason": str|null
+   342→  },
+   343→
+   344→  // Portfolio state
+   345→  "last_btc_balance": float, "last_cash_balance": float,
+   346→  "last_portfolio_value": float, "last_price": float,
+   347→  "last_exchange_currency": "THB"|"USDT",
+   348→  "last_exchange_name": "BITKUB"|"BINANCE",
+   349→  "last_dry_run": bool,
+   350→
+   351→  // Dry-run virtual balances
+   352→  "dry_run_cash": float|null, "dry_run_btc": float|null,
+   353→  "dry_run_sell_proceeds": float|null,
+   354→
+   355→  // Misc
+   356→  "price_history": [],
+   357→  "last_decision": {
+   358→    "buy_amount": float, "sell_amount": float,
+   359→    "multiplier": float, "base_budget": float,
+   360→    "reserve_injection": float, "monday_boost": float,
+   361→    "in_dca_window": bool
+   362→  },
+   363→  "realized_price": float|null, "lth_realized_price": float|null,
+   364→  "lth_source": str|null, "rp_source": str|null
+   365→}
+   366→```
+   367→
+   368→## 2. INDICATORS COMPUTED (14 total)
+   369→
+   370→### Technical (from 500-day kline closes, pure numpy):
+   371→- **SMA-14**, **SMA-30**, **SMA-200**, **SMA-365** — Simple Moving Averages
+   372→- **RSI(14)** — Wilder smoothing, full series via compute_all_rsi()
+   373→- **MACD(12,26,9)** — line, signal, histogram + full histogram series
+   374→- **macd_cross_bear** — MACD crossed below signal on latest bar
+   375→- **macd_hist_declining** — histogram declining 4+ consecutive bars
+   376→- **rsi_divergence** — bearish RSI divergence (price near 40d high, RSI 8+ pts below its 40d high)
+   377→- **ATH** — all-time high from closes array
+   378→
+   379→### On-Chain (external APIs with fallback chain):
+   380→- **MVRV** — BGeometrics cache → embedded history → CoinMetrics web → ahasignals scrape
+   381→- **MVRV Percentile** — 365-day rolling from embedded/BG history (searchsorted side='right')
+   382→- **MVRV Z-Score** — 365-day rolling (mean/std) from embedded/BG history
+   383→- **NUPL** — derived: 1 - 1/MVRV
+   384→- **Realized Price** — BGeometrics (BG) → derived: price/MVRV
+   385→- **LTH Realized Price** — BGeometrics (BG) → proxy: RP × dynamic multiplier (1.10-1.25x)
+   386→- **STH-SOPR** — BGeometrics (BG) → proxy: price/SMA14
+   387→
+   388→## 3. SELL SCORING SYSTEM
+   389→Score 0-122+ possible, with triple-trigger gate:
+   390→- MVRV thresholds: +20 (>2.5), +15 (>3.0), +10 (>3.5), +10 (>4.0)
+   391→- RSI partial: +5 (>65), +5 (>70), +7 (>80)
+   392→- MVRV percentile: +12 (≥0.92), +8 (≥0.97)
+   393→- MVRV Z-score: +8 (>3.0), +7 (>4.0)
+   394→- MACD signals: +10 (bear cross), +5 (declining histogram)
+   395→- RSI divergence: +15
+   396→- LTH RP ratio: +8 (>3x), +5 (>3.5x), +5 (>4x)
+   397→- ATH proximity: +7 (>97% of ATH)
+   398→- NUPL: +5 (>0.70), +5 (>0.80)
+   399→- **BEAR BLOCK**: -200 if price < SMA-200 (kills sell in bear market)
+   400→- **Gate**: score zeroed unless Path A (MVRV>2.5), A-Ext (2.0-2.5 + pct/z≥48), or B (pct≥0.92 + MVRV>2.0)
+   401→
+   402→## 4. EXTERNAL API ENDPOINTS
+   403→
+   404→### Live Trading:
+   405→| API | Endpoint | Purpose | Auth |
+   406→|-----|----------|---------|------|
+   407→| **Binance** | `api.binance.com/api/v3/ticker/price` | BTC/USDT price | Public |
+   408→| **Binance** | `api.binance.com/api/v3/klines` | 500d daily klines | Public |
+   409→| **Binance** | `api.binance.com/api/v3/account` | Balances | HMAC-SHA256 |
+   410→| **Binance** | `api.binance.com/api/v3/order` | Market buy/sell | HMAC-SHA256 |
+   411→| **Bitkub** | `api.bitkub.com/api/v3/market/ticker` | BTC/THB price | Public |
+   412→| **Bitkub** | `api.bitkub.com/api/v3/market/wallet` | Balances | HMAC-SHA256 |
+   413→| **Bitkub** | `api.bitkub.com/api/v3/market/place-bid` | Market buy | HMAC-SHA256 |
+   414→| **Bitkub** | `api.bitkub.com/api/v3/market/place-ask` | Market sell | HMAC-SHA256 |
+   415→
+   416→### On-Chain Data:
+   417→| API | Endpoint | Metrics | Auth |
+   418→|-----|----------|---------|------|
+   419→| **BGeometrics** | `api.bgeometrics.com/v1/{metric}?token=` | STH-SOPR, LTH-RP, RP, MVRV, MVRV-Z, aSOPR, LTH-SOPR, STH-RP | Bearer token (env) |
+   420→| **CoinMetrics** | `community-api.coinmetrics.io/v4/timeseries/asset-metrics` | CapMVRVCur (MVRV) | Free, no key |
+   421→| **ahasignals.com** | `ahasignals.com/current-bitcoin-mvrv-z-score` | MVRV (scrape) | None |
+   422→
+   423→### Price Fallbacks (when Binance geo-blocked, 451):
+   424→| API | Endpoint | Purpose |
+   425→|-----|----------|---------|
+   426→| **Kraken** | `api.kraken.com/0/public/Ticker` | BTC/USD price |
+   427→| **Kraken** | `api.kraken.com/0/public/OHLC` | Daily klines |
+   428→| **KuCoin** | `api.kucoin.com/api/v1/market/orderbook/level1` | BTC/USDT price |
+   429→| **KuCoin** | `api.kucoin.com/api/v1/market/candles` | Daily klines |
+   430→| **CoinCap** | `api.coincap.io/v2/assets/bitcoin` | Price |
+   431→| **CoinCap** | `api.coincap.io/v2/assets/bitcoin/history` | Daily history |
+   432→| **CoinGecko** | `api.coingecko.com/api/v3/simple/price` | BTC/USD price |
+   433→| **CoinGecko** | `api.coingecko.com/api/v3/coins/bitcoin/market_chart` | Klines/OHLC |
+   434→| **Binance Vision** | `data.binance.vision/data/spot/monthly/klines/BTCUSDT/1d/` | Static CSV/ZIP klines (not geo-blocked) |
+   435→
+   436→### FX Rate:
+   437→| API | Endpoint | Purpose |
+   438→|-----|----------|---------|
+   439→| **Bitkub** | `api.bitkub.com/api/v3/market/ticker?sym=USDT_THB` | Live USD/THB rate |
+   440→| **CoinGecko** | BTC/THB + BTC/USD market_chart ratio | Historical USD/THB monthly rates |
+   441→
+   442→### Notifications:
+   443→| API | Endpoint | Purpose |
+   444→|-----|----------|---------|
+   445→| **Telegram** | `api.telegram.org/bot{token}/sendMessage` | Trade reports, alerts |
+   446→
+   447→## 5. LOCAL DATA FILES / CACHES
+   448→
+   449→| File | Format | Content | Updated |
+   450→|------|--------|---------|--------|
+   451→| `live_bot/state.json` | JSON | Full bot state (schema above) | Every run |
+   452→| `trade_log.json` | JSON array | Trade records: date, type, amount, btc, price, fee, dry_run, reserve, path, score | Every trade |
+   453→| `live_bot/bg_cache.json` | JSON | BGeometrics cache: {metrics: {sth_sopr: {date: val}, lth_realized_price, realized_price, mvrv, mvrv_zscore, ...}} | Incremental, immutable history |
+   454→| `live_bot/_mvrv_history.py` | Python array | Embedded MVRV daily values (~5 years) | Auto-updated from web |
+   455→| `live_bot/usd_thb_rate.json` | JSON | {rate, date, source} | Daily |
+   456→| `live_bot/indicator_history.json` | JSON array | Daily indicator snapshots (up to 730 entries = 2 years) | Every run + refresh |
+   457→| `kill_switch.json` | JSON | {active: bool, reason, activated_by, activated_at} | Manual |
+   458→| `dashboard/dist/index.html` | Static HTML | Full dashboard (single-file, ~97KB generator) | Every run |
+   459→
+   460→## 6. EXISTING DASHBOARD / WEB INTERFACE
+   461→- **Dashboard**: Static HTML generated by `scripts/generate_dashboard.py` (97KB generator)
+   462→  - Reads: state.json, trade_log.json, kill_switch.json, indicator_history.json
+   463→  - Deployed to: Netlify (`dashboard/dist/index.html`)
+   464→  - Features: portfolio value, indicators, trade log, kill switch, refresh button
+   465→  - Serverless trigger: `dashboard/netlify/functions/trigger.js` (calls GitHub Actions workflow_dispatch)
+   466→  - Actions supported: update, kill, resume
+   467→  - Rate limited: 5 calls/min per IP
+   468→  - Protected by: Netlify password + GitHub PAT
+   469→- **GitHub Actions** runs the bot 3x/day (03:00, 03:20, 03:40 UTC = 10:00, 10:20, 10:40 THB)
+   470→  - Primary: `dca-bitkub.yml` (scheduled, live)
+   471→  - Secondary: `dca-bot.yml` (manual, Binance/Bitkub)
+   472→  - Dashboard: `dashboard-trigger.yml` (manual dispatch)
+   473→  - Demo: `dca-demo.yml`
+   474→  - Heartbeat: `heartbeat.yml`
+   475→
+   476→## 7. KEY FINDINGS FOR BRIEFING DASHBOARD
+   477→- **All 14 indicators are already computed** and stored in `state.json` + `indicator_history.json`
+   478→- **state.json** is the single source of truth — updated every run with latest indicators, balances, decisions
+   479→- **indicator_history.json** has time-series data (up to 730 daily snapshots) — ideal for charts
+   480→- **bg_cache.json** has years of on-chain history (STH-SOPR from 2022, LTH-RP, RP, MVRV)
+   481→- **trade_log.json** has all trades with fill prices, fees, dry_run flag
+   482→- **Backtest pipeline** (data_pipeline.py) uses same sources: Binance + CoinMetrics + BGeometrics
+   483→- **No REST API exists** — all data is file-based (JSON), read by the static HTML dashboard
+   484→- **For a new briefing dashboard**, the data is ready: just read state.json + indicator_history.json + bg_cache.json + trade_log.json---
+   485→Task ID: 1
+   486→Agent: Main Agent (team-dev workflow)
+   487→
+   488→Work Log:
+   489→- Analyzed existing Phoenix bot data sources (state.json, indicator_history.json, trade_log.json)
+   490→- Analyzed existing dashboard (generate_dashboard.py, 61KB HTML)
+   491→- Planned BTC Daily Briefing Dashboard architecture (Option A+C)
+   492→- Created /src/lib/btc-data.ts: data layer reading Phoenix bot state files
+   493→- Created /src/app/api/briefing/route.ts: API endpoint with 5-min cache
+   494→- Created /src/app/page.tsx: Full dashboard with 6 sections
+   495→- Fixed data-pipeline.py LTH-RP bug (master.get() on Series)
+   496→- Fixed trade_log.json field name mismatch (amount vs amount_thb)
+   497→- Fixed Turbopack JSX parsing issue with inline Date expression
+   498→
+   499→Stage Summary:
+   500→- BTC Daily Briefing Dashboard running at localhost:3000
+   501→- Shows: Price hero, Phoenix bot status, On-Chain Pulse, Technical Momentum, Key Levels, Market Narrative, Recent Trades
+   502→- All data from Phoenix bot state.json (real-time, no new API calls needed)
+   503→- Screenshot saved: /home/z/my-project/download/btc-briefing-dashboard.png
+   504→
+   505→---
+   506→Task ID: 2-a
+   507→Agent: Data Flow Agent
+   508→Task: Investigate git push issue — bot_state.json 404 on raw.githubusercontent.com
+   509→
+   510→Work Log:
+   511→- Read /home/z/my-project/live_bot/sync_state.py (147 lines) fully
+   512→- Checked git remote -v in /home/z/btc-signal-analyzer: origin → https://github.com/manhiiautomation-gif/btc-signal-analyzer.git (no auth)
+   513→- Checked git branch -vv: `* main 7e200a5 ...` with NO `[origin/main]` tracking — upstream was NEVER set
+   514→- Checked git log --oneline -5: 4 local commits (initial + 3 bot state syncs), reflog shows only local commits
+   515→- Verified .git/refs/remotes/origin/ directory does NOT EXIST — git fetch has never succeeded
+   516→- Confirmed git for-each-ref refs/remotes/ returns nothing — zero remote tracking refs in the entire repo
+   517→- Tested git fetch origin: FAILS with `fatal: could not read Username for 'https://github.com': No such device or address` (no auth, no credential helper)
+   518→- Verified git config --list: remote.origin.fetch=+refs/heads/*:refs/remotes/origin/* IS configured, but never executed
+   519→- Checked push.default: not set (defaults to `simple` for git 2.47.3)
+   520→- Checked credential.helper: not set globally or locally
+   521→- Verified token extraction from my-project: ghp_ token (40 chars), extraction logic works correctly
+   522→- Built local bare-repo test: confirmed `git push <url> main` IS syntactically valid and pushes correctly
+   523→- Confirmed `git push <url> main` does NOT create remote tracking refs (refs/remotes/origin/main) — this is by design
+   524→- Verified output/bot_state.json exists in local main branch (git ls-tree, git show)
+   525→
+   526→Stage Summary:
+   527→
+   528→## ROOT CAUSE ANALYSIS
+   529→
+   530→### (a) Exact Root Cause
+   531→
+   532→**The problem has TWO layers:**
+   533→
+   534→**Layer 1 — Remote tracking refs are non-existent.**
+   535→The btc-signal-analyzer repo was created via `git init` locally (reflog shows `commit (initial)`) and was NEVER cloned from GitHub. Consequently:
+   536→- `git fetch origin` has never been successfully run
+   537→- `.git/refs/remotes/origin/` directory does not exist at all
+   538→- `origin/main` does not exist (`git rev-parse origin/main` → fatal: unknown revision)
+   539→- No upstream tracking is configured (`git branch -vv` shows bare `main` with no `[origin/main]`)
+   540→- `git fetch origin` CANNOT work because the remote URL (`https://github.com/...`) has no authentication and no credential helper is configured
+   541→
+   542→**Layer 2 — `git push <auth_url> main` (line 120) does NOT update remote tracking refs.**
+   543→When `git push` is given a raw URL instead of a remote name, git pushes the objects and updates the REMOTE refs, but it does NOT create or update any local remote tracking refs (`refs/remotes/origin/*`). This is by design in git. The script's approach of pushing via authenticated URL bypasses the remote configuration entirely, so `origin/main` is never born.
+   544→
+   545→**Why the file is 404 on raw.githubusercontent.com:**
+   546→The push syntax `git push <url> main` IS valid (confirmed via local bare-repo testing — it correctly pushes `refs/heads/main` to the remote). If the push is reaching GitHub with a valid token, the most likely reason for 404 is that **the btc-signal-analyzer repo is PRIVATE** — raw.githubusercontent.com returns 404 (not 403) for private repos to avoid information leakage. If the repo is public and the push is failing, the error would be in `push_result.stderr` (exit code non-zero) and the script would return False. Investigate the actual stderr output from a live push run to confirm.
+   547→
+   548→### (b) Minimal Fix in sync_state.py
+   549→
+   550→Replace the URL-based push (lines 107-127) with remote-name-based push. The key change: temporarily set the remote's push URL to include the token, push using the remote name (which DOES update tracking refs), then restore the URL.
+   551→
+   552→```python
+   553→# CURRENT (broken):
+   554→push_result = subprocess.run(
+   555→    ['git', 'push', auth_url, 'main'],  # pushes via URL — no tracking ref update
+   556→    cwd=repo, capture_output=True, text=True, timeout=60
+   557→)
+   558→
+   559→# FIXED:
+   560→# Temporarily set push URL with token, push via remote name, restore
+   561→subprocess.run(
+   562→    ['git', 'remote', 'set-url', '--push', 'origin', auth_url],
+   563→    cwd=repo, capture_output=True, text=True, timeout=10
+   564→)
+   565→push_result = subprocess.run(
+   566→    ['git', 'push', 'origin', 'main'],  # pushes via remote name — updates tracking refs
+   567→    cwd=repo, capture_output=True, text=True, timeout=60
+   568→)
+   569→# Restore clean push URL (no token in config)
+   570→subprocess.run(
+   571→    ['git', 'remote', 'set-url', '--push', 'origin', base_url],
+   572→    cwd=repo, capture_output=True, text=True, timeout=10
+   573→)
+   574→```
+   575→
+   576→Also remove the `else` branch (lines 123-127) since the token path should always be used, and remove the URL-based push entirely. The `--push` flag ensures only the push URL is modified, keeping the fetch URL clean (or alternatively, also set the fetch URL for `git fetch` to work).
+   577→
+   578→### (c) One-Time Git Commands to Fix btc-signal-analyzer Repo State
+   579→
+   580→```bash
+   581→cd /home/z/btc-signal-analyzer
+   582→
+   583→# Step 1: Extract token from my-project and configure origin with auth
+   584→TOKEN=$(git -C /home/z/my-project config --get remote.origin.url | sed 's|https://||;s|@.*||')
+   585→git remote set-url origin "https://${TOKEN}@github.com/manhiiautomation-gif/btc-signal-analyzer.git"
+   586→
+   587→# Step 2: Push all local commits AND set up upstream tracking
+   588→# (this creates origin/main and sets the tracking branch)
+   589→git push -u origin main
+   590→
+   591→# Step 3: Verify tracking is set up
+   592→git branch -vv   # should now show [origin/main]
+   593→git rev-parse origin/main   # should succeed
+   594→
+   595→# Step 4 (optional, recommended): Strip token from stored URL and use credential helper
+   596→git remote set-url origin "https://github.com/manhiiautomation-gif/btc-signal-analyzer.git"
+   597→# Then either configure a credential helper, or rely on the script's set-url --push approach
+   598→```
+   599→
+   600→**Note:** Step 1 stores the token in the git config. If security is a concern, use Step 4 to remove it and rely on the script's `set-url --push` approach for future pushes. Alternatively, configure `git credential-store` or `GIT_ASKPASS` for persistent auth.
+   601→
+   602→## KEY EVIDENCE TABLE
+   603→
+   604→| Check | Result | Implication |
+   605→|-------|--------|-------------|
+   606→| `git branch -vv` | `main` with no `[origin/main]` | No upstream tracking ever set |
+   607→| `git rev-parse origin/main` | fatal: unknown revision | Remote tracking ref does not exist |
+   608→| `ls .git/refs/remotes/origin/` | No such file or directory | git fetch never succeeded |
+   609→| `git for-each-ref refs/remotes/` | (empty) | Zero remote refs in entire repo |
+   610→| `git reflog` | Only local commits, no fetch/pull | Confirms no remote interaction ever |
+   611→| `git fetch origin` | fatal: could not read Username | No auth in remote URL, no credential helper |
+   612→| `git config push.default` | (unset, defaults to `simple`) | Not the issue |
+   613→| `git config credential.helper` | (unset) | Not configured |
+   614→| `git remote -v` | https://github.com/.../btc-signal-analyzer.git | No token in URL |
+   615→| Token extraction | ghp_ token, 40 chars, works | Token is available |
+   616→| Local `git push <url> main` test | Succeeds, creates remote branch | Syntax is valid |
+   617→| `git push <url> main` tracking update | Does NOT update refs/remotes/origin/* | Confirmed by design |
+   618→
+   619→---
+   620→Task ID: 2-b
+   621→Agent: Integration Agent
+   622→Task: Dashboard URLs check — verify all 5 data source endpoints, repo visibility, and graceful failure handling
+   623→
+   624→## URL TEST RESULTS
+   625→
+   626→| # | URL | HTTP Status | Verdict |
+   627→|---|-----|-------------|---------|
+   628→| 1 | `https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT` | **200** | ✅ Working. Returns valid JSON with lastPrice, priceChangePercent, quoteVolume |
+   629→| 2 | `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=30` | **200** | ✅ Working. Returns 30 daily candles for sparkline |
+   630→| 3 | `https://api.bitkub.com/api/market/ticker?sym=THB_BTC` | **200** (body: `{"error": 99}`) | ⚠️ HTTP 200 but returns API error 99. The `sym=` query parameter appears broken/deprecated. THB_BTC data IS available when calling the endpoint WITHOUT `sym=` (returns full ticker with THB_BTC.last = 2,563,428.73) |
+   631→| 4 | `https://api.alternative.me/fng/?limit=1` | **200** | ✅ Working. Returns value=65, classification="Greed" |
+   632→| 5 | `https://raw.githubusercontent.com/manhiiautomation-gif/btc-signal-analyzer/main/output/signal_score.json` | **404** | ❌ Not Found. File has NOT been pushed to GitHub yet |
+   633→| 6 | `https://raw.githubusercontent.com/manhiiautomation-gif/btc-signal-analyzer/main/output/bot_state.json` | **404** | ❌ Not Found. Expected — push fix in progress |
+   634→
+   635→## REPO VISIBILITY
+   636→
+   637→- `curl -s https://api.github.com/repos/manhiiautomation-gif/btc-signal-analyzer` → HTTP 404 `"Not Found"`
+   638→- This is GitHub's standard response for **private repos** when called unauthenticated (to prevent leaking existence)
+   639→- **Conclusion: The `btc-signal-analyzer` repo is PRIVATE.** Raw GitHub URLs will return 404 for any file until the repo is made public OR the dashboard is served with authentication.
+   640→- **This is a BLOCKER for both signal_score.json and bot_state.json** — no amount of pushing will fix this without making the repo public.
+   641→
+   642→## GRACEFUL FAILURE ANALYSIS
+   643→
+   644→| Data Source | Wrapped in try/catch? | Fallback Behavior | Dashboard Crashes? |
+   645→|-------------|----------------------|-------------------|-------------------|
+   646→| Binance (ticker + klines) | **NO** | None. Error propagates to `init()` global catch → shows full-page error screen | ⚠️ If Binance fails, ENTIRE dashboard shows error (not just price). However, `Promise.allSettled` at line 1017 prevents one failure from blocking others — the error is swallowed by allSettled, but `state.price.usd` stays 0, causing renderers to show $0 |
+   647→| Bitkub | **YES** (line 562) | Falls back to `USD * 35` estimate. Actual BTC/THB ~2,563,428 vs estimate ~2,733,920 (≈6.6% high) | ✅ No crash |
+   648→| Fear & Greed | **YES** (line 574) | `renderFearGreed()` checks `if (!fg)` → shows "Fear & Greed data not available" | ✅ No crash |
+   649→| signal_score.json | **YES** (line 589) | `renderOnChain()` shows MVRV/NUPL at 0.000 (defaults). `renderMomentum()` shows "On-chain signal data not available yet" | ✅ No crash, but shows misleading 0.000 values |
+   650→| bot_state.json | **YES** (line 617) | `state.bot = null`. `renderBot()` shows badge "NO DATA" + message "Push bot_state.json to btc-signal-analyzer repo to enable live status" | ✅ No crash. Correctly shows NO DATA |
+   651→
+   652→## ISSUES FOUND
+   653→
+   654→### CRITICAL: Repo is Private — Raw GitHub URLs Will Never Work
+   655→- **Both `signal_score.json` and `bot_state.json` are hosted on a PRIVATE repo**
+   656→- `raw.githubusercontent.com` requires the repo to be public for unauthenticated access
+   657→- The dashboard (a static HTML opened in browser) has no auth mechanism
+   658→- **Fix: Make `manhiiautomation-gif/btc-signal-analyzer` repo PUBLIC on GitHub**
+   659→
+   660→### MEDIUM: Bitkub `sym=` Parameter Returns Error 99
+   661→- URL `https://api.bitkub.com/api/market/ticker?sym=THB_BTC` returns `{"error": 99}` with HTTP 200
+   662→- Bitkub API may have deprecated the `sym` query parameter
+   663→- Without `sym=`, calling `https://api.bitkub.com/api/market/ticker` returns all pairs including THB_BTC
+   664→- **Fix options:** (a) Remove `?sym=THB_BTC` and filter client-side, or (b) keep as-is (fallback works)
+   665→
+   666→### LOW: Binance Fetcher Not Individually try/caught
+   667→- `fetchBinancePrice()` (line 547) lacks try/catch — relies on `Promise.allSettled` to prevent total failure
+   668→- If Binance is down, price shows as $0 and `renderPrice()` still runs (no crash, but shows $0 everywhere)
+   669→- The global `catch(e)` in `init()` is never reached because `Promise.allSettled` never rejects
+   670→- **Impact:** Dashboard shows $0 price instead of a clear error message for just the price section
+   671→
+   672→### LOW: renderBriefing Always Shows MVRV Text Even With No Data
+   673→- When signal_score.json is 404, `state.onchain.mvrv` defaults to 0
+   674→- `renderBriefing()` unconditionally says "MVRV at 0.00 is in deep accumulation zone" which is misleading
+   675→- **Fix:** Guard the MVRV briefing text with a check like `if (mvrv > 0)`
+   676→
+   677→### LOW: Signal Score Fetch Failure Leaves MVRV/NUPL at Defaults
+   678→- When signal_score.json fails, MVRV shows 0.000, NUPL shows 0.000, Z-Score shows 0.00
+   679→- These look like real values to the user
+   680→- **Fix:** Show "N/A" or "waiting for data" instead of 0.000 when signal data is unavailable
+   681→
+   682→## SUMMARY
+   683→
+   684→| Category | Status |
+   685→|----------|--------|
+   686→| Public API URLs (Binance, FG) | ✅ All working |
+   687→| Bitkub URL | ⚠️ Returns error 99 (fallback active) |
+   688→| GitHub Raw URLs (signal, bot_state) | ❌ 404 — repo is PRIVATE |
+   689→| Dashboard crash on failures | ✅ No crashes — all handled gracefully |
+   690→| NO DATA display for bot_state | ✅ Correctly shows "NO DATA" badge and message |
+   691→| Blocking issue | **Repo must be made PUBLIC** for dashboard to work fully |
+   692→
+   693→---
+   694→Task ID: 5-review
+   695→Agent: Code Reviewer
+   696→Task: Review all code changes (sync_state.py, main.py, index.html)
+   697→
+   698→## REVIEW FINDINGS
+   699→
+   700→### File 1: `live_bot/sync_state.py` — Git push via `set-url --push`
+   701→
+   702→**Verdict: ✅ CORRECT — No regressions detected**
+   703→
+   704→Changes reviewed:
+   705→- L117-119: `git remote set-url --push origin <auth_url>` — sets push-only URL with token
+   706→- L122-125: `git push origin main` — pushes via the configured push URL
+   707→- L128-132: Restore push URL to clean `base_url` (no token)
+   708→
+   709→**Correctness:**
+   710→- The `--push` flag correctly sets only the push URL, leaving the fetch URL untouched. This is the right approach for injecting auth without polluting the config.
+   711→- Token extraction from my-project's remote (L24-36) and cleanup of btc-signal-analyzer's remote (L112-113) are logically sound.
+   712→- The `if token:` guard (L115, L128) correctly skips set-url operations when no token is available.
+   713→
+   714→**Edge cases & issues found:**
+   715→- **LOW — Token leak on process kill (L117-132):** If the process is killed between the auth set-url (L117) and the restore (L130), the GitHub PAT will remain in the btc-signal-analyzer repo's git config as the push URL. Since this is on a trusted CI/runner machine, the practical risk is low, but it's worth noting. Mitigation: the outer `except Exception` (L143) won't catch SIGKILL.
+   716→- **INFO — No-op commit handling (L100-103):** If `git commit` fails (e.g., nothing to commit after the add), the subsequent push still runs harmlessly. This is acceptable behavior.
+   717→- **INFO — Hardcoded branch `main` (L123):** If the btc-signal-analyzer repo ever switches default branch, this would need updating. Acceptable for current setup.
+   718→
+   719→### File 2: `live_bot/main.py` — Sync call in finally block (L318-323)
+   720→
+   721→**Verdict: ✅ CORRECT — No regressions detected**
+   722→
+   723→Changes reviewed:
+   724→- L318-323: Lazy import of `sync_state` and non-fatal call in the `finally` block
+   725→
+   726→**Correctness:**
+   727→- `bot_state` is assigned at L219, before the `try` block (L258), so it's always defined when the `finally` runs. No `NameError` risk.
+   728→- The lazy `from live_bot import sync_state` avoids circular imports and loading overhead when sync isn't needed (e.g., demo mode exits before this point).
+   729→- `except Exception` catches all import/runtime errors, printing a non-fatal message. `SystemExit` (from L310's `sys.exit(1)`) is a `BaseException` and won't be caught here — it propagates correctly, but the `finally` block still executes first.
+   730→- `_release_lock()` (L324) runs after sync attempt, ensuring lock cleanup always happens.
+   731→
+   732→**Edge cases & issues found:**
+   733→- **NONE.** This is a clean, safe pattern. The sync is fire-and-forget, fully decoupled from bot operation.
+   734→- **INFO — Loop mode sync timing (L272-293):** In loop mode, state is saved per iteration (L291) but sync only happens once in the `finally` block when the loop ends (Ctrl+C or error). This means intermediate loop states are NOT synced to GitHub. This is acceptable — only the final state matters for the dashboard.
+   735→
+   736→### File 3: `btc-briefing/index.html` — Bitkub API fix, MVRV/NUPL guards
+   737→
+   738→**Verdict: ✅ CORRECT — No regressions. One pre-existing issue noted.**
+   739→
+   740→#### 3a. Bitkub API fix (L462, L562-573)
+   741→- CONFIG.BITKUB_API changed to base endpoint `https://api.bitkub.com/api/market/ticker`
+   742→- Parsing changed from `data.result.THB_BTC.last` → `data.THB_BTC.last`
+   743→
+   744→**Correctness:** ✅ Matches Bitkub's documented flat response format `{ THB_BTC: { last, ... }, ... }`
+   745→- Guard `if (data && data.THB_BTC)` prevents crash on unexpected format
+   746→- `parseFloat()` handles string values from the API
+   747→- Fallback to `usd * 35` on fetch failure is reasonable (rough THB approximation)
+   748→
+   749→#### 3b. MVRV/NUPL rendering guards (L704, L722, L979)
+   750→- `renderOnChain()` L704: `if (state.onchain.mvrv > 0)` — shows metrics or "Waiting for on-chain data..."
+   751→- `renderOnChain()` L722: `if (state.onchain.nupl !== 0 || state.signal)` — shows NUPL or "N/A"
+   752→- `renderBriefing()` L979: `if (mvrv > 0)` — shows MVRV narrative or "On-chain data not yet available..."
+   753→- `renderKeyLevels()` L872: `state.onchain.mvrv > 0 ? usd / state.onchain.mvrv : 0` — already guarded
+   754→
+   755→**Correctness:** ✅ All guards are consistent. When on-chain data is unavailable, users see informative placeholders instead of misleading "MVRV at 0.00" or "NUPL: 0.000".
+   756→
+   757→**Edge cases & issues found:**
+   758→- **LOW — MVRV Z-Score shown as 0.00 inside MVRV block (L711):** When `mvrv > 0` but `mvrv_z` is still 0 (e.g., NUPL was available but z-score wasn't in signal_score.json), the UI shows "Z-Score: 0.00" which could be misread as a real value. Consider adding a guard like `state.onchain.mvrv_z > 0 ? ... : 'N/A'`.
+   759→- **PRE-EXISTING BUG — `renderKeyLevels` sparse array overwrite (L887-893):** When `mvrv === 0`, `levels` contains only `[ATH]` (length 1). If `bot.last_indicators.realized_price > 0`, then `levels[0]` overwrites ATH with Realized Price, and `levels[1]` assignment creates a sparse array. The ATH entry is silently lost. This is NOT a regression from the current changes — it's a pre-existing issue that becomes more visible now that the MVRV=0 state is properly handled (previously MVRV might have shown 0.00 but still produced a derived RP).
+   760→- **INFO — Hardcoded USD/THB rate (L571, L888, L891):** The fallback rate of 35 and bot-state division by 35 are hardcoded in multiple places. If the THB rate drifts significantly, these will be inaccurate. Not a regression.
+   761→
+   762→## OVERALL SUMMARY
+   763→
+   764→| Change | Correctness | Regressions | Severity Issues |
+   765→|--------|-------------|-------------|------------------|
+   766→| sync_state.py — push via set-url --push | ✅ | None | LOW: token leak on SIGKILL |
+   767→| main.py — sync in finally block | ✅ | None | None |
+   768→| index.html — Bitkub flat response | ✅ | None | None |
+   769→| index.html — MVRV/NUPL guards | ✅ | None | LOW: z-score 0.00 display; PRE-EXISTING: key levels sparse array |
+   770→
+   771→**Conclusion: All three changes are correct and safe to deploy.** No regressions found. Two LOW-severity items and one pre-existing bug are documented for future improvement.
+   772→
+   773→---
+   774→Task ID: 2-a
+   775→Agent: UI/Display Agent
+   776→Task: F&G meter bug investigation + full UI bug scan
+   777→
+   778→Work Log:
+   779→- Read worklog.md (existing entries through Task 2-b review)
+   780→- Read full /home/z/btc-briefing/index.html (1122 lines)
+   781→- Tested F&G API: curl https://api.alternative.me/fng/?limit=1 → 200, valid JSON, CORS headers present (access-control-allow-origin: *)
+   782→- Tested all 5 APIs — ALL return HTTP 200
+   783→- Verified signal_score.json structure: 17 indicators, each with raw_value/percentile/direction (all floats, no nulls)
+   784→- Verified bot_state.json structure: has last_indicators.realized_price (1743217.98 THB) and lth_realized_price (2004700.67 THB)
+   785→- Verified Bitkub API returns THB_BTC.last = 2,555,163.05
+   786→- Verified Binance API returns valid ticker data
+   787→- Traced full F&G data flow: fetchFearGreed() → state.onchain.fng → renderFearGreed() → DOM
+   788→- Analyzed gauge CSS: conic-gradient color positions vs needle angle mapping
+   789→- Audited all 7 render functions for null/undefined access, division-by-zero, wrong field names
+   790→
+   791→Stage Summary:
+   792→
+   793→## 1. FEAR & GREED METER — ROOT CAUSE
+   794→
+   795→**The F&G data loads correctly.** The API returns 200 with valid CORS. The `fetchFearGreed()` function (line 575-588) correctly parses `data.data[0].value` (string "65") via `parseInt()`. The `renderFearGreed()` function (line 887-911) correctly builds the gauge DOM.
+   796→
+   797→**The bug is a GAUGE COLOR INVERSION** (lines 226-230 CSS + line 894 JS).
+   798→
+   799→The conic-gradient (line 226-228) is:
+   800→```css
+   801→conic-gradient(#ef4444 0deg, #f97316 72deg, #eab308 144deg, #22c55e 216deg, #06b6d4 360deg)
+   802→```
+   803→Conic-gradient goes clockwise from 12 o'clock (0deg). The visible semicircle spans 270deg→360deg→90deg (left to right). Color mapping on the visible arc:
+   804→- **LEFT edge (270deg)**: green-cyan (#22c55e→#06b6d4) = Greed colors
+   805→- **TOP center (0deg)**: sharp cyan→red jump (visual seam)
+   806→- **RIGHT edge (90deg)**: red-orange (#ef4444→#f97316) = Fear colors
+   807→
+   808→The needle angle (line 894): `(fg.value / 100) * 180 - 90` maps value=0 → -90° (LEFT) and value=100 → +90° (RIGHT).
+   809→
+   810→**Result**: When F&G=65 (Greed), needle points RIGHT into the RED/ORANGE zone. When F&G=20 (Fear), needle points LEFT into the GREEN/CYAN zone. The colors are the exact OPPOSITE of what they should be.
+   811→
+   812→**Fix (1 line)**: Change line 894 from:
+   813→```javascript
+   814→const angle = (fg.value / 100) * 180 - 90;
+   815→```
+   816→to:
+   817→```javascript
+   818→const angle = 90 - (fg.value / 100) * 180;
+   819→```
+   820→This makes value=0 (Fear) point RIGHT (red) and value=100 (Greed) point LEFT (cyan).
+   821→
+   822→**Secondary issue**: There is a sharp color discontinuity at the top center of the gauge (0deg/360deg boundary) where cyan meets red. The gradient should be designed so the color transition is smooth across the visible semicircle.
+   823→
+   824→## 2. FULL BUG SCAN RESULTS
+   825→
+   826→| # | Severity | Function | Lines | Description |
+   827→|---|----------|----------|-------|-------------|
+   828→| 1 | **CRITICAL** | renderFearGreed + CSS | 226-230, 894 | **F&G gauge colors inverted** — Fear colors (red) on right, Greed colors (cyan) on left. Needle points wrong way relative to color band. Fix: flip needle angle formula. |
+   829→| 2 | **HIGH** | renderKeyLevels | 933-941 | **Array index overwrite loses ATH** — When `state.onchain.mvrv <= 0` (on-chain data not loaded), `levels` only has [ATH] at index 0. Bot state code then does `levels[0] = {realized_price}` which OVERWRITES ATH. ATH disappears from the dashboard. Fix: use `find()` or push instead of direct index assignment. |
+   830→| 3 | **MEDIUM** | renderKeyLevels | 936, 939 | **Hardcoded THB/USD rate (35)** for bot state price conversion. Should use actual rate: `state.price.thb > 0 ? state.price.usd / state.price.thb : 35`. Current rate is ~32.8, so levels are off by ~6.7%. |
+   831→| 4 | **MEDIUM** | renderMomentum | 818 | **Missing percentile null guard** — `fr.percentile * 100` will produce `NaN%` if `percentile` field is absent from a future API response. Current data is fine, but no defensive check. Other indicators in this function guard `raw_value` but not `percentile`. |
+   832→| 5 | **MEDIUM** | fetchBinancePrice | 547-560 | **No try/catch** — Unlike other fetchers, this one has no error handling. If Binance fails, it throws into `Promise.allSettled` (caught), but `state.price` stays at defaults (usd=0). `renderPrice()` then shows $0 with no error indication. Should wrap in try/catch like `fetchBitkubPrice()`. |
+   833→| 6 | **MEDIUM** | CSS gauge | 226-228 | **Sharp color seam at top center** — The conic-gradient has a hard boundary between #06b6d4 (at 360deg) and #ef4444 (at 0deg) exactly where the needle sits for neutral (value≈50). Creates a visible vertical line in the gauge. |
+   834→| 7 | **LOW** | renderBot | 986 | **Dead code**: `const thbPrice = price || state.price.thb;` is declared but never used in the rest of renderBot(). |
+   835→| 8 | **LOW** | renderOnChain | 621-624 | **Fetched but never displayed**: `state.onchain.fund_flow` is populated from `btc_fund_flow_ratio` but `renderOnChain()` never renders it. Only MVRV, NUPL, Puell, and Signal Score are shown. |
+   836→| 9 | **LOW** | renderBriefing | 1022-1071 | **Minimal briefing when data partial** — If only MVRV is available (no F&G, no signal score, no funding rate), the briefing is just one sentence. Not a bug, but a thin experience. |
+   837→| 10 | **LOW** | fetchBitkubPrice | 571 | **Hardcoded THB/USD fallback of 35** — Current actual rate is ~32.8. Fallback estimate is 6.7% off. Should use a recent rate or at least update the constant. |
+   838→
+   839→## 3. API STATUS
+   840→
+   841→| API | HTTP | CORS | Data Valid | Notes |
+   842→|-----|------|------|------------|-------|
+   843→| api.alternative.me/fng | 200 | ✅ `*` | ✅ value="65" | Working correctly |
+   844→| api.binance.com/ticker/24hr | 200 | ✅ | ✅ price=77880.70 | Working correctly |
+   845→| raw.githubusercontent.com/.../signal_score.json | 200 | ✅ | ✅ 17 indicators | Working correctly |
+   846→| raw.githubusercontent.com/.../bot_state.json | 200 | ✅ | ✅ 29 top-level keys | Working correctly |
+   847→| api.bitkub.com/market/ticker | 200 | ✅ | ✅ THB_BTC.last=2555163.05 | Working correctly |
+   848→
+   849→**All 5 APIs return HTTP 200 with valid data and proper CORS headers. No API connectivity issues.**
+   850→
+   851→## 4. RECOMMENDED FIXES
+   852→
+   853→### Fix #1 (CRITICAL): F&G Gauge Color Inversion
+   854→**File**: `/home/z/btc-briefing/index.html`, line 894
+   855→**Change**:
+   856→```javascript
+   857→// OLD:
+   858→const angle = (fg.value / 100) * 180 - 90;
+   859→// NEW:
+   860→const angle = 90 - (fg.value / 100) * 180;
+   861→```
+   862→**Also fix the conic-gradient** (lines 226-228) to eliminate the seam and make colors flow correctly left-to-right (Fear→Greed):
+   863→```css
+   864→/* OLD: */
+   865→conic-gradient(#ef4444 0deg, #f97316 72deg, #eab308 144deg, #22c55e 216deg, #06b6d4 360deg)
+   866→/* NEW: */
+   867→conic-gradient(from 180deg, #ef4444 0deg, #f97316 72deg, #eab308 144deg, #22c55e 216deg, #06b6d4 360deg)
+   868→```
+   869→Adding `from 180deg` rotates the gradient start to the bottom (clipped), so the visible semicircle reads Red (left) → Orange → Yellow → Green → Cyan (right).
+   870→
+   871→### Fix #2 (HIGH): Key Levels Array Overwrite
+   872→**File**: line 933-941
+   873→**Change**: Replace direct index assignment with safe lookup:
+   874→```javascript
+   875→if (state.bot && state.bot.last_indicators) {
+   876→  const bi = state.bot.last_indicators;
+   877→  const rate = state.price.thb > 0 ? state.price.usd / state.price.thb : 35;
+   878→  const rpIdx = levels.findIndex(l => l.label.includes('Realized Price'));
+   879→  const lthIdx = levels.findIndex(l => l.label.includes('LTH'));
+   880→  if (bi.realized_price > 0 && rpIdx >= 0) {
+   881→    const rpUsd = bi.realized_price / rate;
+   882→    levels[rpIdx] = { label: 'Realized Price', value: rpUsd, dist: ((usd - rpUsd) / rpUsd) * 100 };
+   883→  }
+   884→  if (bi.lth_realized_price > 0 && lthIdx >= 0) {
+   885→    const lthUsd = bi.lth_realized_price / rate;
+   886→    levels[lthIdx] = { label: 'LTH Realized Price', value: lthUsd, dist: ((usd - lthUsd) / lthUsd) * 100 };
+   887→  }
+   888→}
+   889→```
+   890→
+   891→### Fix #3 (MEDIUM): Hardcoded THB/USD rate
+   892→Already addressed in Fix #2 above by computing `rate` dynamically.
+   893→
+   894→### Fix #4 (MEDIUM): Percentile null guard
+   895→**File**: line 818
+   896→**Change**: Add guard: `${(fr.percentile != null ? fr.percentile * 100 : 0).toFixed(1)}%`
+   897→
+   898→### Fix #5 (MEDIUM): Binance fetch error handling
+   899→**File**: lines 547-560
+   900→**Change**: Wrap `fetchBinancePrice()` body in try/catch like `fetchBitkubPrice()`.
+   901→
+   902→### Fix #6 (MEDIUM): Gauge seam
+   903→Already addressed in Fix #1 by using `from 180deg`.
+   904→
+   905→### Fix #7 (LOW): Dead code
+   906→**File**: line 986
+   907→**Change**: Remove `const thbPrice = price || state.price.thb;`
+   908→
+   909→### Fix #8 (LOW): Fund Flow not displayed
+   910→**File**: renderOnChain() function
+   911→**Change**: Add a section to display `state.onchain.fund_flow` if available, similar to the Puell Multiple section.
+   912→
+   913→**Conclusion: The #1 user-reported issue (F&G meter not working) is caused by inverted gauge colors — data loads fine but the visual is backwards. One primary fix (needle angle + gradient rotation) resolves it. One HIGH-severity bug (key levels array overwrite) and several MEDIUM bugs were also found. All 5 APIs are healthy.**
+   914→

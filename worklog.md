@@ -769,3 +769,145 @@ Changes reviewed:
 | index.html — MVRV/NUPL guards | ✅ | None | LOW: z-score 0.00 display; PRE-EXISTING: key levels sparse array |
 
 **Conclusion: All three changes are correct and safe to deploy.** No regressions found. Two LOW-severity items and one pre-existing bug are documented for future improvement.
+
+---
+Task ID: 2-a
+Agent: UI/Display Agent
+Task: F&G meter bug investigation + full UI bug scan
+
+Work Log:
+- Read worklog.md (existing entries through Task 2-b review)
+- Read full /home/z/btc-briefing/index.html (1122 lines)
+- Tested F&G API: curl https://api.alternative.me/fng/?limit=1 → 200, valid JSON, CORS headers present (access-control-allow-origin: *)
+- Tested all 5 APIs — ALL return HTTP 200
+- Verified signal_score.json structure: 17 indicators, each with raw_value/percentile/direction (all floats, no nulls)
+- Verified bot_state.json structure: has last_indicators.realized_price (1743217.98 THB) and lth_realized_price (2004700.67 THB)
+- Verified Bitkub API returns THB_BTC.last = 2,555,163.05
+- Verified Binance API returns valid ticker data
+- Traced full F&G data flow: fetchFearGreed() → state.onchain.fng → renderFearGreed() → DOM
+- Analyzed gauge CSS: conic-gradient color positions vs needle angle mapping
+- Audited all 7 render functions for null/undefined access, division-by-zero, wrong field names
+
+Stage Summary:
+
+## 1. FEAR & GREED METER — ROOT CAUSE
+
+**The F&G data loads correctly.** The API returns 200 with valid CORS. The `fetchFearGreed()` function (line 575-588) correctly parses `data.data[0].value` (string "65") via `parseInt()`. The `renderFearGreed()` function (line 887-911) correctly builds the gauge DOM.
+
+**The bug is a GAUGE COLOR INVERSION** (lines 226-230 CSS + line 894 JS).
+
+The conic-gradient (line 226-228) is:
+```css
+conic-gradient(#ef4444 0deg, #f97316 72deg, #eab308 144deg, #22c55e 216deg, #06b6d4 360deg)
+```
+Conic-gradient goes clockwise from 12 o'clock (0deg). The visible semicircle spans 270deg→360deg→90deg (left to right). Color mapping on the visible arc:
+- **LEFT edge (270deg)**: green-cyan (#22c55e→#06b6d4) = Greed colors
+- **TOP center (0deg)**: sharp cyan→red jump (visual seam)
+- **RIGHT edge (90deg)**: red-orange (#ef4444→#f97316) = Fear colors
+
+The needle angle (line 894): `(fg.value / 100) * 180 - 90` maps value=0 → -90° (LEFT) and value=100 → +90° (RIGHT).
+
+**Result**: When F&G=65 (Greed), needle points RIGHT into the RED/ORANGE zone. When F&G=20 (Fear), needle points LEFT into the GREEN/CYAN zone. The colors are the exact OPPOSITE of what they should be.
+
+**Fix (1 line)**: Change line 894 from:
+```javascript
+const angle = (fg.value / 100) * 180 - 90;
+```
+to:
+```javascript
+const angle = 90 - (fg.value / 100) * 180;
+```
+This makes value=0 (Fear) point RIGHT (red) and value=100 (Greed) point LEFT (cyan).
+
+**Secondary issue**: There is a sharp color discontinuity at the top center of the gauge (0deg/360deg boundary) where cyan meets red. The gradient should be designed so the color transition is smooth across the visible semicircle.
+
+## 2. FULL BUG SCAN RESULTS
+
+| # | Severity | Function | Lines | Description |
+|---|----------|----------|-------|-------------|
+| 1 | **CRITICAL** | renderFearGreed + CSS | 226-230, 894 | **F&G gauge colors inverted** — Fear colors (red) on right, Greed colors (cyan) on left. Needle points wrong way relative to color band. Fix: flip needle angle formula. |
+| 2 | **HIGH** | renderKeyLevels | 933-941 | **Array index overwrite loses ATH** — When `state.onchain.mvrv <= 0` (on-chain data not loaded), `levels` only has [ATH] at index 0. Bot state code then does `levels[0] = {realized_price}` which OVERWRITES ATH. ATH disappears from the dashboard. Fix: use `find()` or push instead of direct index assignment. |
+| 3 | **MEDIUM** | renderKeyLevels | 936, 939 | **Hardcoded THB/USD rate (35)** for bot state price conversion. Should use actual rate: `state.price.thb > 0 ? state.price.usd / state.price.thb : 35`. Current rate is ~32.8, so levels are off by ~6.7%. |
+| 4 | **MEDIUM** | renderMomentum | 818 | **Missing percentile null guard** — `fr.percentile * 100` will produce `NaN%` if `percentile` field is absent from a future API response. Current data is fine, but no defensive check. Other indicators in this function guard `raw_value` but not `percentile`. |
+| 5 | **MEDIUM** | fetchBinancePrice | 547-560 | **No try/catch** — Unlike other fetchers, this one has no error handling. If Binance fails, it throws into `Promise.allSettled` (caught), but `state.price` stays at defaults (usd=0). `renderPrice()` then shows $0 with no error indication. Should wrap in try/catch like `fetchBitkubPrice()`. |
+| 6 | **MEDIUM** | CSS gauge | 226-228 | **Sharp color seam at top center** — The conic-gradient has a hard boundary between #06b6d4 (at 360deg) and #ef4444 (at 0deg) exactly where the needle sits for neutral (value≈50). Creates a visible vertical line in the gauge. |
+| 7 | **LOW** | renderBot | 986 | **Dead code**: `const thbPrice = price || state.price.thb;` is declared but never used in the rest of renderBot(). |
+| 8 | **LOW** | renderOnChain | 621-624 | **Fetched but never displayed**: `state.onchain.fund_flow` is populated from `btc_fund_flow_ratio` but `renderOnChain()` never renders it. Only MVRV, NUPL, Puell, and Signal Score are shown. |
+| 9 | **LOW** | renderBriefing | 1022-1071 | **Minimal briefing when data partial** — If only MVRV is available (no F&G, no signal score, no funding rate), the briefing is just one sentence. Not a bug, but a thin experience. |
+| 10 | **LOW** | fetchBitkubPrice | 571 | **Hardcoded THB/USD fallback of 35** — Current actual rate is ~32.8. Fallback estimate is 6.7% off. Should use a recent rate or at least update the constant. |
+
+## 3. API STATUS
+
+| API | HTTP | CORS | Data Valid | Notes |
+|-----|------|------|------------|-------|
+| api.alternative.me/fng | 200 | ✅ `*` | ✅ value="65" | Working correctly |
+| api.binance.com/ticker/24hr | 200 | ✅ | ✅ price=77880.70 | Working correctly |
+| raw.githubusercontent.com/.../signal_score.json | 200 | ✅ | ✅ 17 indicators | Working correctly |
+| raw.githubusercontent.com/.../bot_state.json | 200 | ✅ | ✅ 29 top-level keys | Working correctly |
+| api.bitkub.com/market/ticker | 200 | ✅ | ✅ THB_BTC.last=2555163.05 | Working correctly |
+
+**All 5 APIs return HTTP 200 with valid data and proper CORS headers. No API connectivity issues.**
+
+## 4. RECOMMENDED FIXES
+
+### Fix #1 (CRITICAL): F&G Gauge Color Inversion
+**File**: `/home/z/btc-briefing/index.html`, line 894
+**Change**:
+```javascript
+// OLD:
+const angle = (fg.value / 100) * 180 - 90;
+// NEW:
+const angle = 90 - (fg.value / 100) * 180;
+```
+**Also fix the conic-gradient** (lines 226-228) to eliminate the seam and make colors flow correctly left-to-right (Fear→Greed):
+```css
+/* OLD: */
+conic-gradient(#ef4444 0deg, #f97316 72deg, #eab308 144deg, #22c55e 216deg, #06b6d4 360deg)
+/* NEW: */
+conic-gradient(from 180deg, #ef4444 0deg, #f97316 72deg, #eab308 144deg, #22c55e 216deg, #06b6d4 360deg)
+```
+Adding `from 180deg` rotates the gradient start to the bottom (clipped), so the visible semicircle reads Red (left) → Orange → Yellow → Green → Cyan (right).
+
+### Fix #2 (HIGH): Key Levels Array Overwrite
+**File**: line 933-941
+**Change**: Replace direct index assignment with safe lookup:
+```javascript
+if (state.bot && state.bot.last_indicators) {
+  const bi = state.bot.last_indicators;
+  const rate = state.price.thb > 0 ? state.price.usd / state.price.thb : 35;
+  const rpIdx = levels.findIndex(l => l.label.includes('Realized Price'));
+  const lthIdx = levels.findIndex(l => l.label.includes('LTH'));
+  if (bi.realized_price > 0 && rpIdx >= 0) {
+    const rpUsd = bi.realized_price / rate;
+    levels[rpIdx] = { label: 'Realized Price', value: rpUsd, dist: ((usd - rpUsd) / rpUsd) * 100 };
+  }
+  if (bi.lth_realized_price > 0 && lthIdx >= 0) {
+    const lthUsd = bi.lth_realized_price / rate;
+    levels[lthIdx] = { label: 'LTH Realized Price', value: lthUsd, dist: ((usd - lthUsd) / lthUsd) * 100 };
+  }
+}
+```
+
+### Fix #3 (MEDIUM): Hardcoded THB/USD rate
+Already addressed in Fix #2 above by computing `rate` dynamically.
+
+### Fix #4 (MEDIUM): Percentile null guard
+**File**: line 818
+**Change**: Add guard: `${(fr.percentile != null ? fr.percentile * 100 : 0).toFixed(1)}%`
+
+### Fix #5 (MEDIUM): Binance fetch error handling
+**File**: lines 547-560
+**Change**: Wrap `fetchBinancePrice()` body in try/catch like `fetchBitkubPrice()`.
+
+### Fix #6 (MEDIUM): Gauge seam
+Already addressed in Fix #1 by using `from 180deg`.
+
+### Fix #7 (LOW): Dead code
+**File**: line 986
+**Change**: Remove `const thbPrice = price || state.price.thb;`
+
+### Fix #8 (LOW): Fund Flow not displayed
+**File**: renderOnChain() function
+**Change**: Add a section to display `state.onchain.fund_flow` if available, similar to the Puell Multiple section.
+
+**Conclusion: The #1 user-reported issue (F&G meter not working) is caused by inverted gauge colors — data loads fine but the visual is backwards. One primary fix (needle angle + gradient rotation) resolves it. One HIGH-severity bug (key levels array overwrite) and several MEDIUM bugs were also found. All 5 APIs are healthy.**

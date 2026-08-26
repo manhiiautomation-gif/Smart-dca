@@ -1,0 +1,1134 @@
+     1→<!DOCTYPE html>
+     2→<html lang="th">
+     3→<head>
+     4→<meta charset="UTF-8">
+     5→<meta name="viewport" content="width=device-width, initial-scale=1.0">
+     6→<title>BTC Daily Briefing</title>
+     7→<meta name="description" content="Real-time BTC market intelligence for manual trading decisions">
+     8→<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+     9→<style>
+    10→  :root {
+    11→    --bg-primary: #09090b;
+    12→    --bg-card: #18181b;
+    13→    --bg-card-hover: #1f1f23;
+    14→    --border: #27272a;
+    15→    --text-primary: #fafafa;
+    16→    --text-secondary: #a1a1aa;
+    17→    --text-muted: #71717a;
+    18→    --accent-amber: #f59e0b;
+    19→    --accent-amber-dim: rgba(245,158,11,0.15);
+    20→    --green: #22c55e;
+    21→    --green-dim: rgba(34,197,94,0.15);
+    22→    --red: #ef4444;
+    23→    --red-dim: rgba(239,68,68,0.15);
+    24→    --blue: #3b82f6;
+    25→    --blue-dim: rgba(59,130,246,0.15);
+    26→    --orange: #f97316;
+    27→    --orange-dim: rgba(249,115,22,0.15);
+    28→    --cyan: #06b6d4;
+    29→    --violet: #8b5cf6;
+    30→    --emerald: #10b981;
+    31→  }
+    32→
+    33→  * { margin: 0; padding: 0; box-sizing: border-box; }
+    34→
+    35→  body {
+    36→    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans Thai', sans-serif;
+    37→    background: var(--bg-primary);
+    38→    color: var(--text-primary);
+    39→    min-height: 100vh;
+    40→    line-height: 1.5;
+    41→  }
+    42→
+    43→  /* Header */
+    44→  .header {
+    45→    border-bottom: 1px solid var(--border);
+    46→    background: rgba(24,24,27,0.8);
+    47→    backdrop-filter: blur(12px);
+    48→    position: sticky;
+    49→    top: 0;
+    50→    z-index: 50;
+    51→  }
+    52→  .header-inner {
+    53→    max-width: 1200px;
+    54→    margin: 0 auto;
+    55→    padding: 12px 16px;
+    56→    display: flex;
+    57→    align-items: center;
+    58→    justify-content: space-between;
+    59→  }
+    60→  .header-left {
+    61→    display: flex;
+    62→    align-items: center;
+    63→    gap: 12px;
+    64→  }
+    65→  .logo {
+    66→    width: 32px; height: 32px;
+    67→    border-radius: 8px;
+    68→    background: var(--accent-amber-dim);
+    69→    display: flex; align-items: center; justify-content: center;
+    70→    font-size: 18px;
+    71→  }
+    72→  .header h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.025em; }
+    73→  .header p { font-size: 11px; color: var(--text-muted); }
+    74→  .header-right { display: flex; align-items: center; gap: 8px; }
+    75→  .refresh-badge {
+    76→    font-size: 11px;
+    77→    color: var(--text-secondary);
+    78→    border: 1px solid var(--border);
+    79→    border-radius: 999px;
+    80→    padding: 2px 10px;
+    81→  }
+    82→  .refresh-btn {
+    83→    background: none; border: none; color: var(--text-secondary);
+    84→    cursor: pointer; padding: 4px; border-radius: 6px;
+    85→    display: flex; align-items: center;
+    86→  }
+    87→  .refresh-btn:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+    88→  .refresh-btn.spinning svg { animation: spin 1s linear infinite; }
+    89→  @keyframes spin { to { transform: rotate(360deg); } }
+    90→
+    91→  /* Grid */
+    92→  .main { max-width: 1200px; margin: 0 auto; padding: 24px 16px; }
+    93→  .grid { display: grid; gap: 16px; }
+    94→  .grid-3 { grid-template-columns: 1fr; }
+    95→  .grid-2-1 { grid-template-columns: 1fr; }
+    96→  @media (min-width: 768px) {
+    97→    .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+    98→    .grid-2-1 { grid-template-columns: 2fr 1fr; }
+    99→  }
+   100→
+   101→  /* Card */
+   102→  .card {
+   103→    background: var(--bg-card);
+   104→    border: 1px solid var(--border);
+   105→    border-radius: 12px;
+   106→    overflow: hidden;
+   107→  }
+   108→  .card-body { padding: 20px; }
+   109→  .card-title {
+   110→    display: flex; align-items: center; gap: 8px;
+   111→    font-size: 13px; font-weight: 600;
+   112→    color: var(--text-secondary);
+   113→    margin-bottom: 16px;
+   114→    text-transform: uppercase;
+   115→    letter-spacing: 0.05em;
+   116→  }
+   117→  .card-title .icon { width: 16px; height: 16px; }
+   118→
+   119→  /* Price Hero */
+   120→  .price-hero .label { font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; }
+   121→  .price-hero .price-row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+   122→  .price-hero .price { font-size: 36px; font-weight: 700; letter-spacing: -0.02em; }
+   123→  .price-hero .thb-price { font-size: 14px; color: var(--text-muted); }
+   124→  .change-badge {
+   125→    display: inline-flex; align-items: center; gap: 2px;
+   126→    font-size: 13px; font-weight: 600; padding: 2px 8px; border-radius: 6px;
+   127→  }
+   128→  .change-badge.up { color: var(--green); background: var(--green-dim); }
+   129→  .change-badge.down { color: var(--red); background: var(--red-dim); }
+   130→  .trend-badge {
+   131→    display: inline-flex; align-items: center; gap: 4px;
+   132→    font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 999px;
+   133→    border: 1px solid;
+   134→    margin-top: 8px;
+   135→  }
+   136→  .price-stats {
+   137→    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+   138→    margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);
+   139→    text-align: center;
+   140→  }
+   141→  .price-stats .stat-label { font-size: 11px; color: var(--text-muted); margin-bottom: 2px; }
+   142→  .price-stats .stat-value { font-size: 13px; font-weight: 600; }
+   143→  .stat-green { color: var(--green); }
+   144→  .stat-red { color: var(--red); }
+   145→
+   146→  /* Bot Card */
+   147→  .bot-status-badge {
+   148→    margin-left: auto;
+   149→    font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+   150→    border: 1px solid; text-transform: uppercase; letter-spacing: 0.05em;
+   151→  }
+   152→  .bot-status-badge.active { color: var(--green); border-color: rgba(34,197,94,0.4); }
+   153→  .bot-status-badge.offline { color: var(--red); border-color: rgba(239,68,68,0.4); }
+   154→  .bot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+   155→  .bot-item .label { font-size: 11px; color: var(--text-muted); }
+   156→  .bot-item .value { font-size: 13px; font-weight: 600; }
+   157→  .bot-decision {
+   158→    margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);
+   159→  }
+   160→  .bot-decision .label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+   161→  .bot-decision .decision-text { font-size: 13px; font-weight: 500; }
+   162→  .bot-meta { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--text-muted); }
+   163→  .path-badge {
+   164→    font-size: 10px; padding: 1px 8px; border-radius: 999px;
+   165→    border: 1px solid rgba(245,158,11,0.4); color: var(--accent-amber);
+   166→  }
+   167→
+   168→  /* Metric rows */
+   169→  .metric { margin-bottom: 16px; }
+   170→  .metric:last-child { margin-bottom: 0; }
+   171→  .metric-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+   172→  .metric-label { font-size: 12px; color: var(--text-secondary); }
+   173→  .metric-value { font-size: 24px; font-weight: 700; }
+   174→  .metric-value.lg { font-size: 28px; }
+   175→  .metric-sub { display: flex; gap: 16px; font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+   176→  .metric-divider { border-top: 1px solid var(--border); margin: 12px 0; }
+   177→
+   178→  /* Zone Badge */
+   179→  .zone-badge {
+   180→    font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+   181→    border: 1px solid;
+   182→  }
+   183→
+   184→  /* RSI Bar */
+   185→  .rsi-bar-bg {
+   186→    width: 100%; height: 6px; border-radius: 999px;
+   187→    background: var(--border); margin: 6px 0;
+   188→  }
+   189→  .rsi-bar-fill {
+   190→    height: 100%; border-radius: 999px;
+   191→    transition: width 0.5s ease;
+   192→  }
+   193→
+   194→  /* Signal pills */
+   195→  .signal-pill {
+   196→    display: flex; align-items: center; gap: 6px;
+   197→    font-size: 12px; padding: 4px 0;
+   198→  }
+   199→  .signal-pill svg { width: 14px; height: 14px; flex-shrink: 0; }
+   200→  .signal-bear { color: var(--red); }
+   201→  .signal-warn { color: var(--accent-amber); }
+   202→  .signal-none { color: var(--text-muted); }
+   203→
+   204→  /* Key Levels */
+   205→  .level-row {
+   206→    display: flex; align-items: center; justify-content: space-between;
+   207→    padding: 6px 0;
+   208→  }
+   209→  .level-row + .level-row { border-top: 1px solid var(--border); }
+   210→  .level-label { font-size: 12px; color: var(--text-secondary); }
+   211→  .level-right { display: flex; align-items: center; gap: 8px; }
+   212→  .level-value { font-size: 12px; font-family: 'SF Mono', 'Fira Code', monospace; }
+   213→  .level-dist { font-size: 12px; font-weight: 600; }
+   214→  .level-note {
+   215→    margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);
+   216→    font-size: 11px; color: var(--text-muted); line-height: 1.6;
+   217→  }
+   218→
+   219→  /* Fear & Greed */
+   220→  .fg-container { text-align: center; padding: 8px 0; }
+   221→  .fg-gauge {
+   222→    width: 160px; height: 80px; margin: 0 auto 12px; position: relative; overflow: hidden;
+   223→  }
+   224→  .fg-gauge-bg {
+   225→    width: 160px; height: 160px; border-radius: 50%;
+   226→    background: conic-gradient(
+   227→      from 180deg, #06b6d4 0deg, #22c55e 72deg, #eab308 144deg, #f97316 216deg, #ef4444 360deg
+   228→    );
+   229→    position: absolute; top: 0; left: 0;
+   230→    clip-path: polygon(0 0, 100% 0, 100% 50%, 0 50%);
+   231→  }
+   232→  .fg-gauge-inner {
+   233→    width: 120px; height: 120px; border-radius: 50%;
+   234→    background: var(--bg-card);
+   235→    position: absolute; top: 20px; left: 20px;
+   236→    clip-path: polygon(0 0, 100% 0, 100% 50%, 0 50%);
+   237→  }
+   238→  .fg-needle {
+   239→    position: absolute; bottom: 0; left: 50%; width: 3px; height: 65px;
+   240→    background: white; border-radius: 2px; transform-origin: bottom center;
+   241→    transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+   242→    margin-left: -1.5px;
+   243→  }
+   244→  .fg-needle::after {
+   245→    content: ''; position: absolute; bottom: -4px; left: 50%; transform: translateX(-50%);
+   246→    width: 10px; height: 10px; border-radius: 50%; background: white;
+   247→  }
+   248→  .fg-value { font-size: 40px; font-weight: 700; margin: 8px 0 4px; }
+   249→  .fg-label { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+   250→  .fg-desc { font-size: 12px; color: var(--text-muted); }
+   251→
+   252→  /* Market Briefing */
+   253→  .briefing-text { font-size: 14px; color: var(--text-secondary); line-height: 1.7; }
+   254→
+   255→  /* Sparkline */
+   256→  .sparkline-container { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+   257→  .sparkline-label { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
+   258→  .sparkline-svg { width: 100%; height: 60px; }
+   259→
+   260→  /* Footer */
+   261→  .footer { text-align: center; padding: 16px; font-size: 11px; color: var(--text-muted); }
+   262→
+   263→  /* Loading */
+   264→  .loading-screen {
+   265→    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+   266→    flex-direction: column; gap: 12px; color: var(--text-muted);
+   267→  }
+   268→  .loading-spinner { animation: spin 1s linear infinite; }
+   269→
+   270→  /* Error */
+   271→  .error-card {
+   272→    max-width: 400px; margin: 80px auto; text-align: center;
+   273→    background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 32px;
+   274→  }
+   275→  .error-card h2 { font-size: 16px; margin-bottom: 8px; }
+   276→  .error-card p { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
+   277→  .retry-btn {
+   278→    background: var(--bg-card-hover); border: 1px solid var(--border); color: var(--text-primary);
+   279→    padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px;
+   280→  }
+   281→  .retry-btn:hover { background: var(--border); }
+   282→
+   283→  /* Source tags */
+   284→  .source-tag { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+   285→
+   286→  /* No data state */
+   287→  .no-data { color: var(--text-muted); font-size: 12px; font-style: italic; }
+   288→</style>
+   289→</head>
+   290→<body>
+   291→
+   292→<!-- Loading Screen -->
+   293→<div id="loading" class="loading-screen">
+   294→  <svg class="loading-spinner" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+   295→  <span>Loading BTC Briefing...</span>
+   296→</div>
+   297→
+   298→<!-- Error Screen -->
+   299→<div id="error" class="error-card" style="display:none">
+   300→  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" style="margin:0 auto 12px"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+   301→  <h2>Failed to Load Data</h2>
+   302→  <p id="error-msg">Unknown error</p>
+   303→  <button class="retry-btn" onclick="init()">
+   304→    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+   305→    Retry
+   306→  </button>
+   307→</div>
+   308→
+   309→<!-- Main Dashboard -->
+   310→<div id="app" style="display:none">
+   311→  <!-- Header -->
+   312→  <header class="header">
+   313→    <div class="header-inner">
+   314→      <div class="header-left">
+   315→        <div class="logo">⚡</div>
+   316→        <div>
+   317→          <h1>BTC Daily Briefing</h1>
+   318→          <p>Manual trading intelligence + Phoenix v5.1 status</p>
+   319→        </div>
+   320→      </div>
+   321→      <div class="header-right">
+   322→        <span class="refresh-badge" id="refresh-time">--:--</span>
+   323→        <button class="refresh-btn" id="refresh-btn" onclick="init()" title="Refresh">
+   324→          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+   325→        </button>
+   326→      </div>
+   327→    </div>
+   328→  </header>
+   329→
+   330→  <main class="main">
+   331→    <!-- Row 1: Price Hero + Phoenix Bot -->
+   332→    <div class="grid grid-2-1" style="margin-bottom:16px">
+   333→      <!-- Price Hero -->
+   334→      <div class="card price-hero">
+   335→        <div class="card-body">
+   336→          <div class="label">BTC / USD</div>
+   337→          <div class="price-row">
+   338→            <span class="price" id="price-usd">--</span>
+   339→            <span class="change-badge" id="change-24h">--</span>
+   340→            <span class="trend-badge" id="trend-badge" style="display:none">--</span>
+   341→          </div>
+   342→          <div class="thb-price" id="price-thb" style="margin-top:4px">฿--</div>
+   343→          <div class="price-stats">
+   344→            <div>
+   345→              <div class="stat-label">24h Volume</div>
+   346→              <div class="stat-value" id="volume-24h">--</div>
+   347→            </div>
+   348→            <div>
+   349→              <div class="stat-label">Market Cap</div>
+   350→              <div class="stat-value" id="market-cap">--</div>
+   351→            </div>
+   352→            <div>
+   353→              <div class="stat-label">vs ATH</div>
+   354→              <div class="stat-value" id="vs-ath">--</div>
+   355→            </div>
+   356→          </div>
+   357→          <!-- 30d Sparkline -->
+   358→          <div class="sparkline-container">
+   359→            <div class="sparkline-label">30-Day Price</div>
+   360→            <svg class="sparkline-svg" id="sparkline" preserveAspectRatio="none"></svg>
+   361→          </div>
+   362→        </div>
+   363→      </div>
+   364→
+   365→      <!-- Phoenix Bot Status -->
+   366→      <div class="card">
+   367→        <div class="card-body">
+   368→          <div class="card-title">
+   369→            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+   370→            Phoenix v5.1
+   371→            <span class="bot-status-badge" id="bot-status-badge">--</span>
+   372→          </div>
+   373→          <div id="bot-content">
+   374→            <div class="no-data">Loading bot status...</div>
+   375→          </div>
+   376→        </div>
+   377→      </div>
+   378→    </div>
+   379→
+   380→    <!-- Row 2: On-Chain + Momentum + Key Levels -->
+   381→    <div class="grid grid-3" style="margin-bottom:16px">
+   382→      <!-- On-Chain Pulse -->
+   383→      <div class="card">
+   384→        <div class="card-body">
+   385→          <div class="card-title">
+   386→            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2"><path d="M12 2v20"/><path d="M2 12h20"/><path d="m4.93 4.93 14.14 14.14"/><path d="m19.07 4.93-14.14 14.14"/></svg>
+   387→            On-Chain Pulse
+   388→          </div>
+   389→          <div id="onchain-content">
+   390→            <div class="no-data">Loading on-chain data...</div>
+   391→          </div>
+   392→        </div>
+   393→      </div>
+   394→
+   395→      <!-- Technical Momentum -->
+   396→      <div class="card">
+   397→        <div class="card-body">
+   398→          <div class="card-title">
+   399→            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+   400→            Technical Momentum
+   401→          </div>
+   402→          <div id="momentum-content">
+   403→            <div class="no-data">Loading momentum data...</div>
+   404→          </div>
+   405→        </div>
+   406→      </div>
+   407→
+   408→      <!-- Fear & Greed + Key Levels -->
+   409→      <div class="card">
+   410→        <div class="card-body">
+   411→          <div class="card-title">
+   412→            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+   413→            Fear & Greed
+   414→          </div>
+   415→          <div id="fg-content">
+   416→            <div class="no-data">Loading...</div>
+   417→          </div>
+   418→        </div>
+   419→      </div>
+   420→    </div>
+   421→
+   422→    <!-- Row 3: Key Levels -->
+   423→    <div class="card" style="margin-bottom:16px">
+   424→      <div class="card-body">
+   425→        <div class="card-title">
+   426→          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+   427→          Key On-Chain Levels
+   428→        </div>
+   429→        <div id="levels-content">
+   430→          <div class="no-data">Loading key levels...</div>
+   431→        </div>
+   432→      </div>
+   433→    </div>
+   434→
+   435→    <!-- Row 4: Market Briefing -->
+   436→    <div class="card" style="margin-bottom:16px">
+   437→      <div class="card-body">
+   438→        <div class="card-title">
+   439→          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></svg>
+   440→          Market Briefing
+   441→        </div>
+   442→        <p class="briefing-text" id="briefing-text">Loading market narrative...</p>
+   443→      </div>
+   444→    </div>
+   445→
+   446→    <!-- Footer -->
+   447→    <div class="footer">
+   448→      Phoenix v5.1 Briefing Dashboard | Auto-refreshes every 5 min | For manual trading decisions only
+   449→    </div>
+   450→  </main>
+   451→</div>
+   452→
+   453→<script>
+   454→// ─── Config ───
+   455→const CONFIG = {
+   456→  // On-chain signal data (updated by btc-signal-analyzer)
+   457→  SIGNAL_URL: 'https://raw.githubusercontent.com/manhiiautomation-gif/btc-signal-analyzer/main/output/signal_score.json',
+   458→  // Phoenix bot state (pushed by bot cron)
+   459→  BOT_STATE_URL: 'https://raw.githubusercontent.com/manhiiautomation-gif/btc-signal-analyzer/main/output/bot_state.json',
+   460→  // Public APIs
+   461→  BINANCE_API: 'https://api.binance.com/api/v3',
+   462→  BITKUB_API: 'https://api.bitkub.com/api/market/ticker',
+   463→  FG_API: 'https://api.alternative.me/fng/?limit=1',
+   464→  REFRESH_INTERVAL: 5 * 60 * 1000,
+   465→  ATH_USD: 109588,
+   466→};
+   467→
+   468→// ─── State ───
+   469→let state = {
+   470→  price: { usd: 0, thb: 0, change24h: 0, volume: 0, mcap: 0 },
+   471→  onchain: { mvrv: 0, mvrv_z: 0, nupl: 0, sopr: null, fng: null },
+   472→  signal: null,
+   473→  bot: null,
+   474→  sparkline: [],
+   475→};
+   476→
+   477→// ─── Helpers ───
+   478→function fmt(n, d=2) {
+   479→  if (n >= 1e12) return (n/1e12).toFixed(d) + 'T';
+   480→  if (n >= 1e9) return (n/1e9).toFixed(d) + 'B';
+   481→  if (n >= 1e6) return (n/1e6).toFixed(d) + 'M';
+   482→  if (n >= 1e3) return (n/1e3).toFixed(d) + 'K';
+   483→  return n.toFixed(d);
+   484→}
+   485→
+   486→function fmtUSD(n) { return '$' + n.toLocaleString('en-US', {maximumFractionDigits: 0}); }
+   487→function fmtTHB(n) { return '฿' + n.toLocaleString('th-TH', {maximumFractionDigits: 0}); }
+   488→
+   489→function getMvrvZone(mvrv) {
+   490→  if (mvrv < 1.0) return { zone: 'Deep Accumulation', color: '#22c55e' };
+   491→  if (mvrv < 1.5) return { zone: 'Accumulation', color: '#86efac' };
+   492→  if (mvrv < 2.0) return { zone: 'Neutral', color: '#eab308' };
+   493→  if (mvrv < 2.5) return { zone: 'Euphoria', color: '#f97316' };
+   494→  if (mvrv < 3.5) return { zone: 'Overvalued', color: '#ef4444' };
+   495→  return { zone: 'Extreme Euphoria', color: '#dc2626' };
+   496→}
+   497→
+   498→function getNuplPhase(nupl) {
+   499→  if (nupl < 0) return 'Capitulation';
+   500→  if (nupl < 0.25) return 'Fear';
+   501→  if (nupl < 0.5) return 'Optimism';
+   502→  if (nupl < 0.75) return 'Belief';
+   503→  return 'Euphoria';
+   504→}
+   505→
+   506→function getFgColor(val) {
+   507→  if (val <= 25) return '#ef4444';
+   508→  if (val <= 45) return '#f97316';
+   509→  if (val <= 55) return '#eab308';
+   510→  if (val <= 75) return '#22c55e';
+   511→  return '#06b6d4';
+   512→}
+   513→
+   514→function getFgLabel(val) {
+   515→  if (val <= 25) return 'Extreme Fear';
+   516→  if (val <= 45) return 'Fear';
+   517→  if (val <= 55) return 'Neutral';
+   518→  if (val <= 75) return 'Greed';
+   519→  return 'Extreme Greed';
+   520→}
+   521→
+   522→function getFgDesc(val) {
+   523→  if (val <= 25) return 'Historically excellent buying opportunity. Markets are in panic.';
+   524→  if (val <= 45) return 'Fear dominates. Good accumulation zone for long-term investors.';
+   525→  if (val <= 55) return 'Market is undecided. Wait for clearer signals before acting.';
+   526→  if (val <= 75) return 'Greed is building. Be cautious with new positions.';
+   527→  return 'Extreme greed — historically a warning sign. Consider taking profits.';
+   528→}
+   529→
+   530→function getTrend(price, mvrv) {
+   531→  // Use MVRV as primary trend indicator since we don't have SMA200 from public API
+   532→  if (mvrv < 1.0) return { trend: 'Deep Accumulation', color: '#22c55e' };
+   533→  if (mvrv < 1.5) return { trend: 'Accumulation', color: '#86efac' };
+   534→  if (mvrv < 2.0) return { trend: 'Neutral-Bull', color: '#eab308' };
+   535→  if (mvrv < 2.5) return { trend: 'Euphoria', color: '#f97316' };
+   536→  return { trend: 'Overvalued', color: '#ef4444' };
+   537→}
+   538→
+   539→async function fetchJSON(url) {
+   540→  const res = await fetch(url);
+   541→  if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
+   542→  return res.json();
+   543→}
+   544→
+   545→// ─── Data Fetchers ───
+   546→
+   547→async function fetchBinancePrice() {
+   548→  try {
+   549→    // 24h ticker
+   550→    const ticker = await fetchJSON(`${CONFIG.BINANCE_API}/ticker/24hr?symbol=BTCUSDT`);
+   551→    state.price.usd = parseFloat(ticker.lastPrice);
+   552→    state.price.change24h = parseFloat(ticker.priceChangePercent);
+   553→    state.price.volume = parseFloat(ticker.quoteVolume);
+   554→
+   555→    // Market cap (approximate: price * 19.8M circulating supply)
+   556→    state.price.mcap = state.price.usd * 19_800_000;
+   557→
+   558→    // 30-day klines for sparkline
+   559→    const klines = await fetchJSON(`${CONFIG.BINANCE_API}/klines?symbol=BTCUSDT&interval=1d&limit=30`);
+   560→    state.sparkline = klines.map(k => parseFloat(k[4])); // close prices
+   561→  } catch (e) {
+   562→    console.warn('Binance API failed:', e);
+   563→  }
+   564→}
+   565→
+   566→async function fetchBitkubPrice() {
+   567→  try {
+   568→    const data = await fetchJSON(CONFIG.BITKUB_API);
+   569→    // Bitkub returns flat object: { THB_BTC: {...}, THB_ETH: {...}, ... }
+   570→    if (data && data.THB_BTC) {
+   571→      state.price.thb = parseFloat(data.THB_BTC.last);
+   572→    }
+   573→  } catch (e) {
+   574→    // Fallback: estimate THB from USD (approx 35 THB/USD)
+   575→    state.price.thb = state.price.usd * 33;
+   576→  }
+   577→}
+   578→
+   579→async function fetchFearGreed() {
+   580→  try {
+   581→    const data = await fetchJSON(CONFIG.FG_API);
+   582→    if (data && data.data && data.data[0]) {
+   583→      state.onchain.fng = {
+   584→        value: parseInt(data.data[0].value),
+   585→        classification: data.data[0].value_classification,
+   586→        timestamp: data.data[0].timestamp,
+   587→      };
+   588→    }
+   589→  } catch (e) {
+   590→    console.warn('Fear & Greed API failed:', e);
+   591→  }
+   592→}
+   593→
+   594→async function fetchOnchainSignal() {
+   595→  try {
+   596→    const data = await fetchJSON(CONFIG.SIGNAL_URL);
+   597→    // Map actual field names to expected structure
+   598→    state.signal = {
+   599→      score: data.signal_score,
+   600→      zone: typeof data.zone === 'string' ? { label: data.zone.charAt(0).toUpperCase() + data.zone.slice(1) } : data.zone,
+   601→      date: data.date,
+   602→      computed_at: data.computed_at,
+   603→      btc_close: data.btc_close,
+   604→      groups: data.groups || {},
+   605→      indicators: data.indicators || {},
+   606→      history: data.history || [],
+   607→    };
+   608→    if (data.indicators) {
+   609→      // MVRV Ratio
+   610→      const mvrv_ind = data.indicators.btc_mvrv_ratio;
+   611→      if (mvrv_ind && mvrv_ind.raw_value !== null && mvrv_ind.raw_value !== undefined) {
+   612→        state.onchain.mvrv = mvrv_ind.raw_value;
+   613→        state.onchain.mvrv_z = (mvrv_ind.percentile || 0) * 10 - 5; // scale percentile to ~z-score range
+   614→      }
+   615→      // Derive NUPL from MVRV: NUPL = 1 - 1/MVRV
+   616→      if (state.onchain.mvrv > 0) {
+   617→        state.onchain.nupl = 1 - 1 / state.onchain.mvrv;
+   618→      }
+   619→      // Puell Multiple (mining indicator, substitute for SOPR)
+   620→      const puell_ind = data.indicators.btc_puell_multiple;
+   621→      if (puell_ind && puell_ind.raw_value !== null) {
+   622→        state.onchain.puell = puell_ind.raw_value;
+   623→      }
+   624→      // Fund Flow Ratio (on-chain)
+   625→      const ff_ind = data.indicators.btc_fund_flow_ratio;
+   626→      if (ff_ind && ff_ind.raw_value !== null) {
+   627→        state.onchain.fund_flow = ff_ind.raw_value;
+   628→      }
+   629→    }
+   630→  } catch (e) {
+   631→    console.warn('Signal score fetch failed:', e);
+   632→  }
+   633→}
+   634→
+   635→async function fetchBotState() {
+   636→  try {
+   637→    const data = await fetchJSON(CONFIG.BOT_STATE_URL);
+   638→    state.bot = data;
+   639→  } catch (e) {
+   640→    console.warn('Bot state fetch failed:', e);
+   641→    state.bot = null;
+   642→  }
+   643→}
+   644→
+   645→// ─── Renderers ───
+   646→
+   647→function renderPrice() {
+   648→  const { usd, thb, change24h, volume, mcap } = state.price;
+   649→  document.getElementById('price-usd').textContent = fmtUSD(usd);
+   650→  document.getElementById('price-thb').textContent = fmtTHB(thb);
+   651→
+   652→  // 24h change
+   653→  const chEl = document.getElementById('change-24h');
+   654→  const isUp = change24h >= 0;
+   655→  chEl.className = 'change-badge ' + (isUp ? 'up' : 'down');
+   656→  chEl.innerHTML = (isUp ? '▲' : '▼') + ' ' + Math.abs(change24h).toFixed(2) + '%';
+   657→
+   658→  // Trend badge
+   659→  const trend = getTrend(usd, state.onchain.mvrv);
+   660→  const tbEl = document.getElementById('trend-badge');
+   661→  tbEl.style.display = 'inline-flex';
+   662→  tbEl.style.color = trend.color;
+   663→  tbEl.style.borderColor = trend.color + '40';
+   664→  tbEl.style.background = trend.color + '20';
+   665→  tbEl.textContent = trend.trend;
+   666→
+   667→  // Stats
+   668→  document.getElementById('volume-24h').textContent = '$' + fmt(volume, 1);
+   669→  document.getElementById('market-cap').textContent = '$' + fmt(mcap, 1);
+   670→
+   671→  const vsAth = ((usd - CONFIG.ATH_USD) / CONFIG.ATH_USD * 100);
+   672→ const athEl = document.getElementById('vs-ath');
+   673→  athEl.className = 'stat-value ' + (vsAth >= 0 ? 'stat-green' : 'stat-red');
+   674→  athEl.textContent = (vsAth >= 0 ? '+' : '') + vsAth.toFixed(1) + '%';
+   675→
+   676→  // Sparkline
+   677→  renderSparkline();
+   678→}
+   679→
+   680→function renderSparkline() {
+   681→  const data = state.sparkline;
+   682→  if (data.length < 2) return;
+   683→
+   684→  const svg = document.getElementById('sparkline');
+   685→  const w = 600, h = 60;
+   686→  const min = Math.min(...data);
+   687→  const max = Math.max(...data);
+   688→  const range = max - min || 1;
+   689→
+   690→  const points = data.map((v, i) => {
+   691→    const x = (i / (data.length - 1)) * w;
+   692→    const y = h - ((v - min) / range) * (h - 4) - 2;
+   693→    return `${x},${y}`;
+   694→  }).join(' ');
+   695→
+   696→  const areaPoints = `0,${h} ${points} ${w},${h}`;
+   697→  const isUp = data[data.length-1] >= data[0];
+   698→  const color = isUp ? '#22c55e' : '#ef4444';
+   699→
+   700→  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+   701→  svg.innerHTML = `
+   702→    <defs>
+   703→      <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
+   704→        <stop offset="0%" stop-color="${color}" stop-opacity="0.3"/>
+   705→        <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+   706→      </linearGradient>
+   707→    </defs>
+   708→    <polygon points="${areaPoints}" fill="url(#sparkGrad)"/>
+   709→    <polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>
+   710→    <circle cx="${(data.length-1)/(data.length-1)*w}" cy="${h - ((data[data.length-1]-min)/range)*(h-4)-2}" r="3" fill="${color}"/>
+   711→  `;
+   712→}
+   713→
+   714→function renderOnChain() {
+   715→  const { mvrv, nupl, puell } = state.onchain;
+   716→  const mv = getMvrvZone(mvrv);
+   717→  const indCount = Object.keys(state.signal?.indicators || {}).length;
+   718→
+   719→  let html = '';
+   720→
+   721→  // MVRV
+   722→  if (state.onchain.mvrv > 0) {
+   723→    html += `<div class="metric">`;
+   724→    html += `  <div class="metric-header">`;
+   725→    html += `    <span class="metric-label">MVRV Ratio</span>`;
+   726→    html += `    <span class="zone-badge" style="color:${mv.color};border-color:${mv.color}40;background:${mv.color}20">${mv.zone}</span>`;
+   727→    html += `  </div>`;
+   728→    html += `  <div class="metric-value lg">${mvrv.toFixed(3)}</div>`;
+   729→    html += `  <div class="metric-sub"><span>Pct: ${((state.onchain.mvrv_z + 5) / 10 * 100).toFixed(1)}%</span></div>`;
+   730→    html += `</div>`;
+   731→  } else {
+   732→    html += `<div class="metric">`;
+   733→    html += `  <div class="metric-header"><span class="metric-label">MVRV Ratio</span></div>`;
+   734→    html += `  <div class="no-data">Waiting for on-chain data...</div>`;
+   735→    html += `</div>`;
+   736→  }
+   737→
+   738→  // NUPL (derived from MVRV)
+   739→  html += `<div class="metric-divider"></div>`;
+   740→  if (state.onchain.nupl !== null && state.onchain.nupl !== undefined && !isNaN(state.onchain.nupl)) {
+   741→    html += `<div class="metric">`;
+   742→    html += `  <div class="metric-header">`;
+   743→    html += `    <span class="metric-label">NUPL <span style="font-size:10px;color:var(--text-muted)">(derived)</span></span>`;
+   744→    html += `    <span style="font-size:11px;color:var(--text-secondary)">${getNuplPhase(nupl)}</span>`;
+   745→    html += `  </div>`;
+   746→    html += `  <div class="metric-value">${nupl.toFixed(3)}</div>`;
+   747→    html += `</div>`;
+   748→  } else {
+   749→    html += `<div class="metric"><div class="metric-header"><span class="metric-label">NUPL</span></div><div class="no-data">N/A</div></div>`;
+   750→  }
+   751→
+   752→  // Puell Multiple (mining metric, replaces SOPR)
+   753→  html += `<div class="metric-divider"></div>`;
+   754→  html += `<div class="metric">`;
+   755→  html += `  <div class="metric-header">`;
+   756→    html += `    <span class="metric-label">Puell Multiple</span>`;
+   757→    if (puell !== null && puell !== undefined) {
+   758→      const puellSignal = puell < 0.5 ? 'Strong Buy (Miners Capitulating)' : puell < 0.8 ? 'Buy Zone' : puell < 1.2 ? 'Normal' : puell < 2.0 ? 'Overheating' : 'Sell Signal';
+   759→      const puellColor = puell < 0.8 ? 'var(--green)' : puell < 1.2 ? 'var(--text-secondary)' : 'var(--red)';
+   760→      html += `    <span style="font-size:11px;color:${puellColor}">${puellSignal}</span>`;
+   761→    }
+   762→  html += `  </div>`;
+   763→  if (puell !== null && puell !== undefined) {
+   764→    const puellColor = puell < 0.8 ? 'var(--green)' : puell < 1.2 ? 'var(--text-primary)' : 'var(--red)';
+   765→    html += `  <div class="metric-value" style="color:${puellColor}">${puell.toFixed(3)}</div>`;
+   766→  } else {
+   767→    html += `  <div class="no-data">N/A</div>`;
+   768→  }
+   769→  html += `</div>`;
+   770→
+   771→  // Signal Score from btc-signal-analyzer
+   772→  if (state.signal && state.signal.score !== undefined) {
+   773→    html += `<div class="metric-divider"></div>`;
+   774→    html += `<div class="metric">`;
+   775→    html += `  <div class="metric-header">`;
+   776→    html += `    <span class="metric-label">Signal Score</span>`;
+   777→    const sc = state.signal.score;
+   778→    const scColor = sc < 30 ? '#22c55e' : sc < 50 ? '#86efac' : sc < 70 ? '#eab308' : sc < 85 ? '#f97316' : '#ef4444';
+   779→    html += `    <span class="zone-badge" style="color:${scColor};border-color:${scColor}40;background:${scColor}20">${state.signal.zone?.label || 'Neutral'}</span>`;
+   780→    html += `  </div>`;
+   781→    html += `  <div class="metric-value">${sc.toFixed(1)}<span style="font-size:14px;color:var(--text-muted)"> / 100</span></div>`;
+   782→    html += `  <div class="source-tag">Source: btc-signal-analyzer (${indCount} indicators) | ${state.signal.date || 'N/A'}</div>`;
+   783→    html += `</div>`;
+   784→  }
+   785→
+   786→  document.getElementById('onchain-content').innerHTML = html;
+   787→}
+   788→
+   789→function renderMomentum() {
+   790→  const s = state.signal;
+   791→  let html = '';
+   792→
+   793→  if (s && s.indicators) {
+   794→    const ind = s.indicators;
+   795→
+   796→    // Technical Momentum Group Score
+   797→    if (s.groups && s.groups.technical_momentum) {
+   798→      const tm = s.groups.technical_momentum;
+   799→      const tmPct = (tm.score * 100).toFixed(1);
+   800→      const tmColor = tm.score < 0.3 ? 'var(--green)' : tm.score < 0.6 ? 'var(--text-secondary)' : 'var(--red)';
+   801→      const tmLabel = tm.score < 0.3 ? 'Oversold/Bearish' : tm.score < 0.6 ? 'Neutral' : 'Overbought/Bullish';
+   802→      html += `<div class="metric">`;
+   803→      html += `  <div class="metric-header">`;
+   804→      html += `    <span class="metric-label">Momentum Score</span>`;
+   805→      html += `    <span style="font-size:11px;color:${tmColor}">${tmLabel}</span>`;
+   806→      html += `  </div>`;
+   807→      html += `  <div class="metric-value lg" style="color:${tmColor}">${tmPct}<span style="font-size:14px;color:var(--text-muted)">%</span></div>`;
+   808→      html += `</div>`;
+   809→    }
+   810→
+   811→    // Funding Rate
+   812→    const fr = ind.btc_funding_rates;
+   813→    if (fr && fr.raw_value !== null && fr.raw_value !== undefined) {
+   814→      html += `<div class="metric-divider"></div>`;
+   815→      html += `<div class="metric">`;
+   816→      html += `  <div class="metric-header">`;
+   817→      html += `    <span class="metric-label">Funding Rate</span>`;
+   818→      const frColor = fr.raw_value > 0.01 ? 'var(--red)' : fr.raw_value < 0 ? 'var(--green)' : 'var(--text-secondary)';
+   819→      html += `    <span style="font-size:11px;color:${frColor}">${fr.raw_value > 0.01 ? 'High Long Bias' : fr.raw_value < 0 ? 'Short Bias' : 'Neutral'}</span>`;
+   820→      html += `  </div>`;
+   821→      html += `  <div class="metric-value">${(fr.raw_value * 100).toFixed(4)}%</div>`;
+   822→      html += `  <div class="metric-sub"><span>Pct: ${((fr.percentile || 0) * 100).toFixed(1)}%</span></div>`;
+   823→      html += `</div>`;
+   824→    }
+   825→
+   826→    // Taker Buy/Sell Ratio
+   827→    const taker = ind.btc_taker_buy_sell_ratio;
+   828→    if (taker && taker.raw_value !== null && taker.raw_value !== undefined) {
+   829→      html += `<div class="metric-divider"></div>`;
+   830→      html += `<div class="metric">`;
+   831→      html += `  <div class="metric-header">`;
+   832→      html += `    <span class="metric-label">Taker Buy/Sell</span>`;
+   833→      const tColor = taker.raw_value > 1.1 ? 'var(--green)' : taker.raw_value < 0.9 ? 'var(--red)' : 'var(--text-secondary)';
+   834→      html += `    <span style="font-size:11px;color:${tColor}">${taker.raw_value > 1.1 ? 'Buyers Dominant' : taker.raw_value < 0.9 ? 'Sellers Dominant' : 'Balanced'}</span>`;
+   835→      html += `  </div>`;
+   836→      html += `  <div class="metric-value">${taker.raw_value.toFixed(3)}</div>`;
+   837→      html += `</div>`;
+   838→    }
+   839→
+   840→    // Exchange Netflow
+   841→    const nf = ind.btc_exchange_netflow;
+   842→    if (nf && nf.raw_value !== null && nf.raw_value !== undefined) {
+   843→      html += `<div class="metric-divider"></div>`;
+   844→      html += `<div class="metric">`;
+   845→      html += `  <div class="metric-header">`;
+   846→      html += `    <span class="metric-label">Exchange Netflow</span>`;
+   847→      const nfColor = nf.raw_value > 0 ? 'var(--red)' : 'var(--green)';
+   848→      const nfLabel = nf.raw_value > 0 ? 'Inflow (Selling)' : 'Outflow (Accumulation)';
+   849→      html += `    <span style="font-size:11px;color:${nfColor}">${nfLabel}</span>`;
+   850→      html += `  </div>`;
+   851→      html += `  <div class="metric-value" style="color:${nfColor}">${nf.raw_value > 0 ? '+' : ''}${nf.raw_value.toFixed(0)} BTC</div>`;
+   852→      html += `</div>`;
+   853→    }
+   854→
+   855→    // Whale Ratio
+   856→    const wr = ind.btc_exchange_whale_ratio;
+   857→    if (wr && wr.raw_value !== null && wr.raw_value !== undefined) {
+   858→      html += `<div class="metric-divider"></div>`;
+   859→      html += `<div class="metric">`;
+   860→      html += `  <div class="metric-header">`;
+   861→      html += `    <span class="metric-label">Whale Ratio</span>`;
+   862→      const wrColor = wr.raw_value > 0.5 ? 'var(--red)' : 'var(--green)';
+   863→      html += `    <span style="font-size:11px;color:${wrColor}">${wr.raw_value > 0.5 ? 'High Whale Activity' : 'Normal'}</span>`;
+   864→      html += `  </div>`;
+   865→      html += `  <div class="metric-value">${(wr.raw_value * 100).toFixed(1)}%</div>`;
+   866→      html += `</div>`;
+   867→    }
+   868→
+   869→    // 7d / 30d Returns
+   870→    const r7 = ind.return_7d;
+   871→    const r30 = ind.return_30d;
+   872→    if (r7 && r30 && r7.raw_value !== null && r30.raw_value !== null) {
+   873→      html += `<div class="metric-divider"></div>`;
+   874→      html += `<div class="metric">`;
+   875→      html += `  <div class="metric-header"><span class="metric-label">Price Returns</span></div>`;
+   876→      html += `  <div style="display:flex;gap:16px">`;
+   877→      const r7c = r7.raw_value >= 0 ? 'var(--green)' : 'var(--red)';
+   878→      const r30c = r30.raw_value >= 0 ? 'var(--green)' : 'var(--red)';
+   879→      html += `    <div><span style="font-size:11px;color:var(--text-muted)">7d</span><div style="font-size:16px;font-weight:600;color:${r7c}">${(r7.raw_value >= 0 ? '+' : '')}${(r7.raw_value * 100).toFixed(1)}%</div></div>`;
+   880→      html += `    <div><span style="font-size:11px;color:var(--text-muted)">30d</span><div style="font-size:16px;font-weight:600;color:${r30c}">${(r30.raw_value >= 0 ? '+' : '')}${(r30.raw_value * 100).toFixed(1)}%</div></div>`;
+   881→      html += `  </div>`;
+   882→      html += `</div>`;
+   883→    }
+   884→  } else {
+   885→    html = `<div class="no-data">On-chain signal data not available yet. Waiting for btc-signal-analyzer update.</div>`;
+   886→  }
+   887→
+   888→  document.getElementById('momentum-content').innerHTML = html;
+   889→}
+   890→
+   891→function renderFearGreed() {
+   892→  const fg = state.onchain.fng;
+   893→  if (!fg) {
+   894→    document.getElementById('fg-content').innerHTML = `<div class="no-data">Fear & Greed data not available</div>`;
+   895→    return;
+   896→  }
+   897→
+   898→  const angle = 90 - (fg.value / 100) * 180; // 0=left(Fear), 100=right(Greed)
+   899→  const color = getFgColor(fg.value);
+   900→  const label = getFgLabel(fg.value);
+   901→  const desc = getFgDesc(fg.value);
+   902→
+   903→  let html = `<div class="fg-container">`;
+   904→  html += `  <div class="fg-gauge">`;
+   905→  html += `    <div class="fg-gauge-bg"></div>`;
+   906→  html += `    <div class="fg-gauge-inner"></div>`;
+   907→  html += `    <div class="fg-needle" style="transform:rotate(${angle}deg)"></div>`;
+   908→  html += `  </div>`;
+   909→  html += `  <div class="fg-value" style="color:${color}">${fg.value}</div>`;
+   910→  html += `  <div class="fg-label" style="color:${color}">${label}</div>`;
+   911→  html += `  <div class="fg-desc">${desc}</div>`;
+   912→  html += `</div>`;
+   913→
+   914→  document.getElementById('fg-content').innerHTML = html;
+   915→}
+   916→
+   917→function renderKeyLevels() {
+   918→  const { usd } = state.price;
+   919→  const s = state.signal;
+   920→  let levels = [];
+   921→
+   922→  // Derive key levels from available data
+   923→  // MVRV = price / realized_price, so realized_price = price / MVRV
+   924→  const rp = state.onchain.mvrv > 0 ? usd / state.onchain.mvrv : 0;
+   925→  // LTH-RP approximation (typically 1.15x realized price)
+   926→  const lthRp = rp * 1.15;
+   927→
+   928→  if (rp > 0) {
+   929→    levels.push({ label: 'Realized Price (derived)', value: rp, dist: ((usd - rp) / rp) * 100 });
+   930→  }
+   931→  if (lthRp > 0) {
+   932→    levels.push({ label: 'LTH Realized Price (est.)', value: lthRp, dist: ((usd - lthRp) / lthRp) * 100 });
+   933→  }
+   934→  levels.push({ label: 'ATH', value: CONFIG.ATH_USD, dist: ((usd - CONFIG.ATH_USD) / CONFIG.ATH_USD) * 100 });
+   935→
+   936→  // Compute THB/USD rate dynamically if possible
+   937→  const thbUsdRate = (state.price.thb > 0 && state.price.usd > 0) ? state.price.usd / state.price.thb : 35;
+   938→
+   939→  // Add from bot state if available (match by label, never overwrite ATH)
+   940→  if (state.bot && state.bot.last_indicators) {
+   941→    const bi = state.bot.last_indicators;
+   942→    if (bi.realized_price > 0) {
+   943→      const rpUsd = bi.realized_price / thbUsdRate;
+   944→      const idx = levels.findIndex(l => l.label.includes('Realized Price') && !l.label.includes('LTH'));
+   945→      if (idx >= 0) { levels[idx] = { label: 'Realized Price', value: rpUsd, dist: ((usd - rpUsd) / rpUsd) * 100 }; }
+   946→      else { levels.splice(levels.length - 1, 0, { label: 'Realized Price', value: rpUsd, dist: ((usd - rpUsd) / rpUsd) * 100 }); }
+   947→    }
+   948→    if (bi.lth_realized_price > 0) {
+   949→      const lthUsd = bi.lth_realized_price / thbUsdRate;
+   950→      const idx = levels.findIndex(l => l.label.includes('LTH'));
+   951→      if (idx >= 0) { levels[idx] = { label: 'LTH Realized Price', value: lthUsd, dist: ((usd - lthUsd) / lthUsd) * 100 }; }
+   952→      else { levels.splice(levels.length - 1, 0, { label: 'LTH Realized Price', value: lthUsd, dist: ((usd - lthUsd) / lthUsd) * 100 }); }
+   953→    }
+   954→  }
+   955→
+   956→  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0">';
+   957→  levels.forEach(l => {
+   958→    const dColor = l.dist >= 0 ? 'var(--green)' : 'var(--red)';
+   959→    html += `<div class="level-row">`;
+   960→    html += `  <span class="level-label">${l.label}</span>`;
+   961→    html += `  <div class="level-right">`;
+   962→    html += `    <span class="level-value">${fmtUSD(l.value)}</span>`;
+   963→    html += `    <span class="level-dist" style="color:${dColor}">${l.dist >= 0 ? '+' : ''}${l.dist.toFixed(1)}%</span>`;
+   964→    html += `  </div>`;
+   965→    html += `</div>`;
+   966→  });
+   967→  html += '</div>';
+   968→  html += `<div class="level-note">`;
+   969→  html += `  Below Realized Price = historically profitable accumulation zone. `;
+   970→  html += `  Above LTH-RP = long-term holders in profit (sell pressure zone). `;
+   971→  html += `  Levels derived from MVRV: RP ≈ Price / MVRV.`;
+   972→  html += `</div>`;
+   973→
+   974→  document.getElementById('levels-content').innerHTML = html;
+   975→}
+   976→
+   977→function renderBot() {
+   978→  const bot = state.bot;
+   979→  const badge = document.getElementById('bot-status-badge');
+   980→
+   981→  if (!bot) {
+   982→    badge.textContent = 'NO DATA';
+   983→    badge.className = 'bot-status-badge offline';
+   984→    document.getElementById('bot-content').innerHTML = `
+   985→      <div class="no-data" style="text-align:center;padding:16px 0">
+   986→        Phoenix bot state not available.<br>
+   987→        <span style="font-size:11px">Push bot_state.json to btc-signal-analyzer repo to enable live status.</span>
+   988→      </div>
+   989→    `;
+   990→    return;
+   991→  }
+   992→
+   993→  badge.textContent = bot.last_run_date ? 'ACTIVE' : 'OFFLINE';
+   994→  badge.className = 'bot-status-badge ' + (bot.last_run_date ? 'active' : 'offline');
+   995→
+   996→  const bi = bot.last_indicators || {};
+   997→  const ld = bot.last_decision || {};
+   998→  const price = bi.price || 0;
+   999→  const btcBal = bot.last_btc_balance || 0;
+  1000→  const cashBal = bot.last_cash_balance || 0;
+  1001→  const portfolioVal = bot.last_portfolio_value || 0;
+  1002→  const avgCost = btcBal > 0 ? (bot.adjusted_invested || bot.total_invested || 0) / btcBal : 0;
+  1003→  const unrealizedPnl = avgCost > 0 ? ((price - avgCost) / avgCost) * 100 : 0;
+  1004→
+  1005→  let decisionText = 'No trade';
+  1006→  if (ld.buy_amount > 0) decisionText = `BUY ${ld.buy_amount.toLocaleString()} ${bot.last_exchange_currency || 'THB'}`;
+  1007→  else if (ld.sell_amount > 0) decisionText = `SELL ${ld.sell_amount.toLocaleString()} ${bot.last_exchange_currency || 'THB'}`;
+  1008→
+  1009→  const pnlColor = unrealizedPnl >= 0 ? 'var(--green)' : 'var(--red)';
+  1010→
+  1011→  let html = `<div class="bot-grid">`;
+  1012→  html += `  <div class="bot-item"><div class="label">Portfolio</div><div class="value">${fmtTHB(portfolioVal)}</div></div>`;
+  1013→  html += `  <div class="bot-item"><div class="label">P&L</div><div class="value" style="color:${pnlColor}">${unrealizedPnl >= 0 ? '+' : ''}${unrealizedPnl.toFixed(1)}%</div></div>`;
+  1014→  html += `  <div class="bot-item"><div class="label">BTC</div><div class="value" style="font-family:monospace;font-size:12px">${btcBal.toFixed(6)}</div></div>`;
+  1015→  html += `  <div class="bot-item"><div class="label">Cash</div><div class="value">${fmtTHB(cashBal)}</div></div>`;
+  1016→  html += `</div>`;
+  1017→  html += `<div class="bot-decision">`;
+  1018→  html += `  <div class="label">Last Decision</div>`;
+  1019→  html += `  <div class="decision-text">${decisionText}</div>`;
+  1020→  html += `  <div class="bot-meta">`;
+  1021→  html += `    Multiplier: ${ld.multiplier || 0}x | MVRV: ${bi.mvrv || '--'} | Sell Score: ${bi.sell_score || 0}`;
+  1022→  if (bi.path_taken && bi.path_taken !== 'none') {
+  1023→    html += `    <span class="path-badge">${bi.path_taken}</span>`;
+  1024→  }
+  1025→  html += `  </div>`;
+  1026→  html += `  <div class="bot-meta" style="margin-top:4px">`;
+  1027→  html += `    Runs: ${bot.run_count || 0} | Buys: ${bot.buy_count || 0} | Sells: ${bot.sell_count || 0} | Last: ${bot.last_run_date || 'N/A'}`;
+  1028→  html += `  </div>`;
+  1029→  html += `</div>`;
+  1030→
+  1031→  document.getElementById('bot-content').innerHTML = html;
+  1032→}
+  1033→
+  1034→function renderBriefing() {
+  1035→  const { mvrv, nupl, fng } = state.onchain;
+  1036→  const parts = [];
+  1037→
+  1038→  // MVRV
+  1039→  if (mvrv > 0) {
+  1040→    if (mvrv < 1.0) {
+  1041→      parts.push(`MVRV at ${mvrv.toFixed(2)} is in deep accumulation zone — historically strong buy signals.`);
+  1042→    } else if (mvrv < 1.5) {
+  1043→      parts.push(`MVRV at ${mvrv.toFixed(2)} — still in accumulation territory, good for DCA.`);
+  1044→    } else if (mvrv < 2.0) {
+  1045→      parts.push(`MVRV at ${mvrv.toFixed(2)} — neutral zone, normal DCA pace recommended.`);
+  1046→    } else if (mvrv < 2.5) {
+  1047→      parts.push(`MVRV at ${mvrv.toFixed(2)} — entering euphoria, consider reducing buy size.`);
+  1048→    } else {
+  1049→      parts.push(`MVRV at ${mvrv.toFixed(2)} — overvalued territory, selling signals may activate.`);
+  1050→    }
+  1051→  } else {
+  1052→    parts.push('On-chain data not yet available. Waiting for btc-signal-analyzer update.');
+  1053→  }
+  1054→
+  1055→  // Fear & Greed
+  1056→  if (fng) {
+  1057→    if (fng.value <= 25) {
+  1058→      parts.push(`Fear & Greed Index at ${fng.value} (Extreme Fear) — historically one of the best buying opportunities.`);
+  1059→    } else if (fng.value >= 75) {
+  1060→      parts.push(`Fear & Greed Index at ${fng.value} (Extreme Greed) — caution advised, consider taking some profits.`);
+  1061→    }
+  1062→  }
+  1063→
+  1064→  // Signal Score
+  1065→  if (state.signal && state.signal.score !== undefined) {
+  1066→    const sc = state.signal.score;
+  1067→    if (sc < 30) {
+  1068→      parts.push(`Signal Score: ${sc.toFixed(1)}/100 — Strong buy signal from multi-indicator analysis.`);
+  1069→    } else if (sc > 70) {
+  1070→      parts.push(`Signal Score: ${sc.toFixed(1)}/100 — Elevated risk, most indicators suggest caution.`);
+  1071→    }
+  1072→  }
+  1073→
+  1074→  // Funding rate warning
+  1075→  if (state.signal && state.signal.indicators) {
+  1076→    const fr = state.signal.indicators.btc_funding_rates;
+  1077→    if (fr && fr.raw_value > 0.01) {
+  1078→      parts.push(`High funding rate (${(fr.raw_value*100).toFixed(4)}%) suggests crowded long positioning — potential for squeeze.`);
+  1079→    }
+  1080→  }
+  1081→
+  1082→  document.getElementById('briefing-text').textContent = parts.join(' ');
+  1083→}
+  1084→
+  1085→// ─── Main ───
+  1086→
+  1087→async function init() {
+  1088→  const btn = document.getElementById('refresh-btn');
+  1089→  btn.classList.add('spinning');
+  1090→
+  1091→  try {
+  1092→    // Fetch all data in parallel
+  1093→    await Promise.allSettled([
+  1094→      fetchBinancePrice(),
+  1095→      fetchBitkubPrice(),
+  1096→      fetchFearGreed(),
+  1097→      fetchOnchainSignal(),
+  1098→      fetchBotState(),
+  1099→    ]);
+  1100→
+  1101→    // Hide loading, show app
+  1102→    document.getElementById('loading').style.display = 'none';
+  1103→    document.getElementById('error').style.display = 'none';
+  1104→    document.getElementById('app').style.display = 'block';
+  1105→
+  1106→    // Render all sections
+  1107→    renderPrice();
+  1108→    renderOnChain();
+  1109→    renderMomentum();
+  1110→    renderFearGreed();
+  1111→    renderKeyLevels();
+  1112→    renderBot();
+  1113→    renderBriefing();
+  1114→
+  1115→    // Update time
+  1116→    document.getElementById('refresh-time').textContent =
+  1117→      new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+  1118→
+  1119→  } catch (e) {
+  1120→    document.getElementById('loading').style.display = 'none';
+  1121→    document.getElementById('error').style.display = 'block';
+  1122→    document.getElementById('error-msg').textContent = String(e);
+  1123→  } finally {
+  1124→    btn.classList.remove('spinning');
+  1125→  }
+  1126→}
+  1127→
+  1128→// Auto-refresh
+  1129→init();
+  1130→setInterval(init, CONFIG.REFRESH_INTERVAL);
+  1131→</script>
+  1132→
+  1133→</body>
+  1134→</html>
