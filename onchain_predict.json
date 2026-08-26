@@ -1,0 +1,38 @@
+{
+  "code": 200,
+  "data": {
+    "description": "",
+    "html": "",
+    "httpStatus": 200,
+    "httpStatusText": "",
+    "metadata": {
+      "Author": "Grobys, Klaus; Näsman, Sebastian; Sandretto, Davide",
+      "CreationDate": "D:20260527080451+03'00'",
+      "Creator": "PDFium",
+      "EncryptFilterName": null,
+      "IsAcroFormPresent": false,
+      "IsCollectionPresent": false,
+      "IsLinearized": false,
+      "IsSignaturesPresent": false,
+      "IsXFAPresent": false,
+      "Keywords": "On-chain data; Market cycles; Behavioral finance; Bitcoin",
+      "Language": null,
+      "ModDate": "D:20260527080738+03'00'",
+      "PDFFormatVersion": "1.7",
+      "Producer": "PDFium",
+      "Title": "Using on-chain data to predict Bitcoin cycles"
+    },
+    "publishedTime": "Wed, 27 May 2026 05:14:00 GMT",
+    "title": "Using on-chain data to predict Bitcoin cycles",
+    "url": "https://osuva.uwasa.fi/server/api/core/bitstreams/6575b90c-6140-44e7-a798-011a1793d134/content",
+    "usage": {
+      "tokens": 0
+    }
+  },
+  "meta": {
+    "usage": {
+      "tokens": 0
+    }
+  },
+  "status": 20000
+}

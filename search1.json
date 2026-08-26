@@ -1,0 +1,83 @@
+[
+  {
+    "url": "https://github.com/topics/on-chain-data",
+    "name": "on-chain-data",
+    "snippet": "on-chain activity (92% scores trader skill net of variance, and backtests skill-weighted forecasts point-in-time. The signal does not beat the price. fully ...",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/wangzhe3224/awesome-systematic-trading",
+    "name": "wangzhe3224/awesome-systematic-trading",
+    "snippet": "& backtesting systems. Freqtrade is a free and open source crypto trading bot written in Python. It contains backtesting, plotting and money management tools … ...",
+    "host_name": "github.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://medium.com/@gwrx2005/top-10-ai-powered-crypto-trading-repositories-on-github-0041862546b6",
+    "name": "Top 10 AI-Powered Crypto Trading Repositories on GitHub",
+    "snippet": "Freqtrade is a popular open-source crypto trading bot that supports strategy development, backtesting, and live trading.",
+    "host_name": "medium.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/dbogatic/crypto-analysis",
+    "name": "dbogatic/crypto-analysis",
+    "snippet": "This repo attempts to determine the direction of crypto asset movement. Added backtesting SMA strategy for BTC and ETH using Vectorbt API. Scraped hourly HTML ...",
+    "host_name": "github.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.facebook.com/61590475018476/posts/i-audit-a-github-trading-repo-on-this-page-every-couple-of-weeks-every-one-so-fa/122133264777349167",
+    "name": "Vectorbt GitHub repo review: backtesting and numerical",
+    "snippet": "Ultra-fast vectorized backtesting capable. On- Chain Metrics (Smart Money Activity) It allows users to execute basic cryptocurrency trading ...",
+    "host_name": "www.facebook.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/abailey81/Crypto-Statistical-Arbitrage",
+    "name": "abailey81/Crypto-Statistical-Arbitrage",
+    "snippet": "Multi-venue quantitative crypto trading system — cointegration-based pair selection, ML-enhanced signals , and walk-forward backtesting across 32 CEX/DEX venues. Read more",
+    "host_name": "github.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.sciencedirect.com/science/article/pii/S266682702500057X",
+    "name": "Bitcoin price direction prediction using on-chain data and",
+    "snippet": "by R Dubey · 2025 · Cited by 17 — This research demonstrated a systematic approach to evaluate 196 on- chain metrics for helping predict the price of Bitcoin .",
+    "host_name": "www.sciencedirect.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://backtest-kit.github.io",
+    "name": "backtest-kit",
+    "snippet": "A TypeScript engine for backtesting and live-trading strategies — crypto , forex, DEX, spot or futures — where the code you test is the code you ship.",
+    "host_name": "backtest-kit.github.io",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://arxiv.org/html/2501.00826v3",
+    "name": "LLM-Powered Multi-Agent System for Automated Crypto",
+    "snippet": "Jun 16, 2026 — We propose a multi-agent system framework in which three modality-specialised agents — a Crypto Agent processing market dynamics, a News Agent ... Read more",
+    "host_name": "arxiv.org",
+    "rank": 8,
+    "date": "Jun 16, 2026",
+    "favicon": ""
+  }
+]

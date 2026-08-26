@@ -1,0 +1,83 @@
+[
+  {
+    "url": "https://github.com/topics/walk-forward-analysis",
+    "name": "walk-forward-analysis",
+    "snippet": "Multi-asset portfolio backtesting engine for Python . Weights-based strategies, walk-forward analysis, and comprehensive metrics. python portfolio finance ... Read more",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/topics/freqtrade-strategies?o=desc&s=stars",
+    "name": "freqtrade-strategies",
+    "snippet": "Freqtrade bot bitcoin trading trading -bot. HyperOpt a lot of signals to alter the weights from. 32+ enhancements. Includes showcase strategies.",
+    "host_name": "github.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/wangzhe3224/awesome-systematic-trading",
+    "name": "wangzhe3224/awesome-systematic-trading",
+    "snippet": "It contains backtesting , plotting and money management tools as well as strategy optimization by machine learning. * Hummingbot · GitHub last commit (branch) ... Read more",
+    "host_name": "github.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=xaB1GS7X0xA",
+    "name": "I Rebuilt the CoinQuant AI BTC Strategy in Python [Free Code]",
+    "snippet": "CoinQuant AI backtest and reproduce it step by step in Python, then compare the signals, trades, commissions, and equity curve",
+    "host_name": "www.youtube.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://medium.com/@gwrx2005/top-10-ai-powered-crypto-trading-repositories-on-github-0041862546b6",
+    "name": "Top 10 AI-Powered Crypto Trading Repositories on GitHub",
+    "snippet": "Description & AI Methods: Jesse is an open-source Python framework for researching, backtesting, and executing crypto trading strategies. Read more",
+    "host_name": "medium.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/topics/quant-trading-framework",
+    "name": "quant-trading-framework",
+    "snippet": "3 days ago — A complete reference of every key metric, chart, and scoring component displayed on the dashboard. Data updated once a day after market close. Read more",
+    "host_name": "github.com",
+    "rank": 5,
+    "date": "Aug 23, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/topics/backtest",
+    "name": "backtest · GitHub Topics",
+    "snippet": "Free open source crypto trading bot to automate AI, Grid, DCA and TradingView strategies on Binance, Hyperliquid and 15+ exchanges, with a simple interface. Read more",
+    "host_name": "github.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.kdnuggets.com/10-github-repositories-to-master-quant-trading",
+    "name": "10 GitHub Repositories to Master Quant Trading",
+    "snippet": "May 20, 2026 — From your first backtest to a real trading system, here are GitHub repos that can seriously level up your quant trading skills fast.",
+    "host_name": "www.kdnuggets.com",
+    "rank": 7,
+    "date": "May 20, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://wilsonfreitas.github.io/awesome-quant",
+    "name": "Awesome Quant",
+    "snippet": "Awesome Quant ; A Python async and event driven framework for algorithmic trading , with a focus on crypto currencies. https:// github .com/gbeced/basana. Read more",
+    "host_name": "wilsonfreitas.github.io",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  }
+]

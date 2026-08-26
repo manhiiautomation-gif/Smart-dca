@@ -1,0 +1,74 @@
+[
+  {
+    "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC10773860",
+    "name": "Bitcoin volatility in bull vs. bear market-insights from analyzing",
+    "snippet": "by AC Baroiu · 2023 · Cited by 7 — on- chain metrics , together with Twitter sentiment, are being used to determine the best approach for Bitcoin price prediction .",
+    "host_name": "pmc.ncbi.nlm.nih.gov",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.ark-invest.com/articles/analyst-research/on-chain-data-bitcoin",
+    "name": "On-Chain Data: A New Framework to Evaluate Bitcoin",
+    "snippet": "Jan 11, 2021 — In collaboration with Glassnode, we illustrate how on- chain data offers a new framework to analyze emerging monetary assets like bitcoin .",
+    "host_name": "www.ark-invest.com",
+    "rank": 1,
+    "date": "Jan 11, 2021",
+    "favicon": ""
+  },
+  {
+    "url": "https://jfin-swufe.springeropen.com/counter/pdf/10.1186/s40854-024-00643-1.pdf?utm_source=consensus",
+    "name": "Deep learning for Bitcoin price direction prediction",
+    "snippet": "by O Omole · 2024 · Cited by 76 — This paper applies deep learning models to predict Bitcoin price directions and the subsequent profitability of trading strategies based on these predictions . Read more",
+    "host_name": "jfin-swufe.springeropen.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://osuva.uwasa.fi/server/api/core/bitstreams/6575b90c-6140-44e7-a798-011a1793d134/content",
+    "name": "Using on-chain data to predict Bitcoin cycles",
+    "snippet": "by K Grobys · Cited by 1 — This paper contributes to this literature by assessing whether three on- chain , trading-based measures help predict the Bitcoin price time ...",
+    "host_name": "osuva.uwasa.fi",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://arxiv.org/pdf/2411.06327",
+    "name": "Return and Volatility Forecasting Using On-Chain Flows in",
+    "snippet": "by Y Chi · 2024 — We empirically examine the intraday return - and volatility-forecasting power of on- chain flow data for Bitcoin ( BTC ), Ethereum (ETH), and Tether (USDT).",
+    "host_name": "arxiv.org",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://papers.ssrn.com/sol3/Delivery.cfm/5020002.pdf?abstractid=5020002&mirid=1",
+    "name": "Order Flow and Cryptocurrency Returns",
+    "snippet": "In conclusion, our empirical evidence strongly indicates that information conveyed by order flow matters for cryptocurrency returns . ... Predicting exchange rates ... Read more",
+    "host_name": "papers.ssrn.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.bis.org/publ/work1049.pdf?trk=public_post_comment-text",
+    "name": "Crypto trading and Bitcoin prices: evidence from a new",
+    "snippet": "by R Auer · 2022 · Cited by 1 — Prices for cryptocurrencies have undergone multiple boom-bust cycles, We show that a Bitcoin price during the social unrest in Kazakhstan in early 2022.  ...",
+    "host_name": "www.bis.org",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.mdpi.com/1911-8074/17/10/443",
+    "name": "Bitcoin Return Prediction: Is It Possible via Stock-to-Flow,",
+    "snippet": "by A Shelton · 2024 · Cited by 10 — Within this paper , I test whether such models and variables are predictive of Bitcoin's returns . I find that the stock-to- flow model predictions ... Read more",
+    "host_name": "www.mdpi.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  }
+]

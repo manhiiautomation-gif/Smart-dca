@@ -1,0 +1,59 @@
+name: Dashboard Update (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: 'Optional message (shown on dashboard)'
+        required: false
+        type: string
+
+jobs:
+  update-dashboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r live_bot/requirements.txt
+
+      - name: Generate dashboard
+        env:
+          BOT_ENABLED: 'true'  # Always show latest data
+        run: |
+          python scripts/generate_dashboard.py
+
+      - name: Commit & push dashboard
+        run: |
+          git config user.name "Phoenix Bot"
+          git config user.email "phoenix-bot@users.noreply.github.com"
+          git add dashboard/dist/index.html
+          if git diff --staged --quiet; then
+            echo "No dashboard changes"
+          else
+            git commit -m "dashboard: manual update"
+            for i in 1 2 3; do
+              git pull --rebase && git push && break || sleep 10
+            done
+          fi
+
+  deploy:
+    needs: update-dashboard
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/deploy-pages.yml
+    with:
+      skip_build: true
+    secrets: inherit

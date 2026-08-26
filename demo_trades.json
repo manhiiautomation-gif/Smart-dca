@@ -1,0 +1,342 @@
+[
+  {
+    "date": "2026-08-11 07:58",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.0001404,
+    "price": 63992.9,
+    "fee": 0.01,
+    "slippage": 0.0044,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-11 09:44",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00013995,
+    "price": 64180.0,
+    "fee": 0.01,
+    "slippage": 0.0021,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-11 10:36",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00013989,
+    "price": 64208.7,
+    "fee": 0.01,
+    "slippage": 0.0024,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-11 11:32",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00013974,
+    "price": 64279.2,
+    "fee": 0.01,
+    "slippage": 0.0021,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-11 12:30",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00013973,
+    "price": 64283.1,
+    "fee": 0.01,
+    "slippage": 0.002,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-11 14:07",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014011,
+    "price": 64098.5,
+    "fee": 0.01,
+    "slippage": 0.0009,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-11 15:43",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014153,
+    "price": 63460.3,
+    "fee": 0.01,
+    "slippage": 0.0013,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-11 16:39",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014151,
+    "price": 63485.5,
+    "fee": 0.01,
+    "slippage": 0.0038,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-11 17:44",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014142,
+    "price": 63507.5,
+    "fee": 0.01,
+    "slippage": 0.001,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-11 18:39",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014182,
+    "price": 63334.0,
+    "fee": 0.01,
+    "slippage": 0.0017,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-11 19:49",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014173,
+    "price": 63380.1,
+    "fee": 0.01,
+    "slippage": 0.0026,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-11 20:29",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014121,
+    "price": 63605.2,
+    "fee": 0.01,
+    "slippage": 0.0019,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-11 21:30",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014121,
+    "price": 63615.6,
+    "fee": 0.01,
+    "slippage": 0.0035,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-11 22:25",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014113,
+    "price": 63655.7,
+    "fee": 0.01,
+    "slippage": 0.0036,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-11 23:25",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.0001414,
+    "price": 63531.3,
+    "fee": 0.01,
+    "slippage": 0.0034,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-12 00:43",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014112,
+    "price": 63661.0,
+    "fee": 0.01,
+    "slippage": 0.004,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-12 03:13",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014111,
+    "price": 63660.9,
+    "fee": 0.01,
+    "slippage": 0.003,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-12 05:19",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014087,
+    "price": 63768.4,
+    "fee": 0.01,
+    "slippage": 0.0034,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-12 06:59",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014119,
+    "price": 63625.8,
+    "fee": 0.01,
+    "slippage": 0.0035,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-12 08:53",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014095,
+    "price": 63719.6,
+    "fee": 0.01,
+    "slippage": 0.0013,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-12 10:44",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014012,
+    "price": 64097.7,
+    "fee": 0.01,
+    "slippage": 0.0013,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-12 11:33",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014009,
+    "price": 64134.5,
+    "fee": 0.01,
+    "slippage": 0.0045,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-12 12:34",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00013975,
+    "price": 64270.3,
+    "fee": 0.01,
+    "slippage": 0.0019,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-12 14:08",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014123,
+    "price": 63590.8,
+    "fee": 0.01,
+    "slippage": 0.0009,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-12 15:42",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014158,
+    "price": 63450.0,
+    "fee": 0.01,
+    "slippage": 0.0031,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-12 16:39",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014153,
+    "price": 63468.4,
+    "fee": 0.01,
+    "slippage": 0.0029,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-12 17:44",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014166,
+    "price": 63421.7,
+    "fee": 0.01,
+    "slippage": 0.0043,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-12 18:39",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014175,
+    "price": 63378.6,
+    "fee": 0.01,
+    "slippage": 0.0042,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-12 19:51",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014202,
+    "price": 63247.9,
+    "fee": 0.01,
+    "slippage": 0.0025,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-12 21:30",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014168,
+    "price": 63410.1,
+    "fee": 0.01,
+    "slippage": 0.0041,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-12 22:25",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014159,
+    "price": 63445.0,
+    "fee": 0.01,
+    "slippage": 0.0033,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-12 23:24",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014183,
+    "price": 63341.1,
+    "fee": 0.01,
+    "slippage": 0.0039,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-13 00:45",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014159,
+    "price": 63452.0,
+    "fee": 0.01,
+    "slippage": 0.0044,
+    "reserve": 0.0
+  },
+  {
+    "date": "2026-08-13 03:17",
+    "type": "buy",
+    "amount": 8.98,
+    "btc": 0.00014143,
+    "price": 63504.6,
+    "fee": 0.01,
+    "slippage": 0.0017,
+    "reserve": 0.0
+  }
+]

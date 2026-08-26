@@ -1,0 +1,74 @@
+[
+  {
+    "url": "https://www.sciencedirect.com/science/article/pii/S266682702500057X",
+    "name": "Bitcoin price direction prediction using on-chain data and feature selection",
+    "snippet": "They found 64.84 % accuracy using Logistic Regression for daily price prediction and 59.40 % accuracy from XGBoost on 5-minute interval price prediction.",
+    "host_name": "www.sciencedirect.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://link.springer.com/article/10.1186/s40854-024-00643-1",
+    "name": "Deep learning for Bitcoin price direction prediction - Springer Nature",
+    "snippet": "Aug 5, 2024 · This paper applies deep learning models to predict Bitcoin price directions and the subsequent profitability of trading strategies based on ...",
+    "host_name": "link.springer.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.chainalysis.com/blog/2025-global-crypto-adoption-index",
+    "name": "The Chainalysis 2025 Global Adoption Index",
+    "snippet": "Sep 2, 2025 · In each year's report, we look at both on- and off-chain data to determine which countries are leading the world in grassroots crypto adoption.",
+    "host_name": "www.chainalysis.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://aaltodoc.aalto.fi/bitstreams/d2902d1c-d56f-4d3d-ac71-a5504eee7722/download",
+    "name": "[PDF] An Integrated Dataset Approach for Short-Term Forecasting - Aaltodoc",
+    "snippet": "coin-specific accuracy metrics are evaluated. This analysis helps determine whether a single model consist- ently performs well across all cryptocurrencies … ...",
+    "host_name": "aaltodoc.aalto.fi",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://ieeexplore.ieee.org/iel8/11354996/11354997/11355086.pdf",
+    "name": "Bitcoin Price Prediction: A Systematic Literature Review and Bibliometric",
+    "snippet": "Studies often use different datasets, evaluation metrics (RMSE, MAE, MAPE, directional accuracy), and experimental designs, making direct comparisons and.",
+    "host_name": "ieeexplore.ieee.org",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.tradealgo.com/trading-guides/crypto/on-chain-analysis-how-to-use-blockchain-data-to-predict-crypto-price-moves",
+    "name": "On-Chain Analysis: How to Use Blockchain Data to Predict Crypto",
+    "snippet": "Apr 1, 2026 · A 2025 Coin Metrics study found that divergences between price and active address trends predicted corrections with 68% accuracy.",
+    "host_name": "www.tradealgo.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://arxiv.org/html/2602.00037v2",
+    "name": "Bitcoin Price Prediction using Machine Learning and Combinatorial",
+    "snippet": "Mar 8, 2026 · Key metrics such as RMSE and MAPE are used to evaluate our methodology performance. Our proposal presents a notable MAPE performance of 0.19%.",
+    "host_name": "arxiv.org",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.galaxy.com/insights/research/crypto-predictions-2025",
+    "name": "Cryptocurrency Market & Bitcoin Predictions for 2025 - Galaxy",
+    "snippet": "Dec 31, 2024 · Bitcoin will cross $150k in H1 and test or best $185k in Q4 2025. · The U.S. spot Bitcoin ETPs will collectively cross $250bn AUM in 2025.",
+    "host_name": "www.galaxy.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  }
+]

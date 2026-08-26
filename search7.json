@@ -1,0 +1,74 @@
+[
+  {
+    "url": "https://github.com/wilsonfreitas/awesome-quant",
+    "name": "wilsonfreitas/awesome-quant: A curated list of insanely",
+    "snippet": "GitHub scipy - Python. Python-based ecosystem of open-source software ・ multi-strategy backtesting ・ composite crypto trade verdicts. Open source ...",
+    "host_name": "github.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/topics/backtest",
+    "name": "backtest · GitHub Topics",
+    "snippet": "Free open source crypto trading bot to automate AI, Grid, DCA and TradingView strategies on Binance, Hyperliquid and 15+ exchanges, with a simple interface. Read more",
+    "host_name": "github.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/topics/trading-toolkit",
+    "name": "trading-toolkit · GitHub Topics",
+    "snippet": "The only MCP server with live whale trades across 15 exchanges plus on- chain DEX flow . Smart Money Radar, real liquidations and outcome- scored signals. No API ... Read more",
+    "host_name": "github.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://medium.com/@gwrx2005/top-10-ai-powered-crypto-trading-repositories-on-github-0041862546b6",
+    "name": "Top 10 AI-Powered Crypto Trading Repositories on GitHub",
+    "snippet": "Description & AI Methods: Jesse is an open-source Python framework for researching, backtesting, and executing crypto trading strategies. Read more",
+    "host_name": "medium.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/wangzhe3224/awesome-systematic-trading",
+    "name": "wangzhe3224/awesome-systematic-trading",
+    "snippet": "Standalone application for market screening and backtesting. qtrade is a free and open source crypto trading bot written in Python . It contains backtesting, ...",
+    "host_name": "github.com",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.coingecko.com/learn/crypto-backtesting-python",
+    "name": "Crypto Backtesting Using Python with Source Code",
+    "snippet": "Jul 24, 2026 — In this guide, we'll build a crypto backtesting tool leveraging the CoinGecko API, that makes it easy to test various trading strategies, ... Read more",
+    "host_name": "www.coingecko.com",
+    "rank": 5,
+    "date": "Jul 24, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/topics/on-chain-data",
+    "name": "on-chain-data",
+    "snippet": "Rebuilds per-wallet PnL from Polymarket on- chain activity (92% match vs the exchange ), scores trader skill net of variance, and backtests skill-weighted ... Read more",
+    "host_name": "github.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://x.com/aiwithjainam/status/2059228811733172736",
+    "name": "10 GITHUB REPOS THAT BUILD A FULL TRADING",
+    "snippet": "200+ financial ratios, indicators , and performance measurements in one Python library. Replaces Bloomberg formulas. Wall Street built a moat ... Read more",
+    "host_name": "x.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  }
+]

@@ -1,0 +1,92 @@
+[
+  {
+    "url": "https://charts.bitbo.io/mvrv-z-score",
+    "name": "MVRV-Z-Score [Bitcoin] - Bitbo Charts",
+    "snippet": "MVRV Z-Score uses blockchain analysis to identify periods where Bitcoin is extremely over or undervalued relative to its 'fair value'.",
+    "host_name": "charts.bitbo.io",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://en.macromicro.me/collections/3785/crypto/30335/bitcoin-mvrv-zscore",
+    "name": "Bitcoin - MVRV Z-Score | Cryptocurrency | Collection - MacroMicro",
+    "snippet": "MVRV z-score shows the market value's relative position to realized value. MVRV going high means Bitcoin is overvalued; going low means undervalued.",
+    "host_name": "en.macromicro.me",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://cryptoslate.com/the-mvrv-z-score-a-reliable-top-and-bottom-indicator",
+    "name": "Research: How MVRV-Z Score has been a reliable Bitcoin top and",
+    "snippet": "Jul 22, 2022 · Historically, the MVRV-Z Score has been used to mark tops and bottoms in Bitcoin market cycles with impressive reliability.",
+    "host_name": "cryptoslate.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://cryptoquant.com/asset/btc/chart/market-indicator/mvrv-ratio",
+    "name": "Bitcoin: MVRV Ratio - CryptoQuant",
+    "snippet": "MVRV Ratio measures the relationship between Bitcoin's market capitalization and its realized capitalization - dividing the current market value of all BTC",
+    "host_name": "cryptoquant.com",
+    "rank": 3,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://cryptorank.io/news/feed/c1da3-bitcoin-mvrv-indicator-cooldown-analysis",
+    "name": "Market Overheating Resolves as Price Converges Toward Fair Value",
+    "snippet": "Feb 3, 2026 · Bitcoin's market cycles consistently demonstrate MVRV pattern correlations. During the 2021 bull market peak, the MVRV ratio exceeded 3.5. This ...",
+    "host_name": "cryptorank.io",
+    "rank": 4,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://charts.bgeometrics.com/mvrv.html",
+    "name": "MVRV Z-Score - BGeometrics",
+    "snippet": "MVRV provides a relationship between Bitcoin's current market value and the value it was purchased for (realized value), offering a unique perspective on the ...",
+    "host_name": "charts.bgeometrics.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.lookintobitcoin.com/charts/mvrv-zscore",
+    "name": "MVRV Z-Score | Look Into Bitcoin",
+    "snippet": "MVRV Z-Score is a bitcoin chart that uses blockchain analysis to identify periods where Bitcoin is extremely over or undervalued relative to its 'fair value'.",
+    "host_name": "www.lookintobitcoin.com",
+    "rank": 6,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://primexbt.com/market-research/bitcoins-mvrv-z-score-is-flashing-a-rare-undervaluation-signal-heres-what-the-macro-cycle-says-happens-next",
+    "name": "Bitcoin's MVRV Z-Score is flashing a rare undervaluation signal",
+    "snippet": "Apr 7, 2026 · The MVRV Z-Score is one of the most reliable on-chain tools for assessing whether Bitcoin is overvalued or undervalued relative to its ...",
+    "host_name": "primexbt.com",
+    "rank": 7,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.youtube.com/watch?v=jxtm-Vlenyg",
+    "name": "Bitcoin On-Chain Analysis: MVRV Z-Score - YouTube",
+    "snippet": "Mar 22, 2024 · The MVRV Z-Score is equal to (Market Cap - Realized Cap) / (Standard Deviation (Market cap)). It compares the market value and realized ...",
+    "host_name": "www.youtube.com",
+    "rank": 8,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.tradingview.com/news/newsbtc:a1013cc68094b:0-bitcoin-mvrv-z-score-compresses-to-levels-last-seen-near-29-000",
+    "name": "Bitcoin MVRV Z-Score Compresses To Levels Last Seen Near",
+    "snippet": "Feb 4, 2026 · On-chain data shows the Bitcoin MVRV Z-Score has fallen to its lowest level in years following the price crash below the $80,000 level.",
+    "host_name": "www.tradingview.com",
+    "rank": 9,
+    "date": "",
+    "favicon": ""
+  }
+]
