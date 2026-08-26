@@ -1,0 +1,128 @@
+name: Heartbeat — Daily Run Checker
+
+# Monitors that the DCA bot ran successfully each day.
+# Sends Telegram alert if the bot hasn't run by the deadline.
+#
+# Schedule: every 2 hours, but only alerts after the DCA window closes.
+# DCA window: 10:00-11:00 THB (03:00-04:00 UTC), last cron slot at 03:40 UTC.
+# Alert threshold: 05:00 UTC (12:00 THB) — gives 80 min buffer after last slot.
+
+on:
+  schedule:
+    # Every 2 hours — check after each potential DCA window
+    - cron: '0 1 * * *'   # 08:00 THB — pre-window, silent check only
+    - cron: '0 5 * * *'   # 12:00 THB — POST-WINDOW, alert if no run
+    - cron: '0 7 * * *'   # 14:00 THB — second chance alert
+    - cron: '0 9 * * *'   # 16:00 THB — final check of the day
+    - cron: '0 13 * * *'  # 20:00 THB — evening check
+    - cron: '0 17 * * *'  # 00:00 THB (next day) — end-of-day check
+  workflow_dispatch:
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Check last run and alert
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python3 << 'PYEOF'
+          import json
+          import os
+          import requests
+          from datetime import datetime, timezone, timedelta
+
+          THAI_TZ = timezone(timedelta(hours=7))
+          thai_now = datetime.now(THAI_TZ)
+          thai_today = thai_now.date()
+          thai_hour = thai_now.hour
+          utc_hour = thai_now.hour - 7
+
+          # Only alert after DCA window closes (12:00 THB = 05:00 UTC)
+          # Before that, just log silently
+          ALERT_AFTER_HOUR_THB = 12
+
+          # Load state
+          state_path = "live_bot/state.json"
+          try:
+              with open(state_path) as f:
+                  state = json.load(f)
+          except Exception as e:
+              print(f"ERROR: Cannot read state: {e}")
+              exit(0)
+
+          last_run = state.get("last_run_date", "")
+          run_count = state.get("run_count", 0)
+          kill_switch = state.get("enabled", True)
+
+          # Parse last_run_date
+          try:
+              last_run_date = datetime.strptime(last_run, "%Y-%m-%d").date()
+          except (ValueError, TypeError):
+              last_run_date = None
+
+          print(f"Thai now: {thai_now.isoformat()} (hour={thai_hour})")
+          print(f"Thai today: {thai_today}")
+          print(f"Last run date: {last_run}")
+          print(f"Run count: {run_count}")
+          print(f"Alert threshold: {ALERT_AFTER_HOUR_THB}:00 THB")
+
+          # Determine status
+          is_up_to_date = (last_run_date == thai_today)
+          is_past_deadline = (thai_hour >= ALERT_AFTER_HOUR_THB)
+
+          if is_up_to_date:
+              print("OK: Bot has run today.")
+              exit(0)
+
+          if not is_past_deadline:
+              print(f"OK: Not yet past deadline ({thai_hour}:00 < {ALERT_AFTER_HOUR_THB}:00). Skipping alert.")
+              exit(0)
+
+          # Past deadline and bot hasn't run — ALERT
+          print(f"ALERT: Bot has NOT run today (last={last_run}, today={thai_today}). Sending Telegram alert.")
+
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+          if not token or not chat_id:
+              print("WARNING: Telegram credentials not set. Skipping alert.")
+              exit(1)
+
+          day_name_th = ["จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"][thai_today.weekday()]
+          msg = (
+              f"\u26a0\ufe0f Phoenix Heartbeat Alert\n"
+              f"\n"
+              f"\u{1f4c5} วัน{day_name_th} {thai_today.strftime('%d/%m/%Y')}\n"
+              f"\u23f0 เวลา {thai_now.strftime('%H:%M')} น.\n"
+              f"\n"
+              f"\u274c บอทยังไม่ได้รันวันนี้\n"
+              f"\u{1f4cb} รันล่าสุด: {last_run or 'ไม่มี'}\n"
+              f"\u{1f4ca} จำนวนรันทั้งหมด: {run_count} ครั้ง\n"
+              f"\n"
+              f"\u{1f514} Cron อาจพลาด — กด Run manual หรือตรวจสอบ GitHub Actions"
+          )
+
+          try:
+              resp = requests.post(
+                  f"https://api.telegram.org/bot{token}/sendMessage",
+                  json={"chat_id": chat_id, "text": msg, "parse_mode": "HTML"},
+                  timeout=15
+              )
+              if resp.status_code == 200:
+                  print("Telegram alert sent successfully.")
+              else:
+                  print(f"Telegram API error: {resp.status_code} {resp.text[:200]}")
+                  exit(1)
+          except Exception as e:
+              print(f"Telegram send failed: {e}")
+              exit(1)
+          PYEOF
