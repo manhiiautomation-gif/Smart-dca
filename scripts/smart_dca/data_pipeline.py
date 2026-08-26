@@ -354,7 +354,8 @@ def build_master_dataframe(years=5):
 
     # LTH-RP proxy (only if not from BGeometrics)
     if 'lth_realized_price' not in master.columns or master['lth_realized_price'].isna().all():
-        master['lth_realized_price'] = master.get('realized_price', np.nan).rolling(180, min_periods=60).mean()
+        rp_col = master['realized_price'] if 'realized_price' in master.columns else pd.Series(np.nan, index=master.index)
+        master['lth_realized_price'] = rp_col.rolling(180, min_periods=60).mean()
         print(f'        LTH-RP: proxy (180d SMA of Realized Price)')
     else:
         lth_real_count = master['lth_realized_price'].notna().sum()
