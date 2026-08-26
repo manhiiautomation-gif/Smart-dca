@@ -501,3 +501,271 @@ Stage Summary:
 - Shows: Price hero, Phoenix bot status, On-Chain Pulse, Technical Momentum, Key Levels, Market Narrative, Recent Trades
 - All data from Phoenix bot state.json (real-time, no new API calls needed)
 - Screenshot saved: /home/z/my-project/download/btc-briefing-dashboard.png
+
+---
+Task ID: 2-a
+Agent: Data Flow Agent
+Task: Investigate git push issue — bot_state.json 404 on raw.githubusercontent.com
+
+Work Log:
+- Read /home/z/my-project/live_bot/sync_state.py (147 lines) fully
+- Checked git remote -v in /home/z/btc-signal-analyzer: origin → https://github.com/manhiiautomation-gif/btc-signal-analyzer.git (no auth)
+- Checked git branch -vv: `* main 7e200a5 ...` with NO `[origin/main]` tracking — upstream was NEVER set
+- Checked git log --oneline -5: 4 local commits (initial + 3 bot state syncs), reflog shows only local commits
+- Verified .git/refs/remotes/origin/ directory does NOT EXIST — git fetch has never succeeded
+- Confirmed git for-each-ref refs/remotes/ returns nothing — zero remote tracking refs in the entire repo
+- Tested git fetch origin: FAILS with `fatal: could not read Username for 'https://github.com': No such device or address` (no auth, no credential helper)
+- Verified git config --list: remote.origin.fetch=+refs/heads/*:refs/remotes/origin/* IS configured, but never executed
+- Checked push.default: not set (defaults to `simple` for git 2.47.3)
+- Checked credential.helper: not set globally or locally
+- Verified token extraction from my-project: ghp_ token (40 chars), extraction logic works correctly
+- Built local bare-repo test: confirmed `git push <url> main` IS syntactically valid and pushes correctly
+- Confirmed `git push <url> main` does NOT create remote tracking refs (refs/remotes/origin/main) — this is by design
+- Verified output/bot_state.json exists in local main branch (git ls-tree, git show)
+
+Stage Summary:
+
+## ROOT CAUSE ANALYSIS
+
+### (a) Exact Root Cause
+
+**The problem has TWO layers:**
+
+**Layer 1 — Remote tracking refs are non-existent.**
+The btc-signal-analyzer repo was created via `git init` locally (reflog shows `commit (initial)`) and was NEVER cloned from GitHub. Consequently:
+- `git fetch origin` has never been successfully run
+- `.git/refs/remotes/origin/` directory does not exist at all
+- `origin/main` does not exist (`git rev-parse origin/main` → fatal: unknown revision)
+- No upstream tracking is configured (`git branch -vv` shows bare `main` with no `[origin/main]`)
+- `git fetch origin` CANNOT work because the remote URL (`https://github.com/...`) has no authentication and no credential helper is configured
+
+**Layer 2 — `git push <auth_url> main` (line 120) does NOT update remote tracking refs.**
+When `git push` is given a raw URL instead of a remote name, git pushes the objects and updates the REMOTE refs, but it does NOT create or update any local remote tracking refs (`refs/remotes/origin/*`). This is by design in git. The script's approach of pushing via authenticated URL bypasses the remote configuration entirely, so `origin/main` is never born.
+
+**Why the file is 404 on raw.githubusercontent.com:**
+The push syntax `git push <url> main` IS valid (confirmed via local bare-repo testing — it correctly pushes `refs/heads/main` to the remote). If the push is reaching GitHub with a valid token, the most likely reason for 404 is that **the btc-signal-analyzer repo is PRIVATE** — raw.githubusercontent.com returns 404 (not 403) for private repos to avoid information leakage. If the repo is public and the push is failing, the error would be in `push_result.stderr` (exit code non-zero) and the script would return False. Investigate the actual stderr output from a live push run to confirm.
+
+### (b) Minimal Fix in sync_state.py
+
+Replace the URL-based push (lines 107-127) with remote-name-based push. The key change: temporarily set the remote's push URL to include the token, push using the remote name (which DOES update tracking refs), then restore the URL.
+
+```python
+# CURRENT (broken):
+push_result = subprocess.run(
+    ['git', 'push', auth_url, 'main'],  # pushes via URL — no tracking ref update
+    cwd=repo, capture_output=True, text=True, timeout=60
+)
+
+# FIXED:
+# Temporarily set push URL with token, push via remote name, restore
+subprocess.run(
+    ['git', 'remote', 'set-url', '--push', 'origin', auth_url],
+    cwd=repo, capture_output=True, text=True, timeout=10
+)
+push_result = subprocess.run(
+    ['git', 'push', 'origin', 'main'],  # pushes via remote name — updates tracking refs
+    cwd=repo, capture_output=True, text=True, timeout=60
+)
+# Restore clean push URL (no token in config)
+subprocess.run(
+    ['git', 'remote', 'set-url', '--push', 'origin', base_url],
+    cwd=repo, capture_output=True, text=True, timeout=10
+)
+```
+
+Also remove the `else` branch (lines 123-127) since the token path should always be used, and remove the URL-based push entirely. The `--push` flag ensures only the push URL is modified, keeping the fetch URL clean (or alternatively, also set the fetch URL for `git fetch` to work).
+
+### (c) One-Time Git Commands to Fix btc-signal-analyzer Repo State
+
+```bash
+cd /home/z/btc-signal-analyzer
+
+# Step 1: Extract token from my-project and configure origin with auth
+TOKEN=$(git -C /home/z/my-project config --get remote.origin.url | sed 's|https://||;s|@.*||')
+git remote set-url origin "https://${TOKEN}@github.com/manhiiautomation-gif/btc-signal-analyzer.git"
+
+# Step 2: Push all local commits AND set up upstream tracking
+# (this creates origin/main and sets the tracking branch)
+git push -u origin main
+
+# Step 3: Verify tracking is set up
+git branch -vv   # should now show [origin/main]
+git rev-parse origin/main   # should succeed
+
+# Step 4 (optional, recommended): Strip token from stored URL and use credential helper
+git remote set-url origin "https://github.com/manhiiautomation-gif/btc-signal-analyzer.git"
+# Then either configure a credential helper, or rely on the script's set-url --push approach
+```
+
+**Note:** Step 1 stores the token in the git config. If security is a concern, use Step 4 to remove it and rely on the script's `set-url --push` approach for future pushes. Alternatively, configure `git credential-store` or `GIT_ASKPASS` for persistent auth.
+
+## KEY EVIDENCE TABLE
+
+| Check | Result | Implication |
+|-------|--------|-------------|
+| `git branch -vv` | `main` with no `[origin/main]` | No upstream tracking ever set |
+| `git rev-parse origin/main` | fatal: unknown revision | Remote tracking ref does not exist |
+| `ls .git/refs/remotes/origin/` | No such file or directory | git fetch never succeeded |
+| `git for-each-ref refs/remotes/` | (empty) | Zero remote refs in entire repo |
+| `git reflog` | Only local commits, no fetch/pull | Confirms no remote interaction ever |
+| `git fetch origin` | fatal: could not read Username | No auth in remote URL, no credential helper |
+| `git config push.default` | (unset, defaults to `simple`) | Not the issue |
+| `git config credential.helper` | (unset) | Not configured |
+| `git remote -v` | https://github.com/.../btc-signal-analyzer.git | No token in URL |
+| Token extraction | ghp_ token, 40 chars, works | Token is available |
+| Local `git push <url> main` test | Succeeds, creates remote branch | Syntax is valid |
+| `git push <url> main` tracking update | Does NOT update refs/remotes/origin/* | Confirmed by design |
+
+---
+Task ID: 2-b
+Agent: Integration Agent
+Task: Dashboard URLs check — verify all 5 data source endpoints, repo visibility, and graceful failure handling
+
+## URL TEST RESULTS
+
+| # | URL | HTTP Status | Verdict |
+|---|-----|-------------|---------|
+| 1 | `https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT` | **200** | ✅ Working. Returns valid JSON with lastPrice, priceChangePercent, quoteVolume |
+| 2 | `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=30` | **200** | ✅ Working. Returns 30 daily candles for sparkline |
+| 3 | `https://api.bitkub.com/api/market/ticker?sym=THB_BTC` | **200** (body: `{"error": 99}`) | ⚠️ HTTP 200 but returns API error 99. The `sym=` query parameter appears broken/deprecated. THB_BTC data IS available when calling the endpoint WITHOUT `sym=` (returns full ticker with THB_BTC.last = 2,563,428.73) |
+| 4 | `https://api.alternative.me/fng/?limit=1` | **200** | ✅ Working. Returns value=65, classification="Greed" |
+| 5 | `https://raw.githubusercontent.com/manhiiautomation-gif/btc-signal-analyzer/main/output/signal_score.json` | **404** | ❌ Not Found. File has NOT been pushed to GitHub yet |
+| 6 | `https://raw.githubusercontent.com/manhiiautomation-gif/btc-signal-analyzer/main/output/bot_state.json` | **404** | ❌ Not Found. Expected — push fix in progress |
+
+## REPO VISIBILITY
+
+- `curl -s https://api.github.com/repos/manhiiautomation-gif/btc-signal-analyzer` → HTTP 404 `"Not Found"`
+- This is GitHub's standard response for **private repos** when called unauthenticated (to prevent leaking existence)
+- **Conclusion: The `btc-signal-analyzer` repo is PRIVATE.** Raw GitHub URLs will return 404 for any file until the repo is made public OR the dashboard is served with authentication.
+- **This is a BLOCKER for both signal_score.json and bot_state.json** — no amount of pushing will fix this without making the repo public.
+
+## GRACEFUL FAILURE ANALYSIS
+
+| Data Source | Wrapped in try/catch? | Fallback Behavior | Dashboard Crashes? |
+|-------------|----------------------|-------------------|-------------------|
+| Binance (ticker + klines) | **NO** | None. Error propagates to `init()` global catch → shows full-page error screen | ⚠️ If Binance fails, ENTIRE dashboard shows error (not just price). However, `Promise.allSettled` at line 1017 prevents one failure from blocking others — the error is swallowed by allSettled, but `state.price.usd` stays 0, causing renderers to show $0 |
+| Bitkub | **YES** (line 562) | Falls back to `USD * 35` estimate. Actual BTC/THB ~2,563,428 vs estimate ~2,733,920 (≈6.6% high) | ✅ No crash |
+| Fear & Greed | **YES** (line 574) | `renderFearGreed()` checks `if (!fg)` → shows "Fear & Greed data not available" | ✅ No crash |
+| signal_score.json | **YES** (line 589) | `renderOnChain()` shows MVRV/NUPL at 0.000 (defaults). `renderMomentum()` shows "On-chain signal data not available yet" | ✅ No crash, but shows misleading 0.000 values |
+| bot_state.json | **YES** (line 617) | `state.bot = null`. `renderBot()` shows badge "NO DATA" + message "Push bot_state.json to btc-signal-analyzer repo to enable live status" | ✅ No crash. Correctly shows NO DATA |
+
+## ISSUES FOUND
+
+### CRITICAL: Repo is Private — Raw GitHub URLs Will Never Work
+- **Both `signal_score.json` and `bot_state.json` are hosted on a PRIVATE repo**
+- `raw.githubusercontent.com` requires the repo to be public for unauthenticated access
+- The dashboard (a static HTML opened in browser) has no auth mechanism
+- **Fix: Make `manhiiautomation-gif/btc-signal-analyzer` repo PUBLIC on GitHub**
+
+### MEDIUM: Bitkub `sym=` Parameter Returns Error 99
+- URL `https://api.bitkub.com/api/market/ticker?sym=THB_BTC` returns `{"error": 99}` with HTTP 200
+- Bitkub API may have deprecated the `sym` query parameter
+- Without `sym=`, calling `https://api.bitkub.com/api/market/ticker` returns all pairs including THB_BTC
+- **Fix options:** (a) Remove `?sym=THB_BTC` and filter client-side, or (b) keep as-is (fallback works)
+
+### LOW: Binance Fetcher Not Individually try/caught
+- `fetchBinancePrice()` (line 547) lacks try/catch — relies on `Promise.allSettled` to prevent total failure
+- If Binance is down, price shows as $0 and `renderPrice()` still runs (no crash, but shows $0 everywhere)
+- The global `catch(e)` in `init()` is never reached because `Promise.allSettled` never rejects
+- **Impact:** Dashboard shows $0 price instead of a clear error message for just the price section
+
+### LOW: renderBriefing Always Shows MVRV Text Even With No Data
+- When signal_score.json is 404, `state.onchain.mvrv` defaults to 0
+- `renderBriefing()` unconditionally says "MVRV at 0.00 is in deep accumulation zone" which is misleading
+- **Fix:** Guard the MVRV briefing text with a check like `if (mvrv > 0)`
+
+### LOW: Signal Score Fetch Failure Leaves MVRV/NUPL at Defaults
+- When signal_score.json fails, MVRV shows 0.000, NUPL shows 0.000, Z-Score shows 0.00
+- These look like real values to the user
+- **Fix:** Show "N/A" or "waiting for data" instead of 0.000 when signal data is unavailable
+
+## SUMMARY
+
+| Category | Status |
+|----------|--------|
+| Public API URLs (Binance, FG) | ✅ All working |
+| Bitkub URL | ⚠️ Returns error 99 (fallback active) |
+| GitHub Raw URLs (signal, bot_state) | ❌ 404 — repo is PRIVATE |
+| Dashboard crash on failures | ✅ No crashes — all handled gracefully |
+| NO DATA display for bot_state | ✅ Correctly shows "NO DATA" badge and message |
+| Blocking issue | **Repo must be made PUBLIC** for dashboard to work fully |
+
+---
+Task ID: 5-review
+Agent: Code Reviewer
+Task: Review all code changes (sync_state.py, main.py, index.html)
+
+## REVIEW FINDINGS
+
+### File 1: `live_bot/sync_state.py` — Git push via `set-url --push`
+
+**Verdict: ✅ CORRECT — No regressions detected**
+
+Changes reviewed:
+- L117-119: `git remote set-url --push origin <auth_url>` — sets push-only URL with token
+- L122-125: `git push origin main` — pushes via the configured push URL
+- L128-132: Restore push URL to clean `base_url` (no token)
+
+**Correctness:**
+- The `--push` flag correctly sets only the push URL, leaving the fetch URL untouched. This is the right approach for injecting auth without polluting the config.
+- Token extraction from my-project's remote (L24-36) and cleanup of btc-signal-analyzer's remote (L112-113) are logically sound.
+- The `if token:` guard (L115, L128) correctly skips set-url operations when no token is available.
+
+**Edge cases & issues found:**
+- **LOW — Token leak on process kill (L117-132):** If the process is killed between the auth set-url (L117) and the restore (L130), the GitHub PAT will remain in the btc-signal-analyzer repo's git config as the push URL. Since this is on a trusted CI/runner machine, the practical risk is low, but it's worth noting. Mitigation: the outer `except Exception` (L143) won't catch SIGKILL.
+- **INFO — No-op commit handling (L100-103):** If `git commit` fails (e.g., nothing to commit after the add), the subsequent push still runs harmlessly. This is acceptable behavior.
+- **INFO — Hardcoded branch `main` (L123):** If the btc-signal-analyzer repo ever switches default branch, this would need updating. Acceptable for current setup.
+
+### File 2: `live_bot/main.py` — Sync call in finally block (L318-323)
+
+**Verdict: ✅ CORRECT — No regressions detected**
+
+Changes reviewed:
+- L318-323: Lazy import of `sync_state` and non-fatal call in the `finally` block
+
+**Correctness:**
+- `bot_state` is assigned at L219, before the `try` block (L258), so it's always defined when the `finally` runs. No `NameError` risk.
+- The lazy `from live_bot import sync_state` avoids circular imports and loading overhead when sync isn't needed (e.g., demo mode exits before this point).
+- `except Exception` catches all import/runtime errors, printing a non-fatal message. `SystemExit` (from L310's `sys.exit(1)`) is a `BaseException` and won't be caught here — it propagates correctly, but the `finally` block still executes first.
+- `_release_lock()` (L324) runs after sync attempt, ensuring lock cleanup always happens.
+
+**Edge cases & issues found:**
+- **NONE.** This is a clean, safe pattern. The sync is fire-and-forget, fully decoupled from bot operation.
+- **INFO — Loop mode sync timing (L272-293):** In loop mode, state is saved per iteration (L291) but sync only happens once in the `finally` block when the loop ends (Ctrl+C or error). This means intermediate loop states are NOT synced to GitHub. This is acceptable — only the final state matters for the dashboard.
+
+### File 3: `btc-briefing/index.html` — Bitkub API fix, MVRV/NUPL guards
+
+**Verdict: ✅ CORRECT — No regressions. One pre-existing issue noted.**
+
+#### 3a. Bitkub API fix (L462, L562-573)
+- CONFIG.BITKUB_API changed to base endpoint `https://api.bitkub.com/api/market/ticker`
+- Parsing changed from `data.result.THB_BTC.last` → `data.THB_BTC.last`
+
+**Correctness:** ✅ Matches Bitkub's documented flat response format `{ THB_BTC: { last, ... }, ... }`
+- Guard `if (data && data.THB_BTC)` prevents crash on unexpected format
+- `parseFloat()` handles string values from the API
+- Fallback to `usd * 35` on fetch failure is reasonable (rough THB approximation)
+
+#### 3b. MVRV/NUPL rendering guards (L704, L722, L979)
+- `renderOnChain()` L704: `if (state.onchain.mvrv > 0)` — shows metrics or "Waiting for on-chain data..."
+- `renderOnChain()` L722: `if (state.onchain.nupl !== 0 || state.signal)` — shows NUPL or "N/A"
+- `renderBriefing()` L979: `if (mvrv > 0)` — shows MVRV narrative or "On-chain data not yet available..."
+- `renderKeyLevels()` L872: `state.onchain.mvrv > 0 ? usd / state.onchain.mvrv : 0` — already guarded
+
+**Correctness:** ✅ All guards are consistent. When on-chain data is unavailable, users see informative placeholders instead of misleading "MVRV at 0.00" or "NUPL: 0.000".
+
+**Edge cases & issues found:**
+- **LOW — MVRV Z-Score shown as 0.00 inside MVRV block (L711):** When `mvrv > 0` but `mvrv_z` is still 0 (e.g., NUPL was available but z-score wasn't in signal_score.json), the UI shows "Z-Score: 0.00" which could be misread as a real value. Consider adding a guard like `state.onchain.mvrv_z > 0 ? ... : 'N/A'`.
+- **PRE-EXISTING BUG — `renderKeyLevels` sparse array overwrite (L887-893):** When `mvrv === 0`, `levels` contains only `[ATH]` (length 1). If `bot.last_indicators.realized_price > 0`, then `levels[0]` overwrites ATH with Realized Price, and `levels[1]` assignment creates a sparse array. The ATH entry is silently lost. This is NOT a regression from the current changes — it's a pre-existing issue that becomes more visible now that the MVRV=0 state is properly handled (previously MVRV might have shown 0.00 but still produced a derived RP).
+- **INFO — Hardcoded USD/THB rate (L571, L888, L891):** The fallback rate of 35 and bot-state division by 35 are hardcoded in multiple places. If the THB rate drifts significantly, these will be inaccurate. Not a regression.
+
+## OVERALL SUMMARY
+
+| Change | Correctness | Regressions | Severity Issues |
+|--------|-------------|-------------|------------------|
+| sync_state.py — push via set-url --push | ✅ | None | LOW: token leak on SIGKILL |
+| main.py — sync in finally block | ✅ | None | None |
+| index.html — Bitkub flat response | ✅ | None | None |
+| index.html — MVRV/NUPL guards | ✅ | None | LOW: z-score 0.00 display; PRE-EXISTING: key levels sparse array |
+
+**Conclusion: All three changes are correct and safe to deploy.** No regressions found. Two LOW-severity items and one pre-existing bug are documented for future improvement.

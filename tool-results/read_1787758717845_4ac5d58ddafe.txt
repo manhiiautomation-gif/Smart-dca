@@ -1,0 +1,759 @@
+     1→   300→  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" style="margin:0 auto 12px"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+     2→   301→  <h2>Failed to Load Data</h2>
+     3→   302→  <p id="error-msg">Unknown error</p>
+     4→   303→  <button class="retry-btn" onclick="init()">
+     5→   304→    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+     6→   305→    Retry
+     7→   306→  </button>
+     8→   307→</div>
+     9→   308→
+    10→   309→<!-- Main Dashboard -->
+    11→   310→<div id="app" style="display:none">
+    12→   311→  <!-- Header -->
+    13→   312→  <header class="header">
+    14→   313→    <div class="header-inner">
+    15→   314→      <div class="header-left">
+    16→   315→        <div class="logo">⚡</div>
+    17→   316→        <div>
+    18→   317→          <h1>BTC Daily Briefing</h1>
+    19→   318→          <p>Manual trading intelligence + Phoenix v5.1 status</p>
+    20→   319→        </div>
+    21→   320→      </div>
+    22→   321→      <div class="header-right">
+    23→   322→        <span class="refresh-badge" id="refresh-time">--:--</span>
+    24→   323→        <button class="refresh-btn" id="refresh-btn" onclick="init()" title="Refresh">
+    25→   324→          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+    26→   325→        </button>
+    27→   326→      </div>
+    28→   327→    </div>
+    29→   328→  </header>
+    30→   329→
+    31→   330→  <main class="main">
+    32→   331→    <!-- Row 1: Price Hero + Phoenix Bot -->
+    33→   332→    <div class="grid grid-2-1" style="margin-bottom:16px">
+    34→   333→      <!-- Price Hero -->
+    35→   334→      <div class="card price-hero">
+    36→   335→        <div class="card-body">
+    37→   336→          <div class="label">BTC / USD</div>
+    38→   337→          <div class="price-row">
+    39→   338→            <span class="price" id="price-usd">--</span>
+    40→   339→            <span class="change-badge" id="change-24h">--</span>
+    41→   340→            <span class="trend-badge" id="trend-badge" style="display:none">--</span>
+    42→   341→          </div>
+    43→   342→          <div class="thb-price" id="price-thb" style="margin-top:4px">฿--</div>
+    44→   343→          <div class="price-stats">
+    45→   344→            <div>
+    46→   345→              <div class="stat-label">24h Volume</div>
+    47→   346→              <div class="stat-value" id="volume-24h">--</div>
+    48→   347→            </div>
+    49→   348→            <div>
+    50→   349→              <div class="stat-label">Market Cap</div>
+    51→   350→              <div class="stat-value" id="market-cap">--</div>
+    52→   351→            </div>
+    53→   352→            <div>
+    54→   353→              <div class="stat-label">vs ATH</div>
+    55→   354→              <div class="stat-value" id="vs-ath">--</div>
+    56→   355→            </div>
+    57→   356→          </div>
+    58→   357→          <!-- 30d Sparkline -->
+    59→   358→          <div class="sparkline-container">
+    60→   359→            <div class="sparkline-label">30-Day Price</div>
+    61→   360→            <svg class="sparkline-svg" id="sparkline" preserveAspectRatio="none"></svg>
+    62→   361→          </div>
+    63→   362→        </div>
+    64→   363→      </div>
+    65→   364→
+    66→   365→      <!-- Phoenix Bot Status -->
+    67→   366→      <div class="card">
+    68→   367→        <div class="card-body">
+    69→   368→          <div class="card-title">
+    70→   369→            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+    71→   370→            Phoenix v5.1
+    72→   371→            <span class="bot-status-badge" id="bot-status-badge">--</span>
+    73→   372→          </div>
+    74→   373→          <div id="bot-content">
+    75→   374→            <div class="no-data">Loading bot status...</div>
+    76→   375→          </div>
+    77→   376→        </div>
+    78→   377→      </div>
+    79→   378→    </div>
+    80→   379→
+    81→   380→    <!-- Row 2: On-Chain + Momentum + Key Levels -->
+    82→   381→    <div class="grid grid-3" style="margin-bottom:16px">
+    83→   382→      <!-- On-Chain Pulse -->
+    84→   383→      <div class="card">
+    85→   384→        <div class="card-body">
+    86→   385→          <div class="card-title">
+    87→   386→            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2"><path d="M12 2v20"/><path d="M2 12h20"/><path d="m4.93 4.93 14.14 14.14"/><path d="m19.07 4.93-14.14 14.14"/></svg>
+    88→   387→            On-Chain Pulse
+    89→   388→          </div>
+    90→   389→          <div id="onchain-content">
+    91→   390→            <div class="no-data">Loading on-chain data...</div>
+    92→   391→          </div>
+    93→   392→        </div>
+    94→   393→      </div>
+    95→   394→
+    96→   395→      <!-- Technical Momentum -->
+    97→   396→      <div class="card">
+    98→   397→        <div class="card-body">
+    99→   398→          <div class="card-title">
+   100→   399→            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+   101→   400→            Technical Momentum
+   102→   401→          </div>
+   103→   402→          <div id="momentum-content">
+   104→   403→            <div class="no-data">Loading momentum data...</div>
+   105→   404→          </div>
+   106→   405→        </div>
+   107→   406→      </div>
+   108→   407→
+   109→   408→      <!-- Fear & Greed + Key Levels -->
+   110→   409→      <div class="card">
+   111→   410→        <div class="card-body">
+   112→   411→          <div class="card-title">
+   113→   412→            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+   114→   413→            Fear & Greed
+   115→   414→          </div>
+   116→   415→          <div id="fg-content">
+   117→   416→            <div class="no-data">Loading...</div>
+   118→   417→          </div>
+   119→   418→        </div>
+   120→   419→      </div>
+   121→   420→    </div>
+   122→   421→
+   123→   422→    <!-- Row 3: Key Levels -->
+   124→   423→    <div class="card" style="margin-bottom:16px">
+   125→   424→      <div class="card-body">
+   126→   425→        <div class="card-title">
+   127→   426→          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+   128→   427→          Key On-Chain Levels
+   129→   428→        </div>
+   130→   429→        <div id="levels-content">
+   131→   430→          <div class="no-data">Loading key levels...</div>
+   132→   431→        </div>
+   133→   432→      </div>
+   134→   433→    </div>
+   135→   434→
+   136→   435→    <!-- Row 4: Market Briefing -->
+   137→   436→    <div class="card" style="margin-bottom:16px">
+   138→   437→      <div class="card-body">
+   139→   438→        <div class="card-title">
+   140→   439→          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="2"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></svg>
+   141→   440→          Market Briefing
+   142→   441→        </div>
+   143→   442→        <p class="briefing-text" id="briefing-text">Loading market narrative...</p>
+   144→   443→      </div>
+   145→   444→    </div>
+   146→   445→
+   147→   446→    <!-- Footer -->
+   148→   447→    <div class="footer">
+   149→   448→      Phoenix v5.1 Briefing Dashboard | Auto-refreshes every 5 min | For manual trading decisions only
+   150→   449→    </div>
+   151→   450→  </main>
+   152→   451→</div>
+   153→   452→
+   154→   453→<script>
+   155→   454→// ─── Config ───
+   156→   455→const CONFIG = {
+   157→   456→  // On-chain signal data (updated by btc-signal-analyzer)
+   158→   457→  SIGNAL_URL: 'https://raw.githubusercontent.com/manhiiautomation-gif/btc-signal-analyzer/main/output/signal_score.json',
+   159→   458→  // Phoenix bot state (pushed by bot cron)
+   160→   459→  BOT_STATE_URL: 'https://raw.githubusercontent.com/manhiiautomation-gif/btc-signal-analyzer/main/output/bot_state.json',
+   161→   460→  // Public APIs
+   162→   461→  BINANCE_API: 'https://api.binance.com/api/v3',
+   163→   462→  BITKUB_API: 'https://api.bitkub.com/api/market/ticker?sym=THB_BTC',
+   164→   463→  FG_API: 'https://api.alternative.me/fng/?limit=1',
+   165→   464→  REFRESH_INTERVAL: 5 * 60 * 1000,
+   166→   465→  ATH_USD: 109588,
+   167→   466→};
+   168→   467→
+   169→   468→// ─── State ───
+   170→   469→let state = {
+   171→   470→  price: { usd: 0, thb: 0, change24h: 0, volume: 0, mcap: 0 },
+   172→   471→  onchain: { mvrv: 0, mvrv_z: 0, nupl: 0, sopr: null, fng: null },
+   173→   472→  signal: null,
+   174→   473→  bot: null,
+   175→   474→  sparkline: [],
+   176→   475→};
+   177→   476→
+   178→   477→// ─── Helpers ───
+   179→   478→function fmt(n, d=2) {
+   180→   479→  if (n >= 1e12) return (n/1e12).toFixed(d) + 'T';
+   181→   480→  if (n >= 1e9) return (n/1e9).toFixed(d) + 'B';
+   182→   481→  if (n >= 1e6) return (n/1e6).toFixed(d) + 'M';
+   183→   482→  if (n >= 1e3) return (n/1e3).toFixed(d) + 'K';
+   184→   483→  return n.toFixed(d);
+   185→   484→}
+   186→   485→
+   187→   486→function fmtUSD(n) { return '$' + n.toLocaleString('en-US', {maximumFractionDigits: 0}); }
+   188→   487→function fmtTHB(n) { return '฿' + n.toLocaleString('th-TH', {maximumFractionDigits: 0}); }
+   189→   488→
+   190→   489→function getMvrvZone(mvrv) {
+   191→   490→  if (mvrv < 1.0) return { zone: 'Deep Accumulation', color: '#22c55e' };
+   192→   491→  if (mvrv < 1.5) return { zone: 'Accumulation', color: '#86efac' };
+   193→   492→  if (mvrv < 2.0) return { zone: 'Neutral', color: '#eab308' };
+   194→   493→  if (mvrv < 2.5) return { zone: 'Euphoria', color: '#f97316' };
+   195→   494→  if (mvrv < 3.5) return { zone: 'Overvalued', color: '#ef4444' };
+   196→   495→  return { zone: 'Extreme Euphoria', color: '#dc2626' };
+   197→   496→}
+   198→   497→
+   199→   498→function getNuplPhase(nupl) {
+   200→   499→  if (nupl < 0) return 'Capitulation';
+   201→   500→  if (nupl < 0.25) return 'Fear';
+   202→   501→  if (nupl < 0.5) return 'Optimism';
+   203→   502→  if (nupl < 0.75) return 'Belief';
+   204→   503→  return 'Euphoria';
+   205→   504→}
+   206→   505→
+   207→   506→function getFgColor(val) {
+   208→   507→  if (val <= 25) return '#ef4444';
+   209→   508→  if (val <= 45) return '#f97316';
+   210→   509→  if (val <= 55) return '#eab308';
+   211→   510→  if (val <= 75) return '#22c55e';
+   212→   511→  return '#06b6d4';
+   213→   512→}
+   214→   513→
+   215→   514→function getFgLabel(val) {
+   216→   515→  if (val <= 25) return 'Extreme Fear';
+   217→   516→  if (val <= 45) return 'Fear';
+   218→   517→  if (val <= 55) return 'Neutral';
+   219→   518→  if (val <= 75) return 'Greed';
+   220→   519→  return 'Extreme Greed';
+   221→   520→}
+   222→   521→
+   223→   522→function getFgDesc(val) {
+   224→   523→  if (val <= 25) return 'Historically excellent buying opportunity. Markets are in panic.';
+   225→   524→  if (val <= 45) return 'Fear dominates. Good accumulation zone for long-term investors.';
+   226→   525→  if (val <= 55) return 'Market is undecided. Wait for clearer signals before acting.';
+   227→   526→  if (val <= 75) return 'Greed is building. Be cautious with new positions.';
+   228→   527→  return 'Extreme greed — historically a warning sign. Consider taking profits.';
+   229→   528→}
+   230→   529→
+   231→   530→function getTrend(price, mvrv) {
+   232→   531→  // Use MVRV as primary trend indicator since we don't have SMA200 from public API
+   233→   532→  if (mvrv < 1.0) return { trend: 'Deep Accumulation', color: '#22c55e' };
+   234→   533→  if (mvrv < 1.5) return { trend: 'Accumulation', color: '#86efac' };
+   235→   534→  if (mvrv < 2.0) return { trend: 'Neutral-Bull', color: '#eab308' };
+   236→   535→  if (mvrv < 2.5) return { trend: 'Euphoria', color: '#f97316' };
+   237→   536→  return { trend: 'Overvalued', color: '#ef4444' };
+   238→   537→}
+   239→   538→
+   240→   539→async function fetchJSON(url) {
+   241→   540→  const res = await fetch(url);
+   242→   541→  if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
+   243→   542→  return res.json();
+   244→   543→}
+   245→   544→
+   246→   545→// ─── Data Fetchers ───
+   247→   546→
+   248→   547→async function fetchBinancePrice() {
+   249→   548→  // 24h ticker
+   250→   549→  const ticker = await fetchJSON(`${CONFIG.BINANCE_API}/ticker/24hr?symbol=BTCUSDT`);
+   251→   550→  state.price.usd = parseFloat(ticker.lastPrice);
+   252→   551→  state.price.change24h = parseFloat(ticker.priceChangePercent);
+   253→   552→  state.price.volume = parseFloat(ticker.quoteVolume);
+   254→   553→
+   255→   554→  // Market cap (approximate: price * 19.8M circulating supply)
+   256→   555→  state.price.mcap = state.price.usd * 19_800_000;
+   257→   556→
+   258→   557→  // 30-day klines for sparkline
+   259→   558→  const klines = await fetchJSON(`${CONFIG.BINANCE_API}/klines?symbol=BTCUSDT&interval=1d&limit=30`);
+   260→   559→  state.sparkline = klines.map(k => parseFloat(k[4])); // close prices
+   261→   560→}
+   262→   561→
+   263→   562→async function fetchBitkubPrice() {
+   264→   563→  try {
+   265→   564→    const data = await fetchJSON(CONFIG.BITKUB_API);
+   266→   565→    if (data && data.result && data.result.THB_BTC) {
+   267→   566→      state.price.thb = parseFloat(data.result.THB_BTC.last);
+   268→   567→    }
+   269→   568→  } catch (e) {
+   270→   569→    // Fallback: estimate THB from USD (approx 35 THB/USD)
+   271→   570→    state.price.thb = state.price.usd * 35;
+   272→   571→  }
+   273→   572→}
+   274→   573→
+   275→   574→async function fetchFearGreed() {
+   276→   575→  try {
+   277→   576→    const data = await fetchJSON(CONFIG.FG_API);
+   278→   577→    if (data && data.data && data.data[0]) {
+   279→   578→      state.onchain.fng = {
+   280→   579→        value: parseInt(data.data[0].value),
+   281→   580→        classification: data.data[0].value_classification,
+   282→   581→        timestamp: data.data[0].timestamp,
+   283→   582→      };
+   284→   583→    }
+   285→   584→  } catch (e) {
+   286→   585→    console.warn('Fear & Greed API failed:', e);
+   287→   586→  }
+   288→   587→}
+   289→   588→
+   290→   589→async function fetchOnchainSignal() {
+   291→   590→  try {
+   292→   591→    const data = await fetchJSON(CONFIG.SIGNAL_URL);
+   293→   592→    state.signal = data;
+   294→   593→    if (data.indicators) {
+   295→   594→      const mvrv_ind = data.indicators.mvrv_z_score;
+   296→   595→      if (mvrv_ind && mvrv_ind.value !== null) {
+   297→   596→        // MVRV Z-Score is available, derive MVRV from NUPL
+   298→   597→        state.onchain.mvrv_z = mvrv_ind.value;
+   299→   598→      }
+   300→   599→      const nupl_ind = data.indicators.nupl;
+   301→   600→      if (nupl_ind && nupl_ind.value !== null) {
+   302→   601→        state.onchain.nupl = nupl_ind.value;
+   303→   602→        // Derive MVRV from NUPL: NUPL = 1 - 1/MVRV, so MVRV = 1/(1-NUPL)
+   304→   603→        if (nupl_ind.value < 1) {
+   305→   604→          state.onchain.mvrv = 1 / (1 - nupl_ind.value);
+   306→   605→        }
+   307→   606→      }
+   308→   607→      const sopr_ind = data.indicators.sopr;
+   309→   608→      if (sopr_ind && sopr_ind.value !== null) {
+   310→   609→        state.onchain.sopr = sopr_ind.value;
+   311→   610→      }
+   312→   611→    }
+   313→   612→  } catch (e) {
+   314→   613→    console.warn('Signal score fetch failed:', e);
+   315→   614→  }
+   316→   615→}
+   317→   616→
+   318→   617→async function fetchBotState() {
+   319→   618→  try {
+   320→   619→    const data = await fetchJSON(CONFIG.BOT_STATE_URL);
+   321→   620→    state.bot = data;
+   322→   621→  } catch (e) {
+   323→   622→    console.warn('Bot state fetch failed:', e);
+   324→   623→    state.bot = null;
+   325→   624→  }
+   326→   625→}
+   327→   626→
+   328→   627→// ─── Renderers ───
+   329→   628→
+   330→   629→function renderPrice() {
+   331→   630→  const { usd, thb, change24h, volume, mcap } = state.price;
+   332→   631→  document.getElementById('price-usd').textContent = fmtUSD(usd);
+   333→   632→  document.getElementById('price-thb').textContent = fmtTHB(thb);
+   334→   633→
+   335→   634→  // 24h change
+   336→   635→  const chEl = document.getElementById('change-24h');
+   337→   636→  const isUp = change24h >= 0;
+   338→   637→  chEl.className = 'change-badge ' + (isUp ? 'up' : 'down');
+   339→   638→  chEl.innerHTML = (isUp ? '▲' : '▼') + ' ' + Math.abs(change24h).toFixed(2) + '%';
+   340→   639→
+   341→   640→  // Trend badge
+   342→   641→  const trend = getTrend(usd, state.onchain.mvrv);
+   343→   642→  const tbEl = document.getElementById('trend-badge');
+   344→   643→  tbEl.style.display = 'inline-flex';
+   345→   644→  tbEl.style.color = trend.color;
+   346→   645→  tbEl.style.borderColor = trend.color + '40';
+   347→   646→  tbEl.style.background = trend.color + '20';
+   348→   647→  tbEl.textContent = trend.trend;
+   349→   648→
+   350→   649→  // Stats
+   351→   650→  document.getElementById('volume-24h').textContent = '$' + fmt(volume, 1);
+   352→   651→  document.getElementById('market-cap').textContent = '$' + fmt(mcap, 1);
+   353→   652→
+   354→   653→  const vsAth = ((usd - CONFIG.ATH_USD) / CONFIG.ATH_USD * 100);
+   355→   654→ const athEl = document.getElementById('vs-ath');
+   356→   655→  athEl.className = 'stat-value ' + (vsAth >= 0 ? 'stat-green' : 'stat-red');
+   357→   656→  athEl.textContent = (vsAth >= 0 ? '+' : '') + vsAth.toFixed(1) + '%';
+   358→   657→
+   359→   658→  // Sparkline
+   360→   659→  renderSparkline();
+   361→   660→}
+   362→   661→
+   363→   662→function renderSparkline() {
+   364→   663→  const data = state.sparkline;
+   365→   664→  if (data.length < 2) return;
+   366→   665→
+   367→   666→  const svg = document.getElementById('sparkline');
+   368→   667→  const w = 600, h = 60;
+   369→   668→  const min = Math.min(...data);
+   370→   669→  const max = Math.max(...data);
+   371→   670→  const range = max - min || 1;
+   372→   671→
+   373→   672→  const points = data.map((v, i) => {
+   374→   673→    const x = (i / (data.length - 1)) * w;
+   375→   674→    const y = h - ((v - min) / range) * (h - 4) - 2;
+   376→   675→    return `${x},${y}`;
+   377→   676→  }).join(' ');
+   378→   677→
+   379→   678→  const areaPoints = `0,${h} ${points} ${w},${h}`;
+   380→   679→  const isUp = data[data.length-1] >= data[0];
+   381→   680→  const color = isUp ? '#22c55e' : '#ef4444';
+   382→   681→
+   383→   682→  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+   384→   683→  svg.innerHTML = `
+   385→   684→    <defs>
+   386→   685→      <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
+   387→   686→        <stop offset="0%" stop-color="${color}" stop-opacity="0.3"/>
+   388→   687→        <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+   389→   688→      </linearGradient>
+   390→   689→    </defs>
+   391→   690→    <polygon points="${areaPoints}" fill="url(#sparkGrad)"/>
+   392→   691→    <polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>
+   393→   692→    <circle cx="${(data.length-1)/(data.length-1)*w}" cy="${h - ((data[data.length-1]-min)/range)*(h-4)-2}" r="3" fill="${color}"/>
+   394→   693→  `;
+   395→   694→}
+   396→   695→
+   397→   696→function renderOnChain() {
+   398→   697→  const { mvrv, nupl, sopr } = state.onchain;
+   399→   698→  const mv = getMvrvZone(mvrv);
+   400→   699→
+   401→   700→  let html = '';
+   402→   701→
+   403→   702→  // MVRV
+   404→   703→  html += `<div class="metric">`;
+   405→   704→  html += `  <div class="metric-header">`;
+   406→   705→  html += `    <span class="metric-label">MVRV Ratio</span>`;
+   407→   706→  html += `    <span class="zone-badge" style="color:${mv.color};border-color:${mv.color}40;background:${mv.color}20">${mv.zone}</span>`;
+   408→   707→  html += `  </div>`;
+   409→   708→  html += `  <div class="metric-value lg">${mvrv.toFixed(3)}</div>`;
+   410→   709→  html += `  <div class="metric-sub"><span>Z-Score: ${state.onchain.mvrv_z.toFixed(2)}</span></div>`;
+   411→   710→  html += `</div>`;
+   412→   711→
+   413→   712→  // NUPL
+   414→   713→  html += `<div class="metric-divider"></div>`;
+   415→   714→  html += `<div class="metric">`;
+   416→   715→  html += `  <div class="metric-header">`;
+   417→   716→  html += `    <span class="metric-label">NUPL</span>`;
+   418→   717→  html += `    <span style="font-size:11px;color:var(--text-secondary)">${getNuplPhase(nupl)}</span>`;
+   419→   718→  html += `  </div>`;
+   420→   719→  html += `  <div class="metric-value">${nupl.toFixed(3)}</div>`;
+   421→   720→  html += `</div>`;
+   422→   721→
+   423→   722→  // SOPR
+   424→   723→  html += `<div class="metric-divider"></div>`;
+   425→   724→  html += `<div class="metric">`;
+   426→   725→  html += `  <div class="metric-header">`;
+   427→   726→  html += `    <span class="metric-label">SOPR</span>`;
+   428→   727→  if (sopr !== null) {
+   429→   728→    const soprSignal = sopr < 0.9 ? 'Heavy Loss Selling' : sopr < 1.0 ? 'Selling at Loss' : sopr < 1.1 ? 'Normal' : sopr < 1.3 ? 'Profit Taking' : 'Strong Profit Taking';
+   430→   729→    html += `    <span style="font-size:11px;color:${sopr < 1 ? 'var(--green)' : 'var(--text-secondary)'}">${soprSignal}</span>`;
+   431→   730→  }
+   432→   731→  html += `  </div>`;
+   433→   732→  if (sopr !== null) {
+   434→   733→    html += `  <div class="metric-value" style="color:${sopr < 1 ? 'var(--green)' : 'inherit'}">${sopr.toFixed(3)}</div>`;
+   435→   734→  } else {
+   436→   735→    html += `  <div class="no-data">N/A (data not available)</div>`;
+   437→   736→  }
+   438→   737→  html += `</div>`;
+   439→   738→
+   440→   739→  // Signal Score from btc-signal-analyzer
+   441→   740→  if (state.signal && state.signal.score !== undefined) {
+   442→   741→    html += `<div class="metric-divider"></div>`;
+   443→   742→    html += `<div class="metric">`;
+   444→   743→    html += `  <div class="metric-header">`;
+   445→   744→    html += `    <span class="metric-label">Signal Score</span>`;
+   446→   745→    const sc = state.signal.score;
+   447→   746→    const scColor = sc < 30 ? '#22c55e' : sc < 50 ? '#86efac' : sc < 70 ? '#eab308' : sc < 85 ? '#f97316' : '#ef4444';
+   448→   747→    html += `    <span class="zone-badge" style="color:${scColor};border-color:${scColor}40;background:${scColor}20">${state.signal.zone?.label || 'Neutral'}</span>`;
+   449→   748→    html += `  </div>`;
+   450→   749→    html += `  <div class="metric-value">${sc.toFixed(1)}<span style="font-size:14px;color:var(--text-muted)"> / 100</span></div>`;
+   451→   750→    html += `  <div class="source-tag">Source: btc-signal-analyzer (${state.signal.meta?.available_indicators || 0}/${state.signal.meta?.total_indicators || 0} indicators)</div>`;
+   452→   751→    html += `</div>`;
+   453→   752→  }
+   454→   753→
+   455→   754→  document.getElementById('onchain-content').innerHTML = html;
+   456→   755→}
+   457→   756→
+   458→   757→function renderMomentum() {
+   459→   758→  // Since we don't have RSI/MACD from public APIs alone,
+   460→   759→  // show derivative/sentiment data from signal_score.json
+   461→   760→  const s = state.signal;
+   462→   761→  let html = '';
+   463→   762→
+   464→   763→  if (s && s.indicators) {
+   465→   764→    // Funding Rate
+   466→   765→    const fr = s.indicators.funding_rate;
+   467→   766→    if (fr && fr.value !== null) {
+   468→   767→      html += `<div class="metric">`;
+   469→   768→      html += `  <div class="metric-header">`;
+   470→   769→      html += `    <span class="metric-label">Funding Rate (7d avg)</span>`;
+   471→   770→      const frColor = fr.value > 0.01 ? 'var(--red)' : fr.value < 0 ? 'var(--green)' : 'var(--text-secondary)';
+   472→   771→      html += `    <span style="font-size:11px;color:${frColor}">${fr.value > 0.01 ? 'High Long Bias' : fr.value < 0 ? 'Short Bias' : 'Neutral'}</span>`;
+   473→   772→      html += `  </div>`;
+   474→   773→      html += `  <div class="metric-value">${(fr.value * 100).toFixed(4)}%</div>`;
+   475→   774→      html += `  <div class="metric-sub"><span>Pct: ${(fr.percentile * 100).toFixed(1)}%</span></div>`;
+   476→   775→      html += `</div>`;
+   477→   776→    }
+   478→   777→
+   479→   778→    // Taker Buy/Sell Ratio
+   480→   779→    const taker = s.indicators.taker_buy_sell_ratio;
+   481→   780→    if (taker && taker.value !== null) {
+   482→   781→      html += `<div class="metric-divider"></div>`;
+   483→   782→      html += `<div class="metric">`;
+   484→   783→      html += `  <div class="metric-header">`;
+   485→   784→      html += `    <span class="metric-label">Taker Buy/Sell Ratio</span>`;
+   486→   785→      const tColor = taker.value > 1.1 ? 'var(--green)' : taker.value < 0.9 ? 'var(--red)' : 'var(--text-secondary)';
+   487→   786→      html += `    <span style="font-size:11px;color:${tColor}">${taker.value > 1.1 ? 'Buyers Dominant' : taker.value < 0.9 ? 'Sellers Dominant' : 'Balanced'}</span>`;
+   488→   787→      html += `  </div>`;
+   489→   788→      html += `  <div class="metric-value">${taker.value.toFixed(3)}</div>`;
+   490→   789→      html += `</div>`;
+   491→   790→    }
+   492→   791→
+   493→   792→    // Exchange Netflow
+   494→   793→    const nf = s.indicators.exchange_netflow;
+   495→   794→    if (nf && nf.value !== null) {
+   496→   795→      html += `<div class="metric-divider"></div>`;
+   497→   796→      html += `<div class="metric">`;
+   498→   797→      html += `  <div class="metric-header">`;
+   499→   798→      html += `    <span class="metric-label">Exchange Netflow (7d)</span>`;
+   500→   799→      const nfColor = nf.value > 0 ? 'var(--red)' : 'var(--green)';
+   501→   800→      const nfLabel = nf.value > 0 ? 'Inflow (Selling Pressure)' : 'Outflow (Accumulation)';
+   502→   801→      html += `    <span style="font-size:11px;color:${nfColor}">${nfLabel}</span>`;
+   503→   802→      html += `  </div>`;
+   504→   803→      html += `  <div class="metric-value" style="color:${nfColor}">${nf.value > 0 ? '+' : ''}${nf.value.toFixed(0)} BTC</div>`;
+   505→   804→      html += `</div>`;
+   506→   805→    }
+   507→   806→
+   508→   807→    // Whale Ratio
+   509→   808→    const wr = s.indicators.whale_ratio;
+   510→   809→    if (wr && wr.value !== null) {
+   511→   810→      html += `<div class="metric-divider"></div>`;
+   512→   811→      html += `<div class="metric">`;
+   513→   812→      html += `  <div class="metric-header">`;
+   514→   813→      html += `    <span class="metric-label">Whale Ratio (7d)</span>`;
+   515→   814→      const wrColor = wr.value > 0.5 ? 'var(--red)' : 'var(--green)';
+   516→   815→      html += `    <span style="font-size:11px;color:${wrColor}">${wr.value > 0.5 ? 'High Whale Activity' : 'Normal'}</span>`;
+   517→   816→      html += `  </div>`;
+   518→   817→      html += `  <div class="metric-value">${(wr.value * 100).toFixed(1)}%</div>`;
+   519→   818→      html += `</div>`;
+   520→   819→    }
+   521→   820→  } else {
+   522→   821→    html = `<div class="no-data">On-chain signal data not available yet. Waiting for btc-signal-analyzer update.</div>`;
+   523→   822→  }
+   524→   823→
+   525→   824→  document.getElementById('momentum-content').innerHTML = html;
+   526→   825→}
+   527→   826→
+   528→   827→function renderFearGreed() {
+   529→   828→  const fg = state.onchain.fng;
+   530→   829→  if (!fg) {
+   531→   830→    document.getElementById('fg-content').innerHTML = `<div class="no-data">Fear & Greed data not available</div>`;
+   532→   831→    return;
+   533→   832→  }
+   534→   833→
+   535→   834→  const angle = (fg.value / 100) * 180 - 90; // -90 to +90
+   536→   835→  const color = getFgColor(fg.value);
+   537→   836→  const label = getFgLabel(fg.value);
+   538→   837→  const desc = getFgDesc(fg.value);
+   539→   838→
+   540→   839→  let html = `<div class="fg-container">`;
+   541→   840→  html += `  <div class="fg-gauge">`;
+   542→   841→  html += `    <div class="fg-gauge-bg"></div>`;
+   543→   842→  html += `    <div class="fg-gauge-inner"></div>`;
+   544→   843→  html += `    <div class="fg-needle" style="transform:rotate(${angle}deg)"></div>`;
+   545→   844→  html += `  </div>`;
+   546→   845→  html += `  <div class="fg-value" style="color:${color}">${fg.value}</div>`;
+   547→   846→  html += `  <div class="fg-label" style="color:${color}">${label}</div>`;
+   548→   847→  html += `  <div class="fg-desc">${desc}</div>`;
+   549→   848→  html += `</div>`;
+   550→   849→
+   551→   850→  document.getElementById('fg-content').innerHTML = html;
+   552→   851→}
+   553→   852→
+   554→   853→function renderKeyLevels() {
+   555→   854→  const { usd } = state.price;
+   556→   855→  const s = state.signal;
+   557→   856→  let levels = [];
+   558→   857→
+   559→   858→  // Derive key levels from available data
+   560→   859→  // MVRV = price / realized_price, so realized_price = price / MVRV
+   561→   860→  const rp = state.onchain.mvrv > 0 ? usd / state.onchain.mvrv : 0;
+   562→   861→  // LTH-RP approximation (typically 1.15x realized price)
+   563→   862→  const lthRp = rp * 1.15;
+   564→   863→
+   565→   864→  if (rp > 0) {
+   566→   865→    levels.push({ label: 'Realized Price (derived)', value: rp, dist: ((usd - rp) / rp) * 100 });
+   567→   866→  }
+   568→   867→  if (lthRp > 0) {
+   569→   868→    levels.push({ label: 'LTH Realized Price (est.)', value: lthRp, dist: ((usd - lthRp) / lthRp) * 100 });
+   570→   869→  }
+   571→   870→  levels.push({ label: 'ATH', value: CONFIG.ATH_USD, dist: ((usd - CONFIG.ATH_USD) / CONFIG.ATH_USD) * 100 });
+   572→   871→
+   573→   872→  // Add from bot state if available
+   574→   873→  if (state.bot && state.bot.last_indicators) {
+   575→   874→    const bi = state.bot.last_indicators;
+   576→   875→    if (bi.realized_price > 0) {
+   577→   876→      levels[0] = { label: 'Realized Price', value: bi.realized_price / 35, dist: ((usd - bi.realized_price/35) / (bi.realized_price/35)) * 100 };
+   578→   877→    }
+   579→   878→    if (bi.lth_realized_price > 0) {
+   580→   879→      levels[1] = { label: 'LTH Realized Price', value: bi.lth_realized_price / 35, dist: ((usd - bi.lth_realized_price/35) / (bi.lth_realized_price/35)) * 100 };
+   581→   880→    }
+   582→   881→  }
+   583→   882→
+   584→   883→  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0">';
+   585→   884→  levels.forEach(l => {
+   586→   885→    const dColor = l.dist >= 0 ? 'var(--green)' : 'var(--red)';
+   587→   886→    html += `<div class="level-row">`;
+   588→   887→    html += `  <span class="level-label">${l.label}</span>`;
+   589→   888→    html += `  <div class="level-right">`;
+   590→   889→    html += `    <span class="level-value">${fmtUSD(l.value)}</span>`;
+   591→   890→    html += `    <span class="level-dist" style="color:${dColor}">${l.dist >= 0 ? '+' : ''}${l.dist.toFixed(1)}%</span>`;
+   592→   891→    html += `  </div>`;
+   593→   892→    html += `</div>`;
+   594→   893→  });
+   595→   894→  html += '</div>';
+   596→   895→  html += `<div class="level-note">`;
+   597→   896→  html += `  Below Realized Price = historically profitable accumulation zone. `;
+   598→   897→  html += `  Above LTH-RP = long-term holders in profit (sell pressure zone). `;
+   599→   898→  html += `  Levels derived from MVRV: RP ≈ Price / MVRV.`;
+   600→   899→  html += `</div>`;
+   601→   900→
+   602→   901→  document.getElementById('levels-content').innerHTML = html;
+   603→   902→}
+   604→   903→
+   605→   904→function renderBot() {
+   606→   905→  const bot = state.bot;
+   607→   906→  const badge = document.getElementById('bot-status-badge');
+   608→   907→
+   609→   908→  if (!bot) {
+   610→   909→    badge.textContent = 'NO DATA';
+   611→   910→    badge.className = 'bot-status-badge offline';
+   612→   911→    document.getElementById('bot-content').innerHTML = `
+   613→   912→      <div class="no-data" style="text-align:center;padding:16px 0">
+   614→   913→        Phoenix bot state not available.<br>
+   615→   914→        <span style="font-size:11px">Push bot_state.json to btc-signal-analyzer repo to enable live status.</span>
+   616→   915→      </div>
+   617→   916→    `;
+   618→   917→    return;
+   619→   918→  }
+   620→   919→
+   621→   920→  badge.textContent = bot.last_run_date ? 'ACTIVE' : 'OFFLINE';
+   622→   921→  badge.className = 'bot-status-badge ' + (bot.last_run_date ? 'active' : 'offline');
+   623→   922→
+   624→   923→  const bi = bot.last_indicators || {};
+   625→   924→  const ld = bot.last_decision || {};
+   626→   925→  const price = bi.price || 0;
+   627→   926→  const thbPrice = price || state.price.thb;
+   628→   927→  const btcBal = bot.last_btc_balance || 0;
+   629→   928→  const cashBal = bot.last_cash_balance || 0;
+   630→   929→  const portfolioVal = bot.last_portfolio_value || 0;
+   631→   930→  const avgCost = btcBal > 0 ? (bot.adjusted_invested || bot.total_invested || 0) / btcBal : 0;
+   632→   931→  const unrealizedPnl = avgCost > 0 ? ((price - avgCost) / avgCost) * 100 : 0;
+   633→   932→
+   634→   933→  let decisionText = 'No trade';
+   635→   934→  if (ld.buy_amount > 0) decisionText = `BUY ${ld.buy_amount.toLocaleString()} ${bot.last_exchange_currency || 'THB'}`;
+   636→   935→  else if (ld.sell_amount > 0) decisionText = `SELL ${ld.sell_amount.toLocaleString()} ${bot.last_exchange_currency || 'THB'}`;
+   637→   936→
+   638→   937→  const pnlColor = unrealizedPnl >= 0 ? 'var(--green)' : 'var(--red)';
+   639→   938→
+   640→   939→  let html = `<div class="bot-grid">`;
+   641→   940→  html += `  <div class="bot-item"><div class="label">Portfolio</div><div class="value">${fmtTHB(portfolioVal)}</div></div>`;
+   642→   941→  html += `  <div class="bot-item"><div class="label">P&L</div><div class="value" style="color:${pnlColor}">${unrealizedPnl >= 0 ? '+' : ''}${unrealizedPnl.toFixed(1)}%</div></div>`;
+   643→   942→  html += `  <div class="bot-item"><div class="label">BTC</div><div class="value" style="font-family:monospace;font-size:12px">${btcBal.toFixed(6)}</div></div>`;
+   644→   943→  html += `  <div class="bot-item"><div class="label">Cash</div><div class="value">${fmtTHB(cashBal)}</div></div>`;
+   645→   944→  html += `</div>`;
+   646→   945→  html += `<div class="bot-decision">`;
+   647→   946→  html += `  <div class="label">Last Decision</div>`;
+   648→   947→  html += `  <div class="decision-text">${decisionText}</div>`;
+   649→   948→  html += `  <div class="bot-meta">`;
+   650→   949→  html += `    Multiplier: ${ld.multiplier || 0}x | MVRV: ${bi.mvrv || '--'} | Sell Score: ${bi.sell_score || 0}`;
+   651→   950→  if (bi.path_taken && bi.path_taken !== 'none') {
+   652→   951→    html += `    <span class="path-badge">${bi.path_taken}</span>`;
+   653→   952→  }
+   654→   953→  html += `  </div>`;
+   655→   954→  html += `  <div class="bot-meta" style="margin-top:4px">`;
+   656→   955→  html += `    Runs: ${bot.run_count || 0} | Buys: ${bot.buy_count || 0} | Sells: ${bot.sell_count || 0} | Last: ${bot.last_run_date || 'N/A'}`;
+   657→   956→  html += `  </div>`;
+   658→   957→  html += `</div>`;
+   659→   958→
+   660→   959→  document.getElementById('bot-content').innerHTML = html;
+   661→   960→}
+   662→   961→
+   663→   962→function renderBriefing() {
+   664→   963→  const { mvrv, nupl, fng } = state.onchain;
+   665→   964→  const parts = [];
+   666→   965→
+   667→   966→  // MVRV
+   668→   967→  if (mvrv < 1.0) {
+   669→   968→    parts.push(`MVRV at ${mvrv.toFixed(2)} is in deep accumulation zone — historically strong buy signals.`);
+   670→   969→  } else if (mvrv < 1.5) {
+   671→   970→    parts.push(`MVRV at ${mvrv.toFixed(2)} — still in accumulation territory, good for DCA.`);
+   672→   971→  } else if (mvrv < 2.0) {
+   673→   972→    parts.push(`MVRV at ${mvrv.toFixed(2)} — neutral zone, normal DCA pace recommended.`);
+   674→   973→  } else if (mvrv < 2.5) {
+   675→   974→    parts.push(`MVRV at ${mvrv.toFixed(2)} — entering euphoria, consider reducing buy size.`);
+   676→   975→  } else {
+   677→   976→    parts.push(`MVRV at ${mvrv.toFixed(2)} — overvalued territory, selling signals may activate.`);
+   678→   977→  }
+   679→   978→
+   680→   979→  // Fear & Greed
+   681→   980→  if (fng) {
+   682→   981→    if (fng.value <= 25) {
+   683→   982→      parts.push(`Fear & Greed Index at ${fng.value} (Extreme Fear) — historically one of the best buying opportunities.`);
+   684→   983→    } else if (fng.value >= 75) {
+   685→   984→      parts.push(`Fear & Greed Index at ${fng.value} (Extreme Greed) — caution advised, consider taking some profits.`);
+   686→   985→    }
+   687→   986→  }
+   688→   987→
+   689→   988→  // Signal Score
+   690→   989→  if (state.signal && state.signal.score !== undefined) {
+   691→   990→    const sc = state.signal.score;
+   692→   991→    if (sc < 30) {
+   693→   992→      parts.push(`Signal Score: ${sc.toFixed(1)}/100 — Strong buy signal from multi-indicator analysis.`);
+   694→   993→    } else if (sc > 70) {
+   695→   994→      parts.push(`Signal Score: ${sc.toFixed(1)}/100 — Elevated risk, most indicators suggest caution.`);
+   696→   995→    }
+   697→   996→  }
+   698→   997→
+   699→   998→  // Funding rate warning
+   700→   999→  if (state.signal && state.signal.indicators) {
+   701→  1000→    const fr = state.signal.indicators.funding_rate;
+   702→  1001→    if (fr && fr.value > 0.01) {
+   703→  1002→      parts.push(`High funding rate (${(fr.value*100).toFixed(4)}%) suggests crowded long positioning — potential for squeeze.`);
+   704→  1003→    }
+   705→  1004→  }
+   706→  1005→
+   707→  1006→  document.getElementById('briefing-text').textContent = parts.join(' ');
+   708→  1007→}
+   709→  1008→
+   710→  1009→// ─── Main ───
+   711→  1010→
+   712→  1011→async function init() {
+   713→  1012→  const btn = document.getElementById('refresh-btn');
+   714→  1013→  btn.classList.add('spinning');
+   715→  1014→
+   716→  1015→  try {
+   717→  1016→    // Fetch all data in parallel
+   718→  1017→    await Promise.allSettled([
+   719→  1018→      fetchBinancePrice(),
+   720→  1019→      fetchBitkubPrice(),
+   721→  1020→      fetchFearGreed(),
+   722→  1021→      fetchOnchainSignal(),
+   723→  1022→      fetchBotState(),
+   724→  1023→    ]);
+   725→  1024→
+   726→  1025→    // Hide loading, show app
+   727→  1026→    document.getElementById('loading').style.display = 'none';
+   728→  1027→    document.getElementById('error').style.display = 'none';
+   729→  1028→    document.getElementById('app').style.display = 'block';
+   730→  1029→
+   731→  1030→    // Render all sections
+   732→  1031→    renderPrice();
+   733→  1032→    renderOnChain();
+   734→  1033→    renderMomentum();
+   735→  1034→    renderFearGreed();
+   736→  1035→    renderKeyLevels();
+   737→  1036→    renderBot();
+   738→  1037→    renderBriefing();
+   739→  1038→
+   740→  1039→    // Update time
+   741→  1040→    document.getElementById('refresh-time').textContent =
+   742→  1041→      new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+   743→  1042→
+   744→  1043→  } catch (e) {
+   745→  1044→    document.getElementById('loading').style.display = 'none';
+   746→  1045→    document.getElementById('error').style.display = 'block';
+   747→  1046→    document.getElementById('error-msg').textContent = String(e);
+   748→  1047→  } finally {
+   749→  1048→    btn.classList.remove('spinning');
+   750→  1049→  }
+   751→  1050→}
+   752→  1051→
+   753→  1052→// Auto-refresh
+   754→  1053→init();
+   755→  1054→setInterval(init, CONFIG.REFRESH_INTERVAL);
+   756→  1055→</script>
+   757→  1056→
+   758→  1057→</body>
+   759→  1058→</html>
