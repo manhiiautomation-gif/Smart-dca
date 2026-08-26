@@ -102,28 +102,33 @@ def sync_bot_state(state: dict | None = None, verbose: bool = True) -> bool:
             cwd=repo, capture_output=True, text=True, timeout=30
         )
         
-        # Push with token from my-project remote
+        # Push with token — temporarily set push URL to include auth
         token = _get_github_token()
+        url_result = subprocess.run(
+            ['git', 'config', '--get', 'remote.origin.url'],
+            cwd=repo, capture_output=True, text=True, timeout=10
+        )
+        base_url = url_result.stdout.strip()
+        if '@' in base_url:
+            base_url = 'https://' + base_url.split('@')[1]
+        
         if token:
-            # Build authenticated push URL
-            url_result = subprocess.run(
-                ['git', 'config', '--get', 'remote.origin.url'],
+            auth_url = base_url.replace('https://', f'https://{token}@')
+            subprocess.run(
+                ['git', 'remote', 'set-url', '--push', 'origin', auth_url],
                 cwd=repo, capture_output=True, text=True, timeout=10
             )
-            base_url = url_result.stdout.strip()
-            # Strip any existing credentials
-            if '@' in base_url:
-                base_url = 'https://' + base_url.split('@')[1]
-            auth_url = base_url.replace('https://', f'https://{token}@')
-            
-            push_result = subprocess.run(
-                ['git', 'push', auth_url, 'main'],
-                cwd=repo, capture_output=True, text=True, timeout=60
-            )
-        else:
-            push_result = subprocess.run(
-                ['git', 'push', 'origin', 'main'],
-                cwd=repo, capture_output=True, text=True, timeout=60
+        
+        push_result = subprocess.run(
+            ['git', 'push', 'origin', 'main'],
+            cwd=repo, capture_output=True, text=True, timeout=60
+        )
+        
+        # Restore clean push URL (no token in config)
+        if token:
+            subprocess.run(
+                ['git', 'remote', 'set-url', '--push', 'origin', base_url],
+                cwd=repo, capture_output=True, text=True, timeout=10
             )
         
         if push_result.returncode == 0:
