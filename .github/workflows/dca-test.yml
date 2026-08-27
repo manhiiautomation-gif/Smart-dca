@@ -15,9 +15,9 @@ name: Phoenix v5.1 TEST (10min dry-run)
 # ╚══════════════════════════════════════════════════════════════╝
 
 on:
-  schedule:
-    # Every 10 minutes
-    - cron: '*/10 * * * *'
+  # ⚠️ SCHEDULE DISABLED — cron removed to prevent test runs interfering with production.
+  # Only runs when triggered manually via workflow_dispatch.
+  # To re-enable: add back:  - cron: '*/10 * * * *' under schedule:
   workflow_dispatch:
     inputs:
       budget:

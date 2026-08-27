@@ -101,14 +101,14 @@ jobs:
           msg = (
               f"\u26a0\ufe0f Phoenix Heartbeat Alert\n"
               f"\n"
-              f"\u{1f4c5} วัน{day_name_th} {thai_today.strftime('%d/%m/%Y')}\n"
+              f"\U0001f4c5 วัน{day_name_th} {thai_today.strftime('%d/%m/%Y')}\n"
               f"\u23f0 เวลา {thai_now.strftime('%H:%M')} น.\n"
               f"\n"
               f"\u274c บอทยังไม่ได้รันวันนี้\n"
-              f"\u{1f4cb} รันล่าสุด: {last_run or 'ไม่มี'}\n"
-              f"\u{1f4ca} จำนวนรันทั้งหมด: {run_count} ครั้ง\n"
+              f"\U0001f4cb รันล่าสุด: {last_run or 'ไม่มี'}\n"
+              f"\U0001f4ca จำนวนรันทั้งหมด: {run_count} ครั้ง\n"
               f"\n"
-              f"\u{1f514} Cron อาจพลาด — กด Run manual หรือตรวจสอบ GitHub Actions"
+              f"\U0001f514 Cron อาจพลาด — กด Run manual หรือตรวจสอบ GitHub Actions"
           )
 
           try:
