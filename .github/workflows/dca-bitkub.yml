@@ -2,12 +2,14 @@ name: Phoenix v5.1 DCA - Bitkub
 
 on:
   schedule:
-    # Research-based: 10:00-11:00 THB (03:00-04:00 UTC) has lowest BTC volume
-    # and most negative avg hourly returns — optimal DCA entry window.
-    # Monday: base_budget boosted 1.2x (research: highest next-day returns).
-    - cron: '0 3 * * *'
-    - cron: '20 3 * * *'
-    - cron: '40 3 * * *'
+    # TARGET: ~10:00-10:40 THB (~03:00-03:40 UTC)
+    # GitHub Actions cron has consistent ~10h delay on this repo.
+    # Compensating: set cron 10h EARLIER so delayed execution lands near target window.
+    # cron 17:00 UTC + ~10h delay = ~03:00 UTC next day = ~10:00 THB
+    # TODO: revert to '0/20/40 3 * * *' once GitHub delay resolves.
+    - cron: '0 17 * * *'   # +10h delay -> ~03:00 UTC = ~10:00 THB
+    - cron: '20 17 * * *'  # +10h delay -> ~03:20 UTC = ~10:20 THB
+    - cron: '40 17 * * *'  # +10h delay -> ~03:40 UTC = ~10:40 THB
   workflow_dispatch:
     inputs:
       dry_run:

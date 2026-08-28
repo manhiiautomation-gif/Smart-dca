@@ -53,10 +53,16 @@ def _in_dca_time_window() -> bool:
 
     Configured via DCA_TIME_WINDOW_START / DCA_TIME_WINDOW_END (Thai 24h).
     Window is [start, end) — start inclusive, end exclusive.
+
+    TEMPORARILY DISABLED: Always returns True because GitHub Actions cron
+    delays cause runs to land outside the original 10:00-11:00 THB window.
+    Re-enable by setting env DCA_TIME_WINDOW_ENFORCE=true.
     """
-    now = _thai_now()
-    hour = now.hour
-    return config.DCA_TIME_WINDOW_START <= hour < config.DCA_TIME_WINDOW_END
+    if os.environ.get('DCA_TIME_WINDOW_ENFORCE', '').lower() == 'true':
+        now = _thai_now()
+        hour = now.hour
+        return config.DCA_TIME_WINDOW_START <= hour < config.DCA_TIME_WINDOW_END
+    return True
 
 
 def _is_monday_thai() -> bool:
@@ -692,8 +698,8 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
         print(f'[BOT] MONDAY BOOST: base_budget x{config.MONDAY_DCA_MULTIPLIER} = {base_budget:.2f} {currency}')
 
     # ── 6b. DCA time window check ──
-    # Only buy during configured Thai time window (default: 10:00-11:00 THB).
-    # Indicators + dashboard are still computed outside the window.
+    # TEMPORARILY DISABLED — see _in_dca_time_window()
+    # Re-enable by setting env DCA_TIME_WINDOW_ENFORCE=true
     in_dca_window = _in_dca_time_window()
     if not in_dca_window:
         thai_h = _thai_now().hour
@@ -743,6 +749,7 @@ def run_daily(exchange, bot_state: dict, dry_run: bool = False,
           f'score={decision["sell_score"]} path={decision["path_taken"]}')
 
     # ── 8b. DCA time window enforcement ──
+    # TEMPORARILY DISABLED — see _in_dca_time_window()
     # Zero out buy if outside the configured Thai time window.
     # This is a safety feature that ALWAYS applies, even with --force.
     # Rationale: buying outside the research-optimized window defeats the purpose.
