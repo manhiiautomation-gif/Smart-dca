@@ -37,7 +37,8 @@ jobs:
           python3 << 'PYEOF'
           import json
           import os
-          import requests
+          import urllib.request
+          import urllib.error
           from datetime import datetime, timezone, timedelta
 
           THAI_TZ = timezone(timedelta(hours=7))
@@ -112,16 +113,20 @@ jobs:
           )
 
           try:
-              resp = requests.post(
+              payload = json.dumps({"chat_id": chat_id, "text": msg, "parse_mode": "HTML"}).encode('utf-8')
+              req = urllib.request.Request(
                   f"https://api.telegram.org/bot{token}/sendMessage",
-                  json={"chat_id": chat_id, "text": msg, "parse_mode": "HTML"},
+                  data=payload,
+                  headers={"Content-Type": "application/json"},
                   timeout=15
               )
-              if resp.status_code == 200:
-                  print("Telegram alert sent successfully.")
-              else:
-                  print(f"Telegram API error: {resp.status_code} {resp.text[:200]}")
-                  exit(1)
+              resp = urllib.request.urlopen(req)
+              body = resp.read().decode('utf-8', errors='replace')
+              print(f"Telegram alert sent successfully. Response: {body[:100]}")
+          except urllib.error.HTTPError as e:
+              body = e.read().decode('utf-8', errors='replace')[:200]
+              print(f"Telegram API error: {e.code} {body}")
+              exit(1)
           except Exception as e:
               print(f"Telegram send failed: {e}")
               exit(1)
