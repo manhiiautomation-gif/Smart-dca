@@ -345,25 +345,25 @@
             <div class="card-title">Portfolio Summary</div>
             <div class="metric">
                 <div class="metric-label">Portfolio Value</div>
-                <div class="metric-value hero green num-mono">27,263.74 <small style="font-size:0.7em;opacity:0.7;">THB</small></div>
+                <div class="metric-value hero green num-mono">27,261.51 <small style="font-size:0.7em;opacity:0.7;">THB</small></div>
             </div>
-            <div class="metric" style="margin-top:-4px;"><div class="metric-label">24h Change</div><div class="metric-value green" style="font-size:0.95rem;">27,255.68 THB (+338159.80%)</div></div>
+            <div class="metric" style="margin-top:-4px;"><div class="metric-label">24h Change</div><div class="metric-value green" style="font-size:0.95rem;">27,253.80 THB (+353486.38%)</div></div>
             <div class="metric">
                 <div class="metric-label">BTC Holdings</div>
                 <div class="metric-value blue num-mono">0.002239 BTC</div>
-                <div class="metric-sub">5,759.95 THB</div>
+                <div class="metric-sub">5,757.72 THB</div>
             </div>
             <div class="metric">
                 <div class="metric-label">Cash Balance</div>
                 <div class="metric-value">21,503.79 THB</div>
             </div>
             <div class="metric" style="margin-top:-4px;"><div class="metric-label">Avg Buy Price</div><div class="metric-value dim" style="font-size:0.95rem;">2,550,008.50 THB</div></div>
-            <div class="metric" style="margin-top:-4px;"><div class="metric-label">Unrealized P&L</div><div class="metric-value green" style="font-size:0.95rem;">51.12 THB (+5.7%)</div></div>
+            <div class="metric" style="margin-top:-4px;"><div class="metric-label">Unrealized P&L</div><div class="metric-value green" style="font-size:0.95rem;">48.89 THB (+5.4%)</div></div>
             <div class="metric" style="margin-top:-4px;"><div class="metric-label">Avg Buy Size</div><div class="metric-value dim" style="font-size:0.95rem;">180.00 THB/trade</div></div>
             <div class="grid grid-2" style="margin-top:12px; gap:8px;">
                 <div class="metric">
                     <div class="metric-label">ROI (ตลอดกาล)</div>
-                    <div class="metric-value green">+540.0%</div>
+                    <div class="metric-value green">+539.7%</div>
                 </div>
                 <div class="metric">
                     <div class="metric-label">Total Invested</div>
@@ -406,7 +406,7 @@
                 </div>
                 <div class="ind-item">
                     <span class="label">ราคา BTC ตอนนี้</span>
-                    <span class="val num-mono">2,572,841.58 THB</span>
+                    <span class="val num-mono">2,571,846.06 THB</span>
                 </div>
                 <!-- U11: Next Run -->
                 <div class="ind-item">
@@ -546,7 +546,7 @@
 
     <!-- Row 3b: Indicator History Charts (B22) -->
     <div class="card" style="margin-bottom:16px;">
-        <div class="card-title">Indicator History (last 1 days)</div>
+        <div class="card-title">Indicator History (last 0 days)</div>
         <div class="ind-charts-grid" id="ihCharts">
             <div class="ih-chart-box"><div id="ihChartPrice"></div></div>
             <div class="ih-chart-box"><div id="ihChartMvrv"></div></div>
@@ -680,7 +680,7 @@
 
     <!-- Footer -->
     <div class="footer">
-        Phoenix v5.1 DCA Bot | Generated: 2026-08-29 00:47 | Auto-refresh: 5 min | <a href="https://github.com/manhiiautomation-gif/Smart-dca" target="_blank" style="color:var(--blue);text-decoration:none;">GitHub</a>
+        Phoenix v5.1 DCA Bot | Generated: 2026-08-29 00:59 | Auto-refresh: 5 min | <a href="https://github.com/manhiiautomation-gif/Smart-dca" target="_blank" style="color:var(--blue);text-decoration:none;">GitHub</a>
     </div>
 
     <script>
@@ -854,7 +854,7 @@
             if (isAlive) {
                 title.textContent = 'Kill Bot?';
                 msg.innerHTML = '⚠️ ก่อน Kill:<br>' +
-                    '• กำลังถือ: <b>' + '0.00' + ' BTC</b> (~' + '5,759.95' + ' THB)<br>' +
+                    '• กำลังถือ: <b>' + '0.00' + ' BTC</b> (~' + '5,757.72' + ' THB)<br>' +
                     '• ถ้าราคาเปลี่ยน จะไม่มี auto-sell<br>' +
                     '• ต้อง Resume ด้วยมือเท่านั้น';
                 input.value = '';
@@ -933,7 +933,7 @@
 
         // U9: Freshness badge — shows relative time since generation
         (function() {
-            var genTime = 1787964431 * 1000;
+            var genTime = 1787965147 * 1000;
             var el = document.getElementById('freshness');
             if (!el) return;
             function update() {
@@ -953,7 +953,7 @@
     <script>
         (function() {
             var dates = ["2026-08-22 20:37", "2026-08-23 20:37", "2026-08-24 20:56", "2026-08-26 10:41", "2026-08-29 07:47", "2026-08-29"];
-            var values = [4.72, 8.28, 8.84, 8.05, 8.06, 27263.74];
+            var values = [4.64, 8.13, 8.6, 7.74, 7.71, 27261.51];
             var types = ["buy", "buy", "buy", "buy", "buy", "current"];
 
             if (dates.length === 0) {
@@ -1040,12 +1040,12 @@
         // B22: Indicator History Charts (built via _build_indicator_charts_js)
                 // B22: Indicator History Charts
         (function() {
-            var ihDates = ["2026-08-29"];
-            var ihPrice = [2572841.58];
-            var ihMvrv = [1.514];
-            var ihRsi = [44.2];
-            var ihSopr = [1.202];
-            var ihNupl = [0.34];
+            var ihDates = [];
+            var ihPrice = [];
+            var ihMvrv = [];
+            var ihRsi = [];
+            var ihSopr = [];
+            var ihNupl = [];
 
             if (ihDates.length < 2) {
                 var box = document.getElementById('ihCharts');
