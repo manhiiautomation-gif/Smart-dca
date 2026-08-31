@@ -3,13 +3,12 @@ name: Phoenix v5.1 DCA - Bitkub
 on:
   schedule:
     # TARGET: ~10:00-10:40 THB (~03:00-03:40 UTC)
-    # GitHub Actions cron has consistent ~10h delay on this repo.
-    # Compensating: set cron 10h EARLIER so delayed execution lands near target window.
-    # cron 17:00 UTC + ~10h delay = ~03:00 UTC next day = ~10:00 THB
-    # TODO: revert to '0/20/40 3 * * *' once GitHub delay resolves.
-    - cron: '0 17 * * *'   # +10h delay -> ~03:00 UTC = ~10:00 THB
-    - cron: '20 17 * * *'  # +10h delay -> ~03:20 UTC = ~10:20 THB
-    - cron: '40 17 * * *'  # +10h delay -> ~03:40 UTC = ~10:40 THB
+    # GitHub Actions cron delay ~2.5h (varies). Compensating by setting earlier.
+    # cron 00:30 UTC + ~2.5h delay = ~03:00 UTC = ~10:00 THB
+    # TODO: revert to '0/20/40 3 * * *' once GitHub delay is minimal.
+    - cron: '30 0 * * *'   # -> ~03:00 UTC = ~10:00 THB
+    - cron: '50 0 * * *'   # -> ~03:20 UTC = ~10:20 THB
+    - cron: '10 1 * * *'   # -> ~03:40 UTC = ~10:40 THB
   workflow_dispatch:
     inputs:
       dry_run:

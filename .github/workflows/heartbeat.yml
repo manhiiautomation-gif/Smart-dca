@@ -8,14 +8,15 @@ name: Heartbeat — Daily Run Checker
 # Alert threshold: 05:00 UTC (12:00 THB) — gives 80 min buffer after last slot.
 
 on:
-  schedule:
-    # Every 2 hours — check after each potential DCA window
-    - cron: '0 1 * * *'   # 08:00 THB — pre-window, silent check only
-    - cron: '0 5 * * *'   # 12:00 THB — POST-WINDOW, alert if no run
-    - cron: '0 7 * * *'   # 14:00 THB — second chance alert
-    - cron: '0 9 * * *'   # 16:00 THB — final check of the day
-    - cron: '0 13 * * *'  # 20:00 THB — evening check
-    - cron: '0 17 * * *'  # 00:00 THB (next day) — end-of-day check
+  # ⚠️ SCHEDULE DISABLED — cron paused temporarily.
+  # Re-enable: uncomment the schedule block below.
+  # schedule:
+  #   - cron: '0 1 * * *'   # 08:00 THB — pre-window, silent check only
+  #   - cron: '0 5 * * *'   # 12:00 THB — POST-WINDOW, alert if no run
+  #   - cron: '0 7 * * *'   # 14:00 THB — second chance alert
+  #   - cron: '0 9 * * *'   # 16:00 THB — final check of the day
+  #   - cron: '0 13 * * *'  # 20:00 THB — evening check
+  #   - cron: '0 17 * * *'  # 00:00 THB (next day) — end-of-day check
   workflow_dispatch:
 
 jobs:
