@@ -130,5 +130,15 @@
     "dry_run": false,
     "reserve": 0.0,
     "monday_boost": 1.2
+  },
+  {
+    "date": "2026-09-08 11:56",
+    "type": "buy",
+    "amount": 200.0,
+    "btc": 7.727e-05,
+    "price": 2588189.0,
+    "fee": 0.0,
+    "dry_run": false,
+    "reserve": 0.0
   }
 ]
