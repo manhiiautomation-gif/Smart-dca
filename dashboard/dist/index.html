@@ -345,20 +345,20 @@
             <div class="card-title">Portfolio Summary</div>
             <div class="metric">
                 <div class="metric-label">Portfolio Value</div>
-                <div class="metric-value hero green num-mono">43,583.86 <small style="font-size:0.7em;opacity:0.7;">THB</small></div>
+                <div class="metric-value hero green num-mono">43,583.90 <small style="font-size:0.7em;opacity:0.7;">THB</small></div>
             </div>
-            <div class="metric" style="margin-top:-4px;"><div class="metric-label">24h Change</div><div class="metric-value green" style="font-size:0.95rem;">42,993.70 THB (+7285.09%)</div></div>
+            <div class="metric" style="margin-top:-4px;"><div class="metric-label">24h Change</div><div class="metric-value green" style="font-size:0.95rem;">42,993.73 THB (+7284.97%)</div></div>
             <div class="metric">
                 <div class="metric-label">BTC Holdings</div>
                 <div class="metric-value blue num-mono">0.006874 BTC</div>
-                <div class="metric-sub">19,515.43 THB</div>
+                <div class="metric-sub">19,515.47 THB</div>
             </div>
             <div class="metric">
                 <div class="metric-label">Cash Balance</div>
                 <div class="metric-value">24,068.43 THB</div>
             </div>
             <div class="metric" style="margin-top:-4px;"><div class="metric-label">Avg Buy Price</div><div class="metric-value dim" style="font-size:0.95rem;">2,652,335.19 THB</div></div>
-            <div class="metric" style="margin-top:-4px;"><div class="metric-label">Unrealized P&L</div><div class="metric-value green" style="font-size:0.95rem;">1,283.94 THB (+15.3%)</div></div>
+            <div class="metric" style="margin-top:-4px;"><div class="metric-label">Unrealized P&L</div><div class="metric-value green" style="font-size:0.95rem;">1,283.98 THB (+15.3%)</div></div>
             <div class="metric" style="margin-top:-4px;"><div class="metric-label">Avg Buy Size</div><div class="metric-value dim" style="font-size:0.95rem;">214.87 THB/trade</div></div>
             <div class="grid grid-2" style="margin-top:12px; gap:8px;">
                 <div class="metric">
@@ -406,7 +406,7 @@
                 </div>
                 <div class="ind-item">
                     <span class="label">ราคา BTC ตอนนี้</span>
-                    <span class="val num-mono">2,839,124.55 THB</span>
+                    <span class="val num-mono">2,839,130.00 THB</span>
                 </div>
                 <!-- U11: Next Run -->
                 <div class="ind-item">
@@ -432,7 +432,7 @@
             <div class="ind-grid" style="margin-top:8px;">
                 <div class="ind-item">
                     <span class="label">MVRV</span>
-                    <span class="val blue">1.581</span>
+                    <span class="val blue">1.575</span>
                 </div>
                 <div class="ind-item">
                     <span class="label">MVRV Zone</span>
@@ -440,11 +440,11 @@
                 </div>
                 <div class="ind-item">
                     <span class="label">MVRV %ile</span>
-                    <span class="val">75.0%</span>
+                    <span class="val">72.9%</span>
                 </div>
                 <div class="ind-item">
                     <span class="label">MVRV Z-Score</span>
-                    <span class="val">0.49</span>
+                    <span class="val">0.46</span>
                 </div>
                 <div class="ind-item">
                     <span class="label">RSI (14)</span>
@@ -456,7 +456,7 @@
                 </div>
                 <div class="ind-item">
                     <span class="label">NUPL</span>
-                    <span class="val">0.367</span>
+                    <span class="val">0.365</span>
                 </div>
                 <div class="ind-item">
                     <span class="label">SOPR</span>
@@ -546,7 +546,7 @@
 
     <!-- Row 3b: Indicator History Charts (B22) -->
     <div class="card" style="margin-bottom:16px;">
-        <div class="card-title">Indicator History (last 1 days)</div>
+        <div class="card-title">Indicator History (last 0 days)</div>
         <div class="ind-charts-grid" id="ihCharts">
             <div class="ih-chart-box"><div id="ihChartPrice"></div></div>
             <div class="ih-chart-box"><div id="ihChartMvrv"></div></div>
@@ -720,7 +720,7 @@
 
     <!-- Footer -->
     <div class="footer">
-        Phoenix v5.1 DCA Bot | Generated: 2026-10-03 05:31 | Auto-refresh: 5 min | <a href="https://github.com/manhiiautomation-gif/Smart-dca" target="_blank" style="color:var(--blue);text-decoration:none;">GitHub</a>
+        Phoenix v5.1 DCA Bot | Generated: 2026-10-03 05:48 | Auto-refresh: 5 min | <a href="https://github.com/manhiiautomation-gif/Smart-dca" target="_blank" style="color:var(--blue);text-decoration:none;">GitHub</a>
     </div>
 
     <script>
@@ -894,7 +894,7 @@
             if (isAlive) {
                 title.textContent = 'Kill Bot?';
                 msg.innerHTML = '⚠️ ก่อน Kill:<br>' +
-                    '• กำลังถือ: <b>' + '0.01' + ' BTC</b> (~' + '19,515.43' + ' THB)<br>' +
+                    '• กำลังถือ: <b>' + '0.01' + ' BTC</b> (~' + '19,515.47' + ' THB)<br>' +
                     '• ถ้าราคาเปลี่ยน จะไม่มี auto-sell<br>' +
                     '• ต้อง Resume ด้วยมือเท่านั้น';
                 input.value = '';
@@ -973,7 +973,7 @@
 
         // U9: Freshness badge — shows relative time since generation
         (function() {
-            var genTime = 1791005498 * 1000;
+            var genTime = 1791006531 * 1000;
             var el = document.getElementById('freshness');
             if (!el) return;
             function update() {
@@ -993,7 +993,7 @@
     <script>
         (function() {
             var dates = ["2026-08-22 20:37", "2026-08-23 20:37", "2026-08-24 20:56", "2026-08-26 10:41", "2026-08-29 07:47", "2026-08-30 02:33", "2026-08-31 02:33", "2026-09-01 12:23", "2026-09-02 11:50", "2026-09-03 11:48", "2026-09-05 11:52", "2026-09-06 11:54", "2026-09-07 11:59", "2026-09-08 11:56", "2026-09-09 11:56", "2026-09-10 11:58", "2026-09-11 11:55", "2026-09-12 11:48", "2026-09-13 12:04", "2026-09-14 12:12", "2026-09-15 12:06", "2026-09-16 12:01", "2026-09-17 12:04", "2026-09-18 11:56", "2026-09-19 11:49", "2026-09-20 12:06", "2026-09-21 12:11", "2026-09-22 12:12", "2026-09-23 11:57", "2026-09-24 12:07", "2026-09-25 12:09", "2026-09-26 12:13", "2026-09-27 12:29", "2026-09-28 12:38", "2026-09-29 12:56", "2026-09-30 12:46", "2026-10-01 13:15", "2026-10-02 12:56", "2026-10-03 12:31", "2026-10-03"];
-            var values = [25.91, 50.54, 71.85, 91.68, 102.04, 111.77, 133.2, 150.31, 170.11, 191.88, 200.3, 215.99, 225.65, 245.03, 262.96, 283.11, 305.53, 327.72, 349.99, 375.0, 395.2, 444.69, 489.81, 531.35, 554.52, 567.14, 579.0, 579.19, 575.34, 577.17, 578.84, 581.47, 582.9, 587.58, 590.21, 592.92, 593.36, 590.17, 590.16, 43583.86];
+            var values = [25.91, 50.54, 71.85, 91.69, 102.04, 111.77, 133.2, 150.31, 170.12, 191.88, 200.31, 216.0, 225.66, 245.04, 262.97, 283.12, 305.53, 327.72, 350.0, 375.0, 395.21, 444.7, 489.82, 531.36, 554.53, 567.15, 579.01, 579.2, 575.35, 577.19, 578.85, 581.48, 582.92, 587.59, 590.22, 592.94, 593.38, 590.19, 590.17, 43583.9];
             var types = ["buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "current"];
 
             if (dates.length === 0) {
@@ -1080,12 +1080,12 @@
         // B22: Indicator History Charts (built via _build_indicator_charts_js)
                 // B22: Indicator History Charts
         (function() {
-            var ihDates = ["2026-10-03"];
-            var ihPrice = [2839124.55];
-            var ihMvrv = [1.581];
-            var ihRsi = [70.8];
-            var ihSopr = [1.108];
-            var ihNupl = [0.367];
+            var ihDates = [];
+            var ihPrice = [];
+            var ihMvrv = [];
+            var ihRsi = [];
+            var ihSopr = [];
+            var ihNupl = [];
 
             if (ihDates.length < 2) {
                 var box = document.getElementById('ihCharts');
