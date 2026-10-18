@@ -535,5 +535,15 @@
     "fee": 0.0,
     "dry_run": false,
     "reserve": 0.0
+  },
+  {
+    "date": "2026-10-18 11:51",
+    "type": "buy",
+    "amount": 200.0,
+    "btc": 7.313e-05,
+    "price": 2734808.08,
+    "fee": 0.0,
+    "dry_run": false,
+    "reserve": 0.0
   }
 ]
