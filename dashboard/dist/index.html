@@ -345,25 +345,25 @@
             <div class="card-title">Portfolio Summary</div>
             <div class="metric">
                 <div class="metric-label">Portfolio Value</div>
-                <div class="metric-value hero green num-mono">122,017.45 <small style="font-size:0.7em;opacity:0.7;">THB</small></div>
+                <div class="metric-value hero green num-mono">121,989.59 <small style="font-size:0.7em;opacity:0.7;">THB</small></div>
             </div>
             
             <div class="metric">
                 <div class="metric-label">BTC Holdings</div>
                 <div class="metric-value blue num-mono">0.044879 BTC</div>
-                <div class="metric-sub">90,791.58 THB</div>
+                <div class="metric-sub">90,763.72 THB</div>
             </div>
             <div class="metric">
                 <div class="metric-label">Cash Balance</div>
                 <div class="metric-value">31,225.87 THB</div>
             </div>
             <div class="metric" style="margin-top:-4px;"><div class="metric-label">Avg Buy Price</div><div class="metric-value dim" style="font-size:0.95rem;">2,526,951.10 THB</div></div>
-            <div class="metric" style="margin-top:-4px;"><div class="metric-label">Unrealized P&L</div><div class="metric-value red" style="font-size:0.95rem;">-22,615.91 THB (-86.1%)</div></div>
+            <div class="metric" style="margin-top:-4px;"><div class="metric-label">Unrealized P&L</div><div class="metric-value red" style="font-size:0.95rem;">-22,643.77 THB (-86.2%)</div></div>
             <div class="metric" style="margin-top:-4px;"><div class="metric-label">Avg Buy Size</div><div class="metric-value dim" style="font-size:0.95rem;">295.06 THB/trade</div></div>
             <div class="grid grid-2" style="margin-top:12px; gap:8px;">
                 <div class="metric">
                     <div class="metric-label">ROI (ตลอดกาล)</div>
-                    <div class="metric-value green">+245.7%</div>
+                    <div class="metric-value green">+245.6%</div>
                 </div>
                 <div class="metric">
                     <div class="metric-label">Total Invested</div>
@@ -406,7 +406,7 @@
                 </div>
                 <div class="ind-item">
                     <span class="label">ราคา BTC ตอนนี้</span>
-                    <span class="val num-mono">2,023,022.31 THB</span>
+                    <span class="val num-mono">2,022,401.50 THB</span>
                 </div>
                 <!-- U11: Next Run -->
                 <div class="ind-item">
@@ -546,7 +546,7 @@
 
     <!-- Row 3b: Indicator History Charts (B22) -->
     <div class="card" style="margin-bottom:16px;">
-        <div class="card-title">Indicator History (last 1 days)</div>
+        <div class="card-title">Indicator History (last 0 days)</div>
         <div class="ind-charts-grid" id="ihCharts">
             <div class="ih-chart-box"><div id="ihChartPrice"></div></div>
             <div class="ih-chart-box"><div id="ihChartMvrv"></div></div>
@@ -720,7 +720,7 @@
 
     <!-- Footer -->
     <div class="footer">
-        Phoenix v5.1 DCA Bot | Generated: 2026-11-22 07:11 | Auto-refresh: 5 min | <a href="https://github.com/manhiiautomation-gif/Smart-dca" target="_blank" style="color:var(--blue);text-decoration:none;">GitHub</a>
+        Phoenix v5.1 DCA Bot | Generated: 2026-11-22 07:30 | Auto-refresh: 5 min | <a href="https://github.com/manhiiautomation-gif/Smart-dca" target="_blank" style="color:var(--blue);text-decoration:none;">GitHub</a>
     </div>
 
     <script>
@@ -894,7 +894,7 @@
             if (isAlive) {
                 title.textContent = 'Kill Bot?';
                 msg.innerHTML = '⚠️ ก่อน Kill:<br>' +
-                    '• กำลังถือ: <b>' + '0.04' + ' BTC</b> (~' + '90,791.58' + ' THB)<br>' +
+                    '• กำลังถือ: <b>' + '0.04' + ' BTC</b> (~' + '90,763.72' + ' THB)<br>' +
                     '• ถ้าราคาเปลี่ยน จะไม่มี auto-sell<br>' +
                     '• ต้อง Resume ด้วยมือเท่านั้น';
                 input.value = '';
@@ -973,7 +973,7 @@
 
         // U9: Freshness badge — shows relative time since generation
         (function() {
-            var genTime = 1795331513 * 1000;
+            var genTime = 1795332632 * 1000;
             var el = document.getElementById('freshness');
             if (!el) return;
             function update() {
@@ -993,7 +993,7 @@
     <script>
         (function() {
             var dates = ["2026-08-22 20:37", "2026-08-23 20:37", "2026-08-24 20:56", "2026-08-26 10:41", "2026-08-29 07:47", "2026-08-30 02:33", "2026-08-31 02:33", "2026-09-01 12:23", "2026-09-02 11:50", "2026-09-03 11:48", "2026-09-05 11:52", "2026-09-06 11:54", "2026-09-07 11:59", "2026-09-08 11:56", "2026-09-09 11:56", "2026-09-10 11:58", "2026-09-11 11:55", "2026-09-12 11:48", "2026-09-13 12:04", "2026-09-14 12:12", "2026-09-15 12:06", "2026-09-16 12:01", "2026-09-17 12:04", "2026-09-18 11:56", "2026-09-19 11:49", "2026-09-20 12:06", "2026-09-21 12:11", "2026-09-22 12:12", "2026-09-23 11:57", "2026-09-24 12:07", "2026-09-25 12:09", "2026-09-26 12:13", "2026-09-27 12:29", "2026-09-28 12:38", "2026-09-29 12:56", "2026-09-30 12:46", "2026-10-01 13:15", "2026-10-02 12:56", "2026-10-03 12:31", "2026-10-04 13:06", "2026-10-05 12:59", "2026-10-06 13:37", "2026-10-07 13:14", "2026-10-08 13:23", "2026-10-09 13:25", "2026-10-10 13:07", "2026-10-11 13:04", "2026-10-12 13:15", "2026-10-13 13:56", "2026-10-14 12:08", "2026-10-15 11:56", "2026-10-16 11:46", "2026-10-17 11:45", "2026-10-18 11:51", "2026-10-19 11:59", "2026-10-20 12:04", "2026-10-21 12:05", "2026-10-22 12:07", "2026-10-23 12:07", "2026-10-24 11:51", "2026-10-25 12:01", "2026-10-26 12:04", "2026-10-27 12:20", "2026-10-28 12:59", "2026-10-29 13:06", "2026-10-30 13:07", "2026-10-31 13:01", "2026-11-01 13:32", "2026-11-02 13:32", "2026-11-03 14:03", "2026-11-04 13:46", "2026-11-05 14:07", "2026-11-06 14:06", "2026-11-07 13:18", "2026-11-08 13:25", "2026-11-09 13:57", "2026-11-10 14:34", "2026-11-11 13:52", "2026-11-12 14:28", "2026-11-13 13:59", "2026-11-14 13:49", "2026-11-15 13:53", "2026-11-16 13:56", "2026-11-17 15:13", "2026-11-18 14:47", "2026-11-19 14:42", "2026-11-20 14:34", "2026-11-21 14:30", "2026-11-22 14:11", "2026-11-22"];
-            var values = [-39.03, -78.97, -121.27, -164.63, -185.99, -207.8, -261.52, -306.82, -350.2, -392.18, -414.92, -461.24, -488.84, -532.53, -577.24, -620.37, -661.89, -703.57, -745.18, -796.36, -839.45, -919.17, -1002.0, -1087.38, -1185.84, -1234.34, -1294.88, -1352.23, -1412.46, -1468.65, -1524.95, -1580.57, -1637.04, -1702.69, -1758.31, -1813.86, -1871.04, -1930.8, -1988.3, -2046.29, -2118.09, -2177.09, -2234.54, -2289.39, -2343.17, -2397.55, -2452.76, -2520.38, -2576.81, -2632.47, -2684.6, -2737.37, -2789.1, -2841.16, -2906.06, -2959.05, -3013.78, -3068.5, -3121.53, -3173.3, -3277.15, -3398.05, -3497.41, -3601.13, -3701.87, -3749.11, -3837.97, -3930.01, -4041.35, -4127.19, -4218.64, -4318.39, -4398.71, -4481.32, -4563.36, -4653.0, -4728.71, -4801.12, -4874.97, -4929.03, -4998.69, -5045.32, -5101.28, -5145.43, -5190.92, -5227.88, -5246.72, -5236.82, -5236.81, 122017.45];
+            var values = [-39.08, -79.07, -121.42, -164.82, -186.21, -208.05, -261.83, -307.17, -350.6, -392.63, -415.39, -461.75, -489.39, -533.12, -577.88, -621.06, -662.63, -704.35, -746.02, -797.25, -840.39, -920.2, -1003.13, -1088.61, -1187.17, -1235.71, -1296.3, -1353.7, -1413.98, -1470.2, -1526.55, -1582.21, -1638.72, -1704.43, -1760.09, -1815.7, -1872.91, -1932.72, -1990.26, -2048.29, -2120.15, -2179.19, -2236.69, -2291.58, -2345.4, -2399.83, -2455.09, -2522.76, -2579.23, -2634.93, -2687.11, -2739.92, -2791.7, -2843.8, -2908.76, -2961.79, -3016.57, -3071.34, -3124.41, -3176.23, -3280.17, -3401.17, -3500.62, -3604.44, -3705.27, -3752.56, -3841.51, -3933.64, -4045.1, -4131.04, -4222.58, -4322.42, -4402.84, -4485.54, -4567.68, -4657.44, -4733.25, -4805.76, -4879.71, -4933.88, -5003.71, -5050.5, -5106.67, -5150.99, -5196.65, -5233.78, -5252.8, -5243.09, -5243.26, 121989.59];
             var types = ["buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "buy", "current"];
 
             if (dates.length === 0) {
@@ -1080,12 +1080,12 @@
         // B22: Indicator History Charts (built via _build_indicator_charts_js)
                 // B22: Indicator History Charts
         (function() {
-            var ihDates = ["2026-11-22"];
-            var ihPrice = [2023022.31];
-            var ihMvrv = [1.105];
-            var ihRsi = [35.5];
-            var ihSopr = [0.733];
-            var ihNupl = [0.095];
+            var ihDates = [];
+            var ihPrice = [];
+            var ihMvrv = [];
+            var ihRsi = [];
+            var ihSopr = [];
+            var ihNupl = [];
 
             if (ihDates.length < 2) {
                 var box = document.getElementById('ihCharts');
