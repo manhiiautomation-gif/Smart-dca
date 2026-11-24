@@ -911,5 +911,15 @@
     "dry_run": false,
     "reserve": 0.0,
     "monday_boost": 1.2
+  },
+  {
+    "date": "2026-11-24 17:10",
+    "type": "buy",
+    "amount": 600.0,
+    "btc": 0.00029453,
+    "price": 2037153.97,
+    "fee": 0.0,
+    "dry_run": false,
+    "reserve": 0.0
   }
 ]
